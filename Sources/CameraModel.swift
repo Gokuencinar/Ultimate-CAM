@@ -69,7 +69,9 @@ final class CameraModel: NSObject, ObservableObject, AVCapturePhotoCaptureDelega
 
     override init() {
         super.init()
-        diagnosticBridge = DiagnosticBridge { [weak self] stack in self?.capture(stack: stack) }
+        diagnosticBridge = DiagnosticBridge { [weak self] request in
+            self?.capture(stack: request.stack, count: request.count, raw: request.raw, options: request.options)
+        }
         CaptureTrace.record("model.init", [
             "processingDelegate": responds(to: NSSelectorFromString("captureOutput:didFinishProcessingPhoto:error:")),
             "completionDelegate": responds(to: NSSelectorFromString("captureOutput:didFinishCaptureForResolvedSettings:error:"))
@@ -381,7 +383,7 @@ final class CameraModel: NSObject, ObservableObject, AVCapturePhotoCaptureDelega
             "running": session.isRunning, "enabled": connection.isEnabled,
             "active": connection.isActive, "quality": settings.photoQualityPrioritization.rawValue,
             "width": settings.maxPhotoDimensions.width, "height": settings.maxPhotoDimensions.height,
-            "count": desiredCount])
+            "count": desiredCount, "raw": rawRequested])
         captureID = identifier
         expectedFrameCount = frames.count + 1
         output.capturePhoto(with: settings, delegate: self)
