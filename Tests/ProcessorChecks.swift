@@ -21,7 +21,7 @@ struct ProcessorChecks {
         return 55 + abs(block % 130) + ((x + y) % 9)
     }
 
-    static func png(seed: UInt64, noise: Int = 0, dx: Int = 0, dy: Int = 0) throws -> Data {
+    static func png(seed: UInt64, noise: Int = 0, dx: Int = 0, dy: Int = 0, boxX: Int? = nil) throws -> Data {
         var state = seed
         var pixels = [UInt8](repeating: 255, count: size * size * 4)
         for y in 0..<size {
@@ -29,7 +29,8 @@ struct ProcessorChecks {
                 for channel in 0..<3 {
                     state = state &* 6364136223846793005 &+ 1442695040888963407
                     let delta = noise == 0 ? 0 : Int((state >> 32) % UInt64(noise * 2 + 1)) - noise
-                    pixels[(y * size + x) * 4 + channel] = UInt8(clamping: clean(x - dx, y - dy) + delta)
+                    let moving = boxX.map { x >= $0 && x < $0 + 24 && y >= 100 && y < 124 } ?? false
+                    pixels[(y * size + x) * 4 + channel] = UInt8(clamping: (moving ? 250 : clean(x - dx, y - dy)) + delta)
                 }
             }
         }
@@ -88,14 +89,15 @@ struct ProcessorChecks {
         let processor = BurstProcessor()
         let reference = try bitmap(png(seed: 1))
         let noisy = try [png(seed: 10, noise: 24), png(seed: 20, noise: 24), png(seed: 30, noise: 24)]
-        let denoised = try processor.process(noisy)
+        let fixedReference = ProcessingOptions(chooseSharpestReference: false)
+        let denoised = try processor.process(noisy, options: fixedReference)
         try require(denoised.mergedFrames == 3, "Noise fixture did not merge all frames")
         let individual = rmse(try bitmap(noisy[0]), against: reference)
         let merged = rmse(try bitmap(denoised.jpeg), against: reference)
         log("Noise RMSE: individual=\(individual), merged=\(merged)")
         try require(merged < individual * 0.85, "Averaging did not reduce fixture noise sufficiently")
 
-        let translated = try processor.process([png(seed: 1), png(seed: 1, dx: 5, dy: -3), png(seed: 1, dx: -4, dy: 2)])
+        let translated = try processor.process([png(seed: 1), png(seed: 1, dx: 5, dy: -3), png(seed: 1, dx: -4, dy: 2)], options: fixedReference)
         try require(translated.mergedFrames == 3, "Translation fixture did not merge all frames")
         let result = try bitmap(translated.jpeg)
         var best = Double.infinity
@@ -105,6 +107,31 @@ struct ProcessorChecks {
         } }
         log("Translated fixture best RMSE=\(best), output=\(result.width)x\(result.height)")
         try require(best < 8, "Translation direction or fusion introduces ghosting in a static fixture")
+
+        let cleanData = try png(seed: 1)
+        let cleanImage = CIImage(data: cleanData)!
+        let blurredImage = cleanImage.clampedToExtent().applyingFilter("CIGaussianBlur", parameters: [kCIInputRadiusKey: 3])
+            .cropped(to: cleanImage.extent)
+        let blurredData = context.pngRepresentation(of: blurredImage, format: .RGBA8, colorSpace: space)!
+        let selected = try processor.process([blurredData, cleanData])
+        try require(selected.reference == cleanData, "Reference selection preferred a blurred frame")
+        log("Sharpness reference selection passed")
+
+        let moving = try [cleanData, png(seed: 1, boxX: 40), png(seed: 1, boxX: 170)]
+        var noRejection = fixedReference
+        noRejection.rejectMotion = false
+        let naive = try bitmap(processor.process(moving, options: noRejection).jpeg)
+        let robust = try bitmap(processor.process(moving, options: fixedReference).jpeg)
+        func croppedError(_ image: (pixels: [UInt8], width: Int, height: Int)) -> Double {
+            var best = Double.infinity
+            for y in 0...3 { for x in 0...3 { best = min(best, rmse(image, against: reference, offsetX: x, offsetY: y)) } }
+            return best
+        }
+        let naiveError = croppedError(naive), robustError = croppedError(robust)
+        log("Motion fixture RMSE: naive=\(naiveError), rejected=\(robustError)")
+        try require(robustError < naiveError * 0.7, "Motion rejection did not suppress displaced objects")
+        let adjusted = try processor.process([cleanData], options: ProcessingOptions(noiseReduction: 0.02, sharpening: 0.2, liftShadows: 0.2))
+        try require(!adjusted.jpeg.isEmpty && adjusted.reference == cleanData, "Single-image adjustments lost reference")
         log("PROCESSOR CHECKS PASSED · synthetic fixtures only")
     }
 }

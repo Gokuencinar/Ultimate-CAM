@@ -35,6 +35,10 @@ final class CameraModel: NSObject, ObservableObject, AVCapturePhotoCaptureDelega
     @Published private(set) var preview: UIImage?
     @Published private(set) var referencePreview: UIImage?
     @Published private(set) var resultDetails = ""
+    @Published private(set) var supportsRAW = false
+    @Published private(set) var supportsManualExposure = false
+    @Published private(set) var isoRange: ClosedRange<Double> = 25...3200
+    @Published private(set) var shutterRange: ClosedRange<Double> = (1.0 / 8000)...0.33
     let lenses = CameraLens.allCases.filter { $0.device != nil }
 
     private let queue = DispatchQueue(label: "local.ultimatecam.session", qos: .userInitiated)
@@ -56,6 +60,9 @@ final class CameraModel: NSObject, ObservableObject, AVCapturePhotoCaptureDelega
     private var interrupted = false
     private var captureStage = "idle"
     private var diagnosticBridge: DiagnosticBridge?
+    private var processingOptions = ProcessingOptions()
+    private var rawRequested = false
+    private var rawData: Data?
 
     override init() {
         super.init()
@@ -93,20 +100,12 @@ final class CameraModel: NSObject, ObservableObject, AVCapturePhotoCaptureDelega
         active = true
         do {
             if !configured {
-                session.beginConfiguration()
-                session.sessionPreset = .photo
-                if !session.outputs.contains(where: { $0 === output }) {
-                    guard session.canAddOutput(output) else {
-                        session.commitConfiguration()
-                        throw CameraFailure.message("No se puede configurar la salida de fotos.")
-                    }
-                    session.addOutput(output)
-                }
-                session.commitConfiguration()
                 try configure(.wide)
                 configured = true
             }
             if !session.isRunning { session.startRunning() }
+            let rawAvailable = !output.availableRawPhotoPixelFormatTypes.isEmpty
+            publish { self.supportsRAW = rawAvailable }
             let available = self.session.isRunning && !self.interrupted
             CaptureTrace.record("session.ready", ["running": available, "inputs": session.inputs.count, "outputs": session.outputs.count])
             publish { self.ready = available }
@@ -157,6 +156,8 @@ final class CameraModel: NSObject, ObservableObject, AVCapturePhotoCaptureDelega
             guard !self.inFlight, self.configured else { return }
             do {
                 try self.configure(lens)
+                let rawAvailable = !self.output.availableRawPhotoPixelFormatTypes.isEmpty
+                self.publish { self.supportsRAW = rawAvailable }
                 self.message("\(lens.label) · RAW disponible: \(self.output.availableRawPhotoPixelFormatTypes.isEmpty ? "no" : "sí"). Captura actual: JPEG.")
             } catch { self.message(error.localizedDescription) }
         }
@@ -167,6 +168,7 @@ final class CameraModel: NSObject, ObservableObject, AVCapturePhotoCaptureDelega
         let next = try AVCaptureDeviceInput(device: device)
         session.beginConfiguration()
         defer { session.commitConfiguration() }
+        session.sessionPreset = .photo
         let old = input
         if let old { session.removeInput(old) }
         guard session.canAddInput(next) else {
@@ -175,6 +177,20 @@ final class CameraModel: NSObject, ObservableObject, AVCapturePhotoCaptureDelega
         }
         session.addInput(next)
         input = next
+        if !session.outputs.contains(where: { $0 === output }) {
+            guard session.canAddOutput(output) else { throw CameraFailure.message("No se puede configurar la salida de fotos.") }
+            session.addOutput(output)
+        }
+        let isoLimits = Double(device.activeFormat.minISO)...Double(device.activeFormat.maxISO)
+        let shutterLimits = max(1.0 / 100000, device.activeFormat.minExposureDuration.seconds)...max(1.0 / 100000, device.activeFormat.maxExposureDuration.seconds)
+        let rawAvailable = !output.availableRawPhotoPixelFormatTypes.isEmpty
+        let manualAvailable = device.isExposureModeSupported(.custom)
+        publish {
+            self.isoRange = isoLimits
+            self.shutterRange = shutterLimits
+            self.supportsRAW = rawAvailable
+            self.supportsManualExposure = manualAvailable
+        }
         output.maxPhotoQualityPrioritization = .quality
         if let dimensions = device.activeFormat.supportedMaxPhotoDimensions.max(by: {
             Int64($0.width) * Int64($0.height) < Int64($1.width) * Int64($1.height)
@@ -200,6 +216,25 @@ final class CameraModel: NSObject, ObservableObject, AVCapturePhotoCaptureDelega
         }
     }
 
+    func setManualExposure(iso: Double?, seconds: Double = 1.0 / 60) {
+        queue.async {
+            guard !self.inFlight, let device = self.input?.device else { return }
+            do {
+                try device.lockForConfiguration()
+                defer { device.unlockForConfiguration() }
+                if let iso, device.isExposureModeSupported(.custom) {
+                    let clampedISO = min(device.activeFormat.maxISO, max(device.activeFormat.minISO, Float(iso)))
+                    let duration = min(device.activeFormat.maxExposureDuration.seconds,
+                                       max(device.activeFormat.minExposureDuration.seconds, seconds))
+                    device.setExposureModeCustom(duration: CMTime(seconds: duration, preferredTimescale: 1_000_000),
+                                                 iso: clampedISO, completionHandler: nil)
+                } else if iso == nil, device.isExposureModeSupported(.continuousAutoExposure) {
+                    device.exposureMode = .continuousAutoExposure
+                }
+            } catch { self.message(error.localizedDescription) }
+        }
+    }
+
     func setWhiteBalance(_ kelvin: Float?) {
         queue.async {
             guard !self.inFlight, let device = self.input?.device else { return }
@@ -220,14 +255,17 @@ final class CameraModel: NSObject, ObservableObject, AVCapturePhotoCaptureDelega
         }
     }
 
-    func capture(stack: Bool) {
+    func capture(stack: Bool, count: Int = 3, raw: Bool = false, options: ProcessingOptions = ProcessingOptions()) {
         queue.async {
             guard self.active, self.session.isRunning, !self.interrupted, !self.inFlight,
                   let device = self.input?.device else { return }
             self.inFlight = true
             self.transaction = UUID()
             self.frames = []
-            self.desiredCount = stack ? 3 : 1
+            self.desiredCount = stack ? min(9, max(3, count)) : 1
+            self.processingOptions = options
+            self.rawRequested = raw && !stack && !self.output.availableRawPhotoPixelFormatTypes.isEmpty
+            self.rawData = nil
             self.publish { self.busy = true }
             do {
                 if stack {
@@ -239,9 +277,11 @@ final class CameraModel: NSObject, ObservableObject, AVCapturePhotoCaptureDelega
                         throw CameraFailure.message("Esta cámara no admite los bloqueos necesarios para la pila.")
                     }
                     try device.lockForConfiguration()
-                    self.savedExposure = device.exposureMode
+                    if device.exposureMode != .custom {
+                        self.savedExposure = device.exposureMode
+                        device.exposureMode = .locked
+                    }
                     self.savedWhiteBalance = device.whiteBalanceMode
-                    device.exposureMode = .locked
                     device.whiteBalanceMode = .locked
                     if device.isFocusModeSupported(.locked) {
                         self.savedFocus = device.focusMode
@@ -263,16 +303,27 @@ final class CameraModel: NSObject, ObservableObject, AVCapturePhotoCaptureDelega
             finishFailure(CameraFailure.message("JPEG no disponible en esta configuración."))
             return
         }
+        guard let connection = output.connection(with: .video), connection.isEnabled, connection.isActive else {
+            finishFailure(CameraFailure.message("La salida de fotografía no está activa. Vuelve a abrir la app."))
+            return
+        }
         message("Capturando \(frames.count + 1)/\(desiredCount). Mantén la cámara inmóvil.")
-        let settings = AVCapturePhotoSettings(format: [AVVideoCodecKey: AVVideoCodecType.jpeg])
+        let settings: AVCapturePhotoSettings
+        if rawRequested, let rawFormat = output.availableRawPhotoPixelFormatTypes.first {
+            settings = AVCapturePhotoSettings(rawPixelFormatType: rawFormat,
+                processedFormat: [AVVideoCodecKey: AVVideoCodecType.jpeg])
+        } else {
+            settings = AVCapturePhotoSettings(format: [AVVideoCodecKey: AVVideoCodecType.jpeg])
+        }
         settings.maxPhotoDimensions = output.maxPhotoDimensions
-        settings.photoQualityPrioritization = .quality
+        // Use one sensor exposure per request; our own burst performs the merge.
+        // This also honors custom/locked ISO and shutter settings, per Apple's API contract.
+        settings.photoQualityPrioritization = .speed
         let identifier = settings.uniqueID
         captureStage = "requested"
-        let connection = output.connection(with: .video)
         CaptureTrace.record("capture.request", ["id": identifier,
-            "running": session.isRunning, "enabled": connection?.isEnabled ?? false,
-            "active": connection?.isActive ?? false, "quality": settings.photoQualityPrioritization.rawValue,
+            "running": session.isRunning, "enabled": connection.isEnabled,
+            "active": connection.isActive, "quality": settings.photoQualityPrioritization.rawValue,
             "width": settings.maxPhotoDimensions.width, "height": settings.maxPhotoDimensions.height,
             "count": desiredCount])
         captureID = identifier
@@ -287,16 +338,21 @@ final class CameraModel: NSObject, ObservableObject, AVCapturePhotoCaptureDelega
     }
 
     func photoOutput(_ output: AVCapturePhotoOutput, didFinishProcessingPhoto photo: AVCapturePhoto, error: Error?) {
-        CaptureTrace.record("delegate.processing.enter", ["id": photo.resolvedSettings.uniqueID, "error": error?.localizedDescription ?? "none"])
+        CaptureTrace.record("delegate.processing.enter", ["id": photo.resolvedSettings.uniqueID,
+            "raw": photo.isRawPhoto, "error": error?.localizedDescription ?? "none"])
         // didFinishCapture follows processing; enqueue both on the same serial queue.
         let data = photo.fileDataRepresentation()
         let identifier = photo.resolvedSettings.uniqueID
+        let isRaw = photo.isRawPhoto
         queue.async {
             CaptureTrace.record("delegate.processing.queued", ["id": identifier, "expected": self.captureID ?? -1, "bytes": data?.count ?? 0])
             guard self.inFlight, self.captureID == identifier else { return }
             self.captureStage = "processed"
             if let error { self.finishFailure(error) }
-            else if let data { self.frames.append(data) }
+            else if let data {
+                if isRaw { self.rawData = data }
+                else { self.frames.append(data) }
+            }
             else { self.finishFailure(CameraFailure.message("La cámara no ha devuelto datos de imagen.")) }
         }
     }
@@ -311,25 +367,37 @@ final class CameraModel: NSObject, ObservableObject, AVCapturePhotoCaptureDelega
                 self.finishFailure(CameraFailure.message("Captura incompleta. No se ha repetido ni guardado ninguna foto."))
                 return
             }
+            if self.rawRequested && self.rawData == nil {
+                self.finishFailure(CameraFailure.message("No se recibió el DNG solicitado."))
+                return
+            }
             if self.frames.count < self.desiredCount { self.captureNext(); return }
             self.restoreDevice()
             let captured = self.frames
             let token = self.transaction
+            let options = self.processingOptions
+            let raw = self.rawData
             self.frames = []
             self.message("Procesando…")
             self.processing.async {
-                let processed = Result { try autoreleasepool { try BurstProcessor().process(captured) } }
+                let processed = Result { try autoreleasepool {
+                    var result = try BurstProcessor().process(captured, options: options)
+                    result.raw = raw
+                    return result
+                } }
                 self.queue.async {
                     guard self.transaction == token, self.inFlight else { return }
                     switch processed {
                     case .success(let result):
                         CaptureTrace.record("capture.success", ["bytes": result.jpeg.count,
-                            "mergedFrames": result.mergedFrames, "details": result.details])
+                            "mergedFrames": result.mergedFrames, "rawBytes": result.raw?.count ?? 0,
+                            "details": result.details])
                         self.result = result
                         self.publish {
                             self.preview = UIImage(data: result.jpeg)
                             self.referencePreview = UIImage(data: result.reference)
                             self.resultDetails = result.details
+                            if result.raw != nil { self.resultDetails += " · Incluye RAW/DNG" }
                             self.busy = false
                             self.status = "Captura preparada. Revisa el resultado antes de guardarlo."
                         }
@@ -362,6 +430,7 @@ final class CameraModel: NSObject, ObservableObject, AVCapturePhotoCaptureDelega
         captureID = nil
         restoreDevice()
         frames = []
+        rawData = nil
         inFlight = false
         publish { self.busy = false; self.status = error.localizedDescription }
     }
@@ -396,6 +465,12 @@ final class CameraModel: NSObject, ObservableObject, AVCapturePhotoCaptureDelega
                     let options = PHAssetResourceCreationOptions()
                     options.originalFilename = "UltimateCAM-result.jpg"
                     request.addResource(with: .photo, data: result.jpeg, options: options)
+                    if let raw = result.raw {
+                        let rawOptions = PHAssetResourceCreationOptions()
+                        rawOptions.originalFilename = "UltimateCAM-original.dng"
+                        rawOptions.uniformTypeIdentifier = "com.adobe.raw-image"
+                        request.addResource(with: .alternatePhoto, data: raw, options: rawOptions)
+                    }
                     if result.jpeg != result.reference {
                         let reference = PHAssetCreationRequest.forAsset()
                         let options = PHAssetResourceCreationOptions()

@@ -52,6 +52,15 @@ struct CameraView: View {
     @State private var showControls = ProcessInfo.processInfo.arguments.contains("-show-controls")
     @State private var showResult = false
     @State private var showReference = false
+    @State private var stackCount = 3
+    @State private var rawEnabled = false
+    @State private var manualExposure = false
+    @State private var iso: Double = 100
+    @State private var shutterStops = log2(1.0 / 60)
+    @State private var processingOptions = ProcessingOptions()
+    @State private var timerSeconds = 0
+    @State private var countdown = 0
+    @State private var countdownTask: Task<Void, Never>?
 
     var body: some View {
         ZStack {
@@ -78,12 +87,19 @@ struct CameraView: View {
                 modeSelector
             }
             .padding(.horizontal, 22).padding(.top, 10).padding(.bottom, 14)
+            if countdown > 0 {
+                Text("\(countdown)").font(.system(size: 80, weight: .light, design: .rounded))
+            }
         }
         .foregroundStyle(.white).preferredColorScheme(.dark)
         .onAppear { camera.start() }
         .onChange(of: scenePhase) { _, phase in
             if phase == .active { camera.start() }
-            else if phase == .background { camera.stop() }
+            else if phase == .background {
+                countdownTask?.cancel()
+                countdown = 0
+                camera.stop()
+            }
         }
         .sheet(isPresented: $showResult) { review }
     }
@@ -92,7 +108,7 @@ struct CameraView: View {
         HStack {
             VStack(alignment: .leading, spacing: 3) {
                 Text("Ultimate CAM").font(.system(size: 18, weight: .semibold, design: .rounded))
-                Text(stack ? "PILA 3 · JPEG · EXPERIMENTAL" : "FOTO · JPEG")
+                Text(stack ? "PILA \(stackCount) · EXPERIMENTAL" : (rawEnabled ? "FOTO · RAW + JPEG" : "FOTO · JPEG"))
                     .font(.system(size: 10, weight: .medium, design: .rounded))
                     .foregroundStyle(.white.opacity(0.7))
             }
@@ -109,13 +125,42 @@ struct CameraView: View {
     }
 
     private var controls: some View {
-        VStack(alignment: .leading, spacing: 12) {
+        ScrollView {
+          VStack(alignment: .leading, spacing: 12) {
+            if stack {
+                Picker("Fotos de la pila", selection: $stackCount) {
+                    ForEach([3, 5, 7, 9], id: \.self) { Text("\($0) fotos").tag($0) }
+                }.pickerStyle(.segmented)
+            }
+            Picker("Temporizador", selection: $timerSeconds) {
+                Text("Sin temporizador").tag(0)
+                Text("3 s").tag(3)
+                Text("10 s").tag(10)
+            }.font(.caption)
+            if camera.supportsRAW && !stack { Toggle("RAW/DNG + JPEG", isOn: $rawEnabled) }
+            if camera.supportsManualExposure {
+                Toggle("ISO y obturación manuales", isOn: $manualExposure)
+                    .onChange(of: manualExposure) { _, enabled in
+                        iso = min(camera.isoRange.upperBound, max(camera.isoRange.lowerBound, iso))
+                        shutterStops = min(log2(camera.shutterRange.upperBound), max(log2(camera.shutterRange.lowerBound), shutterStops))
+                        applyExposure(enabled: enabled)
+                    }
+                if manualExposure {
+                    Text("ISO \(Int(iso))").font(.caption.monospacedDigit())
+                    Slider(value: $iso, in: camera.isoRange, step: 1)
+                        .onChange(of: iso) { _, _ in applyExposure(enabled: true) }
+                    Text("Obturación: \(shutterLabel)").font(.caption.monospacedDigit())
+                    Slider(value: $shutterStops, in: log2(camera.shutterRange.lowerBound)...log2(camera.shutterRange.upperBound))
+                        .onChange(of: shutterStops) { _, _ in applyExposure(enabled: true) }
+                }
+            }
             HStack {
                 Label("EXPOSICIÓN", systemImage: "plusminus.circle")
                 Spacer()
                 Text("\(bias, specifier: "%+.1f") EV").foregroundStyle(.yellow)
             }.font(.system(size: 12, weight: .semibold, design: .rounded))
             Slider(value: $bias, in: -2...2, step: 0.1)
+                .disabled(manualExposure)
                 .tint(.yellow).accessibilityLabel("Compensación de exposición")
                 .onChange(of: bias) { _, value in camera.setBias(Float(value)) }
             Toggle("Balance de blancos manual", isOn: $manualWB)
@@ -131,14 +176,31 @@ struct CameraView: View {
             }
             Toggle("Cuadrícula", isOn: $grid).font(.system(size: 13, weight: .medium, design: .rounded)).tint(.yellow)
             if stack {
-                Text("Escena inmóvil y trípode. La pila alinea y promedia tres JPEG; no corrige sujetos en movimiento.")
+                Toggle("Elegir referencia más nítida", isOn: $processingOptions.chooseSharpestReference)
+                Toggle("Rechazar zonas en movimiento", isOn: $processingOptions.rejectMotion)
+                Picker("Resolución de la pila", selection: $processingOptions.maximumDimension) {
+                    Text("Ligera · 2048 px").tag(2048.0)
+                    Text("Equilibrada · 2560 px").tag(2560.0)
+                    Text("Hasta 4096 px").tag(4096.0)
+                }
+                Text("El rechazo conserva la referencia en zonas que cambian. No sustituye una alineación local avanzada.")
                     .font(.caption).foregroundStyle(.white.opacity(0.8))
             }
+            Text("Ajustes del resultado").font(.caption.bold())
+            Text("Reducción de ruido").font(.caption)
+            Slider(value: $processingOptions.noiseReduction, in: 0...0.08).tint(.yellow)
+            Text("Nitidez").font(.caption)
+            Slider(value: $processingOptions.sharpening, in: 0...0.8).tint(.yellow)
+            Text("Levantar sombras").font(.caption)
+            Slider(value: $processingOptions.liftShadows, in: 0...1).tint(.yellow)
+          }
+          .font(.system(size: 13, weight: .medium, design: .rounded)).tint(.yellow)
+          .padding(18)
         }
-        .padding(18)
+        .frame(maxHeight: 280)
         .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 26))
         .overlay(RoundedRectangle(cornerRadius: 26).stroke(.white.opacity(0.2), lineWidth: 1))
-        .disabled(camera.busy || !camera.ready)
+        .disabled(camera.busy || !camera.ready || countdown > 0)
     }
 
     private var lensSelector: some View {
@@ -159,7 +221,7 @@ struct CameraView: View {
         }
         .padding(5).background(.ultraThinMaterial, in: Capsule())
         .overlay(Capsule().stroke(.white.opacity(0.15), lineWidth: 1))
-        .disabled(camera.busy || !camera.ready)
+        .disabled(camera.busy || !camera.ready || countdown > 0)
     }
 
     private var captureRow: some View {
@@ -176,7 +238,7 @@ struct CameraView: View {
             .accessibilityLabel("Revisar última captura")
             .disabled(camera.preview == nil || camera.busy)
             Spacer()
-            Button { camera.capture(stack: stack) } label: {
+            Button { takePhoto() } label: {
                 ZStack {
                     Circle().fill(.ultraThinMaterial)
                     Circle().stroke(.white.opacity(0.65), lineWidth: 2)
@@ -184,8 +246,8 @@ struct CameraView: View {
                     if camera.busy { ProgressView().tint(.black) }
                 }.frame(width: 82, height: 82)
             }
-            .accessibilityLabel(stack ? "Capturar pila de tres fotos" : "Tomar foto")
-            .disabled(camera.busy || !camera.ready)
+            .accessibilityLabel(stack ? "Capturar pila de \(stackCount) fotos" : "Tomar foto")
+            .disabled(camera.busy || !camera.ready || countdown > 0)
             Spacer()
             Button { selectLens(lens == .front ? lastBackLens : .front) } label: {
                 Image(systemName: "arrow.triangle.2.circlepath.camera")
@@ -193,17 +255,17 @@ struct CameraView: View {
                     .background(.ultraThinMaterial, in: Circle())
             }
             .accessibilityLabel("Cambiar entre cámara frontal y trasera")
-            .disabled(camera.busy || !camera.ready || !camera.lenses.contains(.front))
+            .disabled(camera.busy || !camera.ready || countdown > 0 || !camera.lenses.contains(.front))
         }
     }
 
     private var modeSelector: some View {
         HStack(spacing: 4) {
             modeButton("FOTO", selected: !stack) { stack = false }
-            modeButton("PILA 3", selected: stack) { stack = true }
+            modeButton("PILA \(stackCount)", selected: stack) { stack = true }
         }
         .padding(4).background(.ultraThinMaterial, in: Capsule())
-        .overlay(Capsule().stroke(.white.opacity(0.15), lineWidth: 1)).disabled(camera.busy)
+        .overlay(Capsule().stroke(.white.opacity(0.15), lineWidth: 1)).disabled(camera.busy || countdown > 0)
     }
 
     private func modeButton(_ title: String, selected: Bool, action: @escaping () -> Void) -> some View {
@@ -221,7 +283,34 @@ struct CameraView: View {
         lens = next
         bias = 0
         manualWB = false
+        manualExposure = false
+        rawEnabled = false
         camera.switchLens(next)
+    }
+
+    private var shutterLabel: String {
+        let seconds = pow(2, shutterStops)
+        return seconds < 1 ? "1/\(Int((1 / seconds).rounded())) s" : String(format: "%.2f s", seconds)
+    }
+
+    private func applyExposure(enabled: Bool) {
+        camera.setManualExposure(iso: enabled ? iso : nil, seconds: pow(2, shutterStops))
+    }
+
+    private func takePhoto() {
+        let captureStack = stack, count = stackCount, raw = rawEnabled, options = processingOptions
+        if timerSeconds == 0 { camera.capture(stack: captureStack, count: count, raw: raw, options: options); return }
+        let delay = timerSeconds
+        countdownTask = Task { @MainActor in
+            do {
+                for value in stride(from: delay, through: 1, by: -1) {
+                    countdown = value
+                    try await Task.sleep(nanoseconds: 1_000_000_000)
+                }
+                countdown = 0
+                camera.capture(stack: captureStack, count: count, raw: raw, options: options)
+            } catch { countdown = 0 }
+        }
     }
 
     private var review: some View {
@@ -236,7 +325,7 @@ struct CameraView: View {
                     Image(uiImage: image).resizable().scaledToFit()
                 }
                 Text(camera.resultDetails).font(.footnote)
-                Text("La referencia es el primer fotograma. La vista previa de cámara llena la pantalla y puede mostrar un recorte distinto al de la foto.")
+                Text("La referencia es el fotograma seleccionado para la fusión. La vista previa de cámara llena la pantalla y puede mostrar un recorte distinto al de la foto.")
                     .font(.caption).foregroundStyle(.secondary)
                 Button("Guardar resultado y referencia") { camera.save() }
                     .buttonStyle(.borderedProminent).tint(.yellow).foregroundStyle(.black)
