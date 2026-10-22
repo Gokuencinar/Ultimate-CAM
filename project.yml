@@ -1,0 +1,27 @@
+name: UltimateCAM
+options:
+  bundleIdPrefix: local.ultimatecam
+  deploymentTarget:
+    iOS: '18.0'
+targets:
+  UltimateCAM:
+    type: application
+    platform: iOS
+    sources: [Sources]
+    info:
+      path: Info.plist
+      properties:
+        CFBundleDisplayName: Ultimate CAM
+        UILaunchScreen: {}
+        UISupportedInterfaceOrientations: [UIInterfaceOrientationPortrait]
+        NSCameraUsageDescription: UltimateCAM necesita la cámara para tomar fotografías.
+        NSPhotoLibraryAddUsageDescription: UltimateCAM guarda las fotos que elijas y su referencia original.
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: local.ultimatecam.camera
+        SWIFT_VERSION: '5.0'
+        TARGETED_DEVICE_FAMILY: '1'
+        CODE_SIGN_STYLE: Automatic
+        ENABLE_USER_SCRIPT_SANDBOXING: YES
+    scheme:
+      gatherCoverageData: false

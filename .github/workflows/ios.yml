@@ -1,0 +1,70 @@
+name: iOS · Ultimate CAM
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ios-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: macos-15
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - name: Prepare Xcode and XcodeGen
+        run: |
+          set -euo pipefail
+          xcodebuild -version
+          xcrun --sdk iphoneos --show-sdk-version
+          if ! command -v xcodegen >/dev/null 2>&1; then
+            brew install xcodegen
+          fi
+          xcodegen --version
+          xcodegen generate
+      - name: Build for iPhone without signing
+        run: |
+          set -euo pipefail
+          mkdir -p build
+          xcodebuild -project UltimateCAM.xcodeproj \
+            -scheme UltimateCAM -configuration Release \
+            -sdk iphoneos -destination 'generic/platform=iOS' \
+            -derivedDataPath build/DerivedData \
+            CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO \
+            build 2>&1 | tee build/xcodebuild.log
+      - name: Package unsigned IPA
+        run: |
+          set -euo pipefail
+          mkdir -p build/package/Payload
+          ditto build/DerivedData/Build/Products/Release-iphoneos/UltimateCAM.app build/package/Payload/UltimateCAM.app
+          /usr/libexec/PlistBuddy -c 'Print CFBundleIdentifier' build/package/Payload/UltimateCAM.app/Info.plist
+          file build/package/Payload/UltimateCAM.app/UltimateCAM
+          cd build/package
+          ditto -c -k --sequesterRsrc --keepParent Payload ../Ultimate-CAM-unsigned.ipa
+          cd ..
+          shasum -a 256 Ultimate-CAM-unsigned.ipa > SHA256SUMS.txt
+          printf 'Commit: %s\nFirma: sin firmar\n' "$GITHUB_SHA" > BUILD.txt
+      - name: Upload IPA and checksum
+        uses: actions/upload-artifact@v4
+        with:
+          name: Ultimate-CAM-unsigned-${{ github.run_number }}
+          path: |
+            build/Ultimate-CAM-unsigned.ipa
+            build/SHA256SUMS.txt
+            build/BUILD.txt
+          if-no-files-found: error
+          retention-days: 14
+      - name: Upload build log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: Ultimate-CAM-build-log-${{ github.run_number }}
+          path: build/xcodebuild.log
+          if-no-files-found: warn
+          retention-days: 14
