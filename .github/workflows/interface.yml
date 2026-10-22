@@ -1,0 +1,29 @@
+name: Vista de Ultimate CAM
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  preview:
+    runs-on: macos-15
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Generate Xcode project
+        run: |
+          set -euo pipefail
+          if ! command -v xcodegen >/dev/null 2>&1; then brew install xcodegen; fi
+          xcodegen generate
+      - name: Capture interface on iPhone 11 Pro simulator
+        run: bash scripts/capture_ui.sh
+      - name: Upload screenshots and build log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: Ultimate-CAM-interface-${{ github.run_id }}
+          path: build/ui/
+          if-no-files-found: error
+          retention-days: 14
