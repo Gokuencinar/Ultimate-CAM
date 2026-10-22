@@ -65,6 +65,7 @@ final class CameraModel: NSObject, ObservableObject, AVCapturePhotoCaptureDelega
     private var processingOptions = ProcessingOptions()
     private var rawRequested = false
     private var rawData: Data?
+    private var captureRecoveryRequired = false
 
     override init() {
         super.init()
@@ -100,6 +101,11 @@ final class CameraModel: NSObject, ObservableObject, AVCapturePhotoCaptureDelega
 
     private func activate() {
         active = true
+        if captureRecoveryRequired {
+            publish { self.ready = false }
+            message("La captura anterior no terminó. Cierra Ultimate CAM desde el selector de apps y vuelve a abrirla.")
+            return
+        }
         do {
             if !configured {
                 try configure(.wide)
@@ -307,7 +313,7 @@ final class CameraModel: NSObject, ObservableObject, AVCapturePhotoCaptureDelega
 
     func capture(stack: Bool, count: Int = 3, raw: Bool = false, options: ProcessingOptions = ProcessingOptions()) {
         queue.async {
-            guard self.active, self.session.isRunning, !self.interrupted, !self.inFlight,
+            guard self.active, self.session.isRunning, !self.interrupted, !self.inFlight, !self.captureRecoveryRequired,
                   let device = self.input?.device else { return }
             self.inFlight = true
             self.transaction = UUID()
@@ -383,7 +389,9 @@ final class CameraModel: NSObject, ObservableObject, AVCapturePhotoCaptureDelega
         queue.asyncAfter(deadline: .now() + 30) {
             guard self.captureID == identifier else { return }
             CaptureTrace.record("capture.timeout", ["id": identifier, "stage": self.captureStage])
-            self.finishFailure(CameraFailure.message("La cámara no respondió en 30 segundos. No se repetirá la captura automáticamente."))
+            self.captureRecoveryRequired = true
+            self.publish { self.ready = false }
+            self.finishFailure(CameraFailure.message("La cámara no respondió en 30 segundos. Cierra Ultimate CAM desde el selector de apps y vuelve a abrirla; no se repetirá la captura."))
         }
     }
 
