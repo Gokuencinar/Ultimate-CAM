@@ -54,9 +54,14 @@ final class CameraModel: NSObject, ObservableObject, AVCapturePhotoCaptureDelega
     private var transaction = UUID()
     private var result: CaptureResult?
     private var interrupted = false
+    private var captureStage = "idle"
 
     override init() {
         super.init()
+        CaptureTrace.record("model.init", [
+            "processingDelegate": responds(to: NSSelectorFromString("captureOutput:didFinishProcessingPhoto:error:")),
+            "completionDelegate": responds(to: NSSelectorFromString("captureOutput:didFinishCaptureForResolvedSettings:error:"))
+        ])
         NotificationCenter.default.addObserver(self, selector: #selector(sessionInterrupted),
             name: AVCaptureSession.wasInterruptedNotification, object: session)
         NotificationCenter.default.addObserver(self, selector: #selector(interruptionEnded),
@@ -101,6 +106,7 @@ final class CameraModel: NSObject, ObservableObject, AVCapturePhotoCaptureDelega
             }
             if !session.isRunning { session.startRunning() }
             let available = self.session.isRunning && !self.interrupted
+            CaptureTrace.record("session.ready", ["running": available, "inputs": session.inputs.count, "outputs": session.outputs.count])
             publish { self.ready = available }
             message("Lista. La pila es experimental y requiere una escena inmóvil.")
         } catch { message(error.localizedDescription) }
@@ -137,6 +143,7 @@ final class CameraModel: NSObject, ObservableObject, AVCapturePhotoCaptureDelega
         let description = (note.userInfo?[AVCaptureSessionErrorKey] as? Error)?.localizedDescription
             ?? "Error de la sesión de cámara. Vuelve a abrir la app."
         queue.async {
+            CaptureTrace.record("session.error", ["description": description])
             self.publish { self.ready = false }
             if self.captureID != nil { self.finishFailure(CameraFailure.message(description)) }
             else { self.message(description) }
@@ -259,21 +266,33 @@ final class CameraModel: NSObject, ObservableObject, AVCapturePhotoCaptureDelega
         settings.maxPhotoDimensions = output.maxPhotoDimensions
         settings.photoQualityPrioritization = .quality
         let identifier = settings.uniqueID
+        captureStage = "requested"
+        let connection = output.connection(with: .video)
+        CaptureTrace.record("capture.request", ["id": identifier,
+            "running": session.isRunning, "enabled": connection?.isEnabled ?? false,
+            "active": connection?.isActive ?? false, "quality": settings.photoQualityPrioritization.rawValue,
+            "width": settings.maxPhotoDimensions.width, "height": settings.maxPhotoDimensions.height,
+            "count": desiredCount])
         captureID = identifier
         expectedFrameCount = frames.count + 1
         output.capturePhoto(with: settings, delegate: self)
+        CaptureTrace.record("capture.submitted", ["id": identifier])
         queue.asyncAfter(deadline: .now() + 30) {
             guard self.captureID == identifier else { return }
+            CaptureTrace.record("capture.timeout", ["id": identifier, "stage": self.captureStage])
             self.finishFailure(CameraFailure.message("La cámara no respondió en 30 segundos. No se repetirá la captura automáticamente."))
         }
     }
 
     func photoOutput(_ output: AVCapturePhotoOutput, didFinishProcessingPhoto photo: AVCapturePhoto, error: Error?) {
+        CaptureTrace.record("delegate.processing.enter", ["id": photo.resolvedSettings.uniqueID, "error": error?.localizedDescription ?? "none"])
         // didFinishCapture follows processing; enqueue both on the same serial queue.
         let data = photo.fileDataRepresentation()
         let identifier = photo.resolvedSettings.uniqueID
         queue.async {
+            CaptureTrace.record("delegate.processing.queued", ["id": identifier, "expected": self.captureID ?? -1, "bytes": data?.count ?? 0])
             guard self.inFlight, self.captureID == identifier else { return }
+            self.captureStage = "processed"
             if let error { self.finishFailure(error) }
             else if let data { self.frames.append(data) }
             else { self.finishFailure(CameraFailure.message("La cámara no ha devuelto datos de imagen.")) }
@@ -281,6 +300,7 @@ final class CameraModel: NSObject, ObservableObject, AVCapturePhotoCaptureDelega
     }
 
     func photoOutput(_ output: AVCapturePhotoOutput, didFinishCaptureFor resolvedSettings: AVCaptureResolvedPhotoSettings, error: Error?) {
+        CaptureTrace.record("delegate.finished.enter", ["id": resolvedSettings.uniqueID, "error": error?.localizedDescription ?? "none"])
         queue.async {
             guard self.inFlight, self.captureID == resolvedSettings.uniqueID else { return }
             self.captureID = nil
@@ -333,12 +353,28 @@ final class CameraModel: NSObject, ObservableObject, AVCapturePhotoCaptureDelega
     }
 
     private func finishFailure(_ error: Error) {
+        CaptureTrace.record("capture.failure", ["description": error.localizedDescription])
         transaction = UUID()
         captureID = nil
         restoreDevice()
         frames = []
         inFlight = false
         publish { self.busy = false; self.status = error.localizedDescription }
+    }
+
+    func photoOutput(_ output: AVCapturePhotoOutput, willBeginCaptureFor resolvedSettings: AVCaptureResolvedPhotoSettings) {
+        CaptureTrace.record("delegate.begin", ["id": resolvedSettings.uniqueID])
+        queue.async { if self.captureID == resolvedSettings.uniqueID { self.captureStage = "began" } }
+    }
+
+    func photoOutput(_ output: AVCapturePhotoOutput, willCapturePhotoFor resolvedSettings: AVCaptureResolvedPhotoSettings) {
+        CaptureTrace.record("delegate.willCapture", ["id": resolvedSettings.uniqueID])
+        queue.async { if self.captureID == resolvedSettings.uniqueID { self.captureStage = "exposing" } }
+    }
+
+    func photoOutput(_ output: AVCapturePhotoOutput, didCapturePhotoFor resolvedSettings: AVCaptureResolvedPhotoSettings) {
+        CaptureTrace.record("delegate.didCapture", ["id": resolvedSettings.uniqueID])
+        queue.async { if self.captureID == resolvedSettings.uniqueID { self.captureStage = "exposed" } }
     }
 
     func save() {
