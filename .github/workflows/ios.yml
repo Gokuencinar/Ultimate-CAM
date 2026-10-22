@@ -55,6 +55,21 @@ jobs:
           build/processor-checks 2>&1 | tee build/processor-checks.log
       - name: Package rootless DEB
         run: bash scripts/package_deb.sh
+      - name: Build read-only device diagnostic
+        run: |
+          set -euo pipefail
+          mkdir -p build/diagnostics
+          xcrun --sdk iphoneos clang -arch arm64 -miphoneos-version-min=18.0 -O2 scripts/device_state.c -o build/diagnostics/UltimateCAM-device-state
+          ldid -S build/diagnostics/UltimateCAM-device-state
+          cd build/diagnostics
+          shasum -a 256 UltimateCAM-device-state > SHA256SUMS.txt
+      - name: Upload device diagnostic
+        uses: actions/upload-artifact@v4
+        with:
+          name: Ultimate-CAM-diagnostics-${{ github.run_number }}
+          path: build/diagnostics/
+          if-no-files-found: error
+          retention-days: 14
       - name: Upload DEB and checksum
         uses: actions/upload-artifact@v4
         with:

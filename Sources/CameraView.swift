@@ -17,7 +17,7 @@ private struct CameraPreview: UIViewRepresentable {
     let session: AVCaptureSession
     let focus: (CGPoint) -> Void
     final class Coordinator: NSObject {
-        let focus: (CGPoint) -> Void
+        var focus: (CGPoint) -> Void
         init(focus: @escaping (CGPoint) -> Void) { self.focus = focus }
         @objc func tap(_ gesture: UITapGestureRecognizer) {
             guard let view = gesture.view as? PreviewSurface else { return }
@@ -32,7 +32,7 @@ private struct CameraPreview: UIViewRepresentable {
         view.addGestureRecognizer(UITapGestureRecognizer(target: context.coordinator, action: #selector(Coordinator.tap(_:))))
         return view
     }
-    func updateUIView(_ view: PreviewSurface, context: Context) {}
+    func updateUIView(_ view: PreviewSurface, context: Context) { context.coordinator.focus = focus }
 }
 
 private struct ViewfinderGrid: View {

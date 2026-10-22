@@ -14,6 +14,7 @@ enum CaptureTrace {
             guard var data = try? JSONSerialization.data(withJSONObject: entry, options: [.sortedKeys]) else { return }
             data.append(0x0A)
             do {
+                try FileManager.default.createDirectory(at: file.deletingLastPathComponent(), withIntermediateDirectories: true)
                 let size = (try? FileManager.default.attributesOfItem(atPath: file.path)[.size] as? NSNumber)?.intValue ?? 0
                 if size > 131072 || !FileManager.default.fileExists(atPath: file.path) {
                     try data.write(to: file, options: .atomic)
