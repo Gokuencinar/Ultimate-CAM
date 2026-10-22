@@ -132,6 +132,16 @@ struct ProcessorChecks {
         try require(robustError < naiveError * 0.7, "Motion rejection did not suppress displaced objects")
         let adjusted = try processor.process([cleanData], options: ProcessingOptions(noiseReduction: 0.02, sharpening: 0.2, liftShadows: 0.2))
         try require(!adjusted.jpeg.isEmpty && adjusted.reference == cleanData, "Single-image adjustments lost reference")
+        let fullImage = CIImage(color: CIColor(red: 0.3, green: 0.4, blue: 0.5))
+            .cropped(to: CGRect(x: 0, y: 0, width: 3200, height: 800))
+        let fullData = context.pngRepresentation(of: fullImage, format: .RGBA8, colorSpace: space)!
+        let fullResult = try processor.process([fullData], options: ProcessingOptions(maximumDimension: 1024, noiseReduction: 0.01))
+        let source = CGImageSourceCreateWithData(fullResult.jpeg as CFData, nil)!
+        let properties = CGImageSourceCopyPropertiesAtIndex(source, 0, nil)! as NSDictionary
+        try require((properties[kCGImagePropertyPixelWidth] as? Int) == 3200 &&
+                    (properties[kCGImagePropertyPixelHeight] as? Int) == 800,
+                    "Single-photo adjustments incorrectly applied the burst resolution limit")
+        log("Single-photo full resolution preserved")
         log("PROCESSOR CHECKS PASSED · synthetic fixtures only")
     }
 }

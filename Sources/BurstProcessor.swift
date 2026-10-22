@@ -37,7 +37,10 @@ final class BurstProcessor {
             guard let image = CIImage(data: data, options: [.applyOrientationProperty: true]) else {
                 throw CameraFailure.message("No se pudo leer una foto.")
             }
-            let limit = CGFloat(min(4096, max(1024, options.maximumDimension)))
+            // The selectable limit belongs to a multi-frame stack. Editing a
+            // single photo must not silently downsample the full-resolution JPEG.
+            let limit = frames.count == 1 ? max(image.extent.width, image.extent.height)
+                : CGFloat(min(4096, max(1024, options.maximumDimension)))
             let factor = min(1, limit / max(image.extent.width, image.extent.height))
             let scaled = image.transformed(by: CGAffineTransform(scaleX: factor, y: factor))
             return scaled.transformed(by: CGAffineTransform(translationX: -scaled.extent.minX,
