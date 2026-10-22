@@ -6,11 +6,13 @@ El objetivo es combinar captura nocturna por acumulación, como concepto de Lumi
 
 ## Estado real
 
-La versión `0.2.0+build.13.git.040abdd` ha compilado con Xcode 16.4 y SDK iOS 18.5 y se ha instalado por SSH en un iPhone 11 Pro con iOS 18.7.1. `dpkg --verify com.gokuencinar.ultimatecam` termina sin diferencias. La primera versión abría y mostraba la cámara, según confirmó el usuario, pero se notificó un tiempo de espera de 30 segundos en Foto y Pila 3. Esta actualización cambia la configuración de sesión y la prioridad de captura e incorpora diagnóstico local. La resolución del bloqueo y la calidad real siguen pendientes de una captura completa en el teléfono. No es un HDR+ ni un Night Sight completo.
+La versión `0.2.0+build.18.git.eedcc45` ha compilado con Xcode 16.4 y SDK iOS 18.5 y está instalada por SSH en un iPhone 11 Pro con iOS 18.7.1. `dpkg --verify com.gokuencinar.ultimatecam` termina sin diferencias.
 
-[Build y pruebas](https://github.com/Gokuencinar/Ultimate-CAM/actions/runs/39730885982): compilación arm64 y paquete Debian correctos. Pasaron las pruebas de ruido (RMSE 14,15 → 6,25), traslación (RMSE 1,30), preferencia por una referencia nítida frente a una borrosa, rechazo de objetos desplazados (RMSE 9,65 → 2,08) ajustes de una imagen y conservación de resolución completa en Foto. Son imágenes artificiales en macOS. Los nuevos controles se revisaron en [capturas del simulador](https://github.com/Gokuencinar/Ultimate-CAM/actions/runs/39729796897); eso no valida la cámara física.
+La primera versión se quedaba capturando hasta agotar 30 segundos. Se corrigieron la configuración de sesión, la prioridad de captura y el acceso al contenedor propio. El diagnóstico independiente detectó `NSCocoaErrorDomain 513` al escribir la caché en la compilación 15. Con la vinculación explícita al contenedor, la compilación 16 ya escribe los registros y completó por SSH una Foto (JPEG de 3.003.168 bytes) y una Pila 3 (3/3 imágenes fusionadas, 1920 × 2560, JPEG de 1.485.730 bytes), sin errores ni timeout. Las solicitudes al sensor fueron de 4032 × 3024. No se guardaron automáticamente en Fotos.
 
-Durante la depuración por SSH, el diagnóstico de solo lectura obtuvo `lockstate=1`, `lockcomplete=1`, `displayStatus=0` y cero procesos UltimateCAM. No se forzó el desbloqueo ni se cambiaron permisos. Con la app sin ejecutar y el teléfono bloqueado no se pudo completar una captura física ni dar por reparado el timeout.
+Estas capturas físicas corresponden a `0.2.0+build.16.git.f7c7212`, no a la última compilación. La 18 conserva esa corrección y añade pantalla despierta en primer plano y diagnóstico de pilas largas, RAW y ajustes. Está instalada, pero falta abrirla y repetir las pruebas: el teléfono se bloqueó durante la actualización y el usuario no podía reabrirlo. Pilas 5/7/9, RAW, controles manuales, guardado y calidad comparada siguen pendientes. No es un HDR+ ni un Night Sight completo.
+
+[Build y pruebas](https://github.com/Gokuencinar/Ultimate-CAM/actions/runs/39734939049): compilación arm64 y paquete Debian correctos. Pasaron las pruebas sintéticas de ruido (RMSE 14,15 → 6,25), traslación (1,30), referencia nítida, rechazo de objetos desplazados (9,65 → 2,08), ajustes y resolución completa en Foto. Estas pruebas son de macOS. Los controles se revisaron en [capturas del simulador](https://github.com/Gokuencinar/Ultimate-CAM/actions/runs/39729796897); eso no valida la calidad de la cámara física.
 
 Repositorio: [Gokuencinar/Ultimate-CAM](https://github.com/Gokuencinar/Ultimate-CAM).
 
@@ -33,7 +35,7 @@ Los controles muestran Foto y Pila con un número de fotogramas configurable. La
 - ISO y obturación manuales dentro de los límites del formato activo de cada lente.
 - Enfoque al tocar el visor, enfoque manual donde exista soporte y zoom digital limitado por el dispositivo (hasta 8× sobre la lente elegida). El zoom digital no es superresolución.
 - RAW/DNG + JPEG en Foto cuando la salida de la lente expone Bayer RAW. No fuerza ProRAW ni genera un RAW fusionado a partir de JPEG. Al guardar, el DNG se añade como recurso alternativo de la foto.
-- Temporizador de 3 o 10 segundos, cancelado al pasar a segundo plano.
+- Temporizador de 3 o 10 segundos, cancelado al pasar a segundo plano. Mantiene la pantalla despierta mientras la cámara está en primer plano; no impide el bloqueo manual.
 - Revisión y guardado explícito en Fotos del resultado y de la referencia seleccionada sin recodificar. Si solo hay una foto válida y no se han pedido ajustes, conserva esa foto sin fingir una fusión.
 - Sesión fuera del hilo principal, protección contra capturas simultáneas y manejo de permisos e interrupciones. Tras 30 segundos sin finalización se bloquean nuevas peticiones y se pide cerrar y reabrir la app para no acumular capturas pendientes. No hay reintentos automáticos.
 
@@ -43,7 +45,7 @@ La pila usa JPEG ya procesados por iOS, no RAW. Son capturas consecutivas, no un
 
 No excede las exposiciones admitidas por la lente ni añade luz que el sensor no haya registrado. No incluye horquillado HDR, modelos neuronales de Google, superresolución, astrofotografía, retrato o Live Photos. RAW/DNG depende de la capacidad real de la lente y sigue pendiente de prueba física. El resultado fusionado no copia los metadatos EXIF de exposición de la referencia porque describirían solo una parte de la pila.
 
-El motor usa APIs públicas. La distribución actual es un `.deb` para jailbreak rootless convencional con arquitectura Debian `iphoneos-arm64` y raíz `/var/jb`. Instala una app independiente; no inyecta hooks ni modifica Cámara de Apple. No solicita acceso a toda la fototeca ni añade entitlements privilegiados. El código no realiza solicitudes de red. Este paquete no es una variante específica para RootHide.
+El motor usa APIs públicas. La distribución actual es un `.deb` para jailbreak rootless convencional con arquitectura Debian `iphoneos-arm64` y raíz `/var/jb`. Instala una app independiente; no inyecta hooks ni modifica Cámara de Apple. No solicita acceso a toda la fototeca. La firma añade únicamente `com.apple.private.security.container-required` con el identificador de esta app para vincular su propio contenedor; no desactiva el sandbox ni omite los permisos de Cámara o Fotos. La forma de esta vinculación se contrasta con el [código de TrollStore](https://github.com/opa334/TrollStore/blob/main/RootHelper/main.m). El código no realiza solicitudes de red. Este paquete no es una variante específica para RootHide.
 
 ## Abrir y compilar
 
@@ -83,9 +85,9 @@ La ruta es `/var/jb/Applications/UltimateCAM.app`. Para quitarla usa el gestor d
 
 La app guarda un registro rotativo de hasta unos 128 KiB en su directorio de caché, `UltimateCAM-capture.jsonl`. Registra estado de sesión, identificadores de solicitud, callbacks, errores y número de bytes recibidos; no incluye imágenes ni EXIF. Es local y no se transmite por red.
 
-El artefacto independiente `Ultimate-CAM-diagnostics-N` contiene `UltimateCAM-device-state`, una utilidad de solo lectura que consulta estados de notificación y busca únicamente el proceso UltimateCAM. No envía notificaciones a SpringBoard ni modifica el bloqueo. Los nombres de estado son señales de diagnóstico del sistema, no una garantía de compatibilidad futura.
+El artefacto independiente `Ultimate-CAM-diagnostics-N` contiene `UltimateCAM-device-state`, una utilidad de solo lectura que consulta estados de notificación y busca únicamente el proceso UltimateCAM. También lee versión, PID, último evento, ruta del registro y error de escritura publicados por la app mediante estados locales. No acepta órdenes por ese canal ni envía notificaciones a SpringBoard ni modifica el bloqueo. Los nombres de estado son señales de diagnóstico del sistema, no una garantía de compatibilidad futura.
 
-Para una prueba de captura sin tocar los controles de la app, esta debe estar abierta en primer plano y con permiso de Cámara. En su caché se puede escribir `UltimateCAM-request.json` con `{"action":"capture","mode":"normal"}` o `{"action":"capture","mode":"stack"}` y enviar `SIGUSR1` al PID exacto de UltimateCAM. El segundo modo prueba la pila de tres por defecto. Una señal sin solicitud local válida no toma fotos. La app consume la solicitud y comprueba su estado de primer plano antes de ejecutarla; si no está activa la ignora. No guarda automáticamente el resultado en Fotos.
+Para una prueba de captura sin tocar los controles de la app, esta debe estar abierta en primer plano y con permiso de Cámara. En su caché se puede escribir `UltimateCAM-request.json` con `{"action":"capture","mode":"normal"}` o `{"action":"capture","mode":"stack"}` y enviar `SIGUSR1` al PID exacto de UltimateCAM. El segundo modo prueba la pila de tres por defecto. En la compilación 18 se admiten además campos de texto `"count":"5"` (también 3, 7 o 9), `"raw":"true"` solo en Foto y `"adjustments":"true"` para una combinación acotada de ajustes. Son controles de diagnóstico; no cambian las selecciones visibles de la interfaz. Una señal sin solicitud local válida no toma fotos. La app consume la solicitud y comprueba su estado de primer plano antes de ejecutarla; si no está activa la ignora. No guarda automáticamente el resultado en Fotos.
 
 ## Primera comprobación en el iPhone
 
