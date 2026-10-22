@@ -6,7 +6,9 @@ El objetivo es combinar captura nocturna por acumulación, como concepto de Lumi
 
 ## Estado real
 
-El primer prototipo ha compilado en GitHub Actions con Xcode 16.4 y SDK iOS 18.5, con un IPA arm64 sin firmar. La interfaz y las comprobaciones añadidas después deben verificarse en su propia ejecución de Actions. Sin instalación ni prueba en el iPhone. La calidad fotográfica no está verificada. No es todavía un modo Night Sight ni un HDR+ completo.
+La versión `0.1.0+git.0e802b6` ha compilado en GitHub Actions con Xcode 16.4 y SDK iOS 18.5. El `.deb` rootless se ha instalado por SSH en un iPhone 11 Pro con iOS 18.7.1; el usuario ha confirmado que abre y muestra la cámara tras aceptar el permiso. La captura, el guardado y la mejora de calidad siguen pendientes de prueba física. No es todavía un modo Night Sight ni un HDR+ completo.
+
+[Build y pruebas de esa versión](https://github.com/Gokuencinar/Ultimate-CAM/actions/runs/39726577859): compilación arm64, fusión con imágenes sintéticas y paquete Debian correctos. En la prueba de ruido, el RMSE bajó de 14,15 a 6,10; la prueba de traslación dio 1,30. Son métricas de imágenes artificiales, no de fotos del iPhone. La interfaz también se revisó mediante capturas del simulador de iPhone 11 Pro.
 
 Repositorio: [Gokuencinar/Ultimate-CAM](https://github.com/Gokuencinar/Ultimate-CAM).
 
@@ -34,11 +36,11 @@ La pila usa JPEG ya procesados por iOS, no RAW. Son capturas consecutivas, no un
 
 No fuerza exposiciones largas ni añade luz que el sensor no haya registrado. No incluye horquillado HDR, reducción avanzada de ruido, superresolución, astrofotografía, retrato, RAW/DNG o Live Photos. Detecta si una lente ofrece RAW, pero no lo captura todavía. El resultado fusionado no copia los metadatos EXIF de exposición del primer fotograma porque describirían solo una parte de la pila; la referencia original se conserva sin recodificar.
 
-La app usa APIs públicas y no necesita jailbreak para esta versión. Tener Dopamine no sustituye compilar y firmar la app. No usa hooks, permisos especiales de jailbreak, acceso a toda la fototeca ni servicios externos. El código no realiza solicitudes de red.
+El motor usa APIs públicas. La distribución actual es un `.deb` para jailbreak rootless convencional con arquitectura Debian `iphoneos-arm64` y raíz `/var/jb`. Instala una app independiente; no inyecta hooks ni modifica Cámara de Apple. No solicita acceso a toda la fototeca ni añade entitlements privilegiados. El código no realiza solicitudes de red. Este paquete no es una variante específica para RootHide.
 
 ## Abrir y compilar
 
-Se necesita macOS, Xcode con SDK de iOS 18 o posterior y XcodeGen. El proyecto utiliza Swift 5 y destino mínimo iOS 18.0.
+Se necesita macOS, Xcode con SDK de iOS 18 o posterior, XcodeGen, ldid y dpkg. El proyecto utiliza Swift 5 y destino mínimo iOS 18.0. El workflow contiene los comandos exactos para compilar y empaquetar.
 
 Desde esta carpeta en un Mac con XcodeGen instalado:
 
@@ -47,11 +49,11 @@ xcodegen generate
 open UltimateCAM.xcodeproj
 ```
 
-En Xcode, selecciona el target UltimateCAM, elige tu equipo de firma en Signing & Capabilities y cambia `local.ultimatecam.camera` por un identificador propio si corresponde. Selecciona el iPhone y ejecuta Run. Los permisos se solicitan desde la app.
+El identificador de app y paquete es `com.gokuencinar.ultimatecam`. Para la distribución con jailbreak, el workflow compila sin certificado Apple, firma el ejecutable con ldid y crea el `.deb` con `scripts/package_deb.sh`. Los permisos de Cámara y de añadir fotos se solicitan desde la app.
 
 ## Compilar desde GitHub
 
-Cada push a `main` o ejecución manual de **iOS · Ultimate CAM** compila la app para iPhone, ejecuta comprobaciones sintéticas del procesador y publica un artefacto `Ultimate-CAM-unsigned-N` con IPA, SHA-256 y commit. Los artefactos se conservan 14 días. La app necesita firma o un método de instalación compatible con el dispositivo antes de ejecutarse. El workflow no contiene certificados ni credenciales de Apple y no instala nada en el teléfono.
+Cada push a `main` o ejecución manual de **iOS · Ultimate CAM** compila la app para iPhone, ejecuta comprobaciones sintéticas del procesador y publica un artefacto `Ultimate-CAM-rootless-N` con `.deb`, SHA-256 y commit. Los artefactos se conservan 14 días. El workflow no contiene certificados, contraseñas SSH ni credenciales de Apple y no instala nada en el teléfono. La generación de capturas del simulador es opcional mediante la entrada manual `ui_preview`.
 
 Las comprobaciones del procesador ejecutan el código real de Core Image y Vision en macOS con imágenes de ruido y desplazamientos conocidos. No sustituyen pruebas de captura, calidad, rendimiento o estabilidad en el iPhone. El log se conserva junto al log de compilación.
 
@@ -63,6 +65,12 @@ xcodebuild -project UltimateCAM.xcodeproj -scheme UltimateCAM -sdk iphonesimulat
 ```
 
 El simulador sirve para comprobar compilación e interfaz, no para validar las cámaras.
+
+## Instalación y desinstalación
+
+En Sileo u otro gestor compatible, abre el `.deb` y confirma su instalación. También puede instalarse desde una terminal con privilegios mediante `dpkg -i` y la ruta exacta del archivo. El script de instalación registra solo esta app con `uicache`; no hace respring ni reinicia el teléfono.
+
+La ruta es `/var/jb/Applications/UltimateCAM.app`. Para quitarla usa el gestor de paquetes o `sudo dpkg -r com.gokuencinar.ultimatecam`. El script de retirada desregistra únicamente Ultimate CAM. La desinstalación no borra las fotografías guardadas en Fotos.
 
 ## Primera comprobación en el iPhone
 
