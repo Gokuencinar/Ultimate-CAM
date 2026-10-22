@@ -33,6 +33,7 @@ final class CameraModel: NSObject, ObservableObject, AVCapturePhotoCaptureDelega
     @Published private(set) var ready = false
     @Published private(set) var busy = false
     @Published private(set) var preview: UIImage?
+    @Published private(set) var referencePreview: UIImage?
     @Published private(set) var resultDetails = ""
     let lenses = CameraLens.allCases.filter { $0.device != nil }
 
@@ -303,6 +304,7 @@ final class CameraModel: NSObject, ObservableObject, AVCapturePhotoCaptureDelega
                         self.result = result
                         self.publish {
                             self.preview = UIImage(data: result.jpeg)
+                            self.referencePreview = UIImage(data: result.reference)
                             self.resultDetails = result.details
                             self.busy = false
                             self.status = "Captura preparada. Revisa el resultado antes de guardarlo."

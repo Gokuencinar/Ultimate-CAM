@@ -38,6 +38,11 @@ jobs:
             -derivedDataPath build/DerivedData \
             CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO \
             build 2>&1 | tee build/xcodebuild.log
+      - name: Check image alignment and noise averaging
+        run: |
+          set -euo pipefail
+          xcrun --sdk macosx swiftc -O Sources/BurstProcessor.swift Tests/ProcessorChecks.swift -o build/processor-checks
+          build/processor-checks 2>&1 | tee build/processor-checks.log
       - name: Package unsigned IPA
         run: |
           set -euo pipefail
@@ -65,6 +70,8 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: Ultimate-CAM-build-log-${{ github.run_number }}
-          path: build/xcodebuild.log
+          path: |
+            build/xcodebuild.log
+            build/processor-checks.log
           if-no-files-found: warn
           retention-days: 14

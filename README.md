@@ -6,7 +6,15 @@ El objetivo es combinar captura nocturna por acumulación, como concepto de Lumi
 
 ## Estado real
 
-Fuentes preparadas y revisadas en Windows. Sin compilación con Xcode, IPA, instalación ni prueba en el iPhone. La calidad fotográfica no está verificada. No es todavía un modo Night Sight ni un HDR+ completo.
+El primer prototipo ha compilado en GitHub Actions con Xcode 16.4 y SDK iOS 18.5, con un IPA arm64 sin firmar. La interfaz y las comprobaciones añadidas después deben verificarse en su propia ejecución de Actions. Sin instalación ni prueba en el iPhone. La calidad fotográfica no está verificada. No es todavía un modo Night Sight ni un HDR+ completo.
+
+Repositorio: [Gokuencinar/Ultimate-CAM](https://github.com/Gokuencinar/Ultimate-CAM).
+
+## Interfaz
+
+Implementación propia inspirada en la captura y descripción públicas de [26CAM de ngkhoi](https://www.reddit.com/r/jailbreak/comments/1vd9zwl/upcoming_26cam_a_tweak_that_bring_ios_26_camera/): visor a pantalla completa, controles flotantes, selector inferior en cápsula, anillo del disparador y botones de lentes. En iOS 18 utiliza materiales translúcidos de SwiftUI; no depende del tweak Liquid (Gl)ass ni incorpora sus binarios. No es una copia de su implementación ni el efecto Liquid Glass nativo de iOS 26.
+
+Los controles muestran únicamente los modos implementados: Foto y Pila 3. La captura de vídeo no está implementada. Exposición, temperatura de color y cuadrícula se despliegan con el botón superior. El visor puede recortar la imagen para llenar la pantalla; la revisión enseña la foto guardable completa.
 
 ## Lo que implementa el código
 
@@ -39,7 +47,13 @@ xcodegen generate
 open UltimateCAM.xcodeproj
 ```
 
-En Xcode, selecciona el target UltimateCAM, elige tu equipo de firma en Signing & Capabilities y cambia `local.ultimatecam.camera` por un identificador propio si corresponde. Selecciona el iPhone y ejecuta Run. Los permisos se solicitan desde la app. No hay un IPA precompilado en esta entrega.
+En Xcode, selecciona el target UltimateCAM, elige tu equipo de firma en Signing & Capabilities y cambia `local.ultimatecam.camera` por un identificador propio si corresponde. Selecciona el iPhone y ejecuta Run. Los permisos se solicitan desde la app.
+
+## Compilar desde GitHub
+
+Cada push a `main` o ejecución manual de **iOS · Ultimate CAM** compila la app para iPhone, ejecuta comprobaciones sintéticas del procesador y publica un artefacto `Ultimate-CAM-unsigned-N` con IPA, SHA-256 y commit. Los artefactos se conservan 14 días. La app necesita firma o un método de instalación compatible con el dispositivo antes de ejecutarse. El workflow no contiene certificados ni credenciales de Apple y no instala nada en el teléfono.
+
+Las comprobaciones del procesador ejecutan el código real de Core Image y Vision en macOS con imágenes de ruido y desplazamientos conocidos. No sustituyen pruebas de captura, calidad, rendimiento o estabilidad en el iPhone. El log se conserva junto al log de compilación.
 
 Para verificar compilación sin firma y sin instalar:
 
@@ -62,7 +76,7 @@ El simulador sirve para comprobar compilación e interfaz, no para validar las c
 
 ## Siguientes etapas
 
-Primero compilar y corregir los problemas que revele Xcode; después validar la pila con imágenes de desplazamiento conocido para comprobar la dirección de la transformación de Vision y la reducción de ruido. Luego probar en el iPhone.
+Primero comprobar el build y las pruebas sintéticas de la versión exacta que se vaya a instalar. Después validar permisos, captura, cambio de lentes y calidad en el iPhone.
 
 Con esa base medida: añadir control ISO/obturación y exposición larga dentro de los límites de cada lente; captura RAW en las cámaras que realmente la expongan; selección de fotograma de referencia, alineación local, rechazo de zonas móviles y fusión sensible al ruido. Después, horquillado y mapeo tonal para un modo HDR propio. La astrofotografía y la superresolución deben ser módulos posteriores, con pruebas separadas.
 

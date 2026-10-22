@@ -6,6 +6,7 @@ struct CaptureResult {
     let jpeg: Data
     let reference: Data
     let details: String
+    let mergedFrames: Int
 }
 
 enum CameraFailure: LocalizedError {
@@ -27,7 +28,7 @@ final class BurstProcessor {
     func process(_ frames: [Data]) throws -> CaptureResult {
         guard let first = frames.first else { throw CameraFailure.message("No hay imágenes.") }
         if frames.count == 1 {
-            return CaptureResult(jpeg: first, reference: first, details: "Foto individual, procesada por el sistema.")
+            return CaptureResult(jpeg: first, reference: first, details: "Foto individual, procesada por el sistema.", mergedFrames: 1)
         }
         // Limit the working image size to bound memory on the iPhone 11 Pro.
         func decode(_ data: Data) throws -> CIImage {
@@ -79,7 +80,7 @@ final class BurstProcessor {
         }
         guard accepted > 1 else {
             return CaptureResult(jpeg: first, reference: first,
-                                 details: "No se pudo alinear la pila. Se conserva la primera foto sin fusionar.")
+                                 details: "No se pudo alinear la pila. Se conserva la primera foto sin fusionar.", mergedFrames: 1)
         }
         guard let cg = context.createCGImage(accumulator, from: common,
                     format: .RGBA8, colorSpace: CGColorSpace(name: CGColorSpace.sRGB)!) else {
@@ -92,7 +93,7 @@ final class BurstProcessor {
         CGImageDestinationAddImage(destination, cg, [kCGImageDestinationLossyCompressionQuality: 0.95] as CFDictionary)
         guard CGImageDestinationFinalize(destination) else { throw CameraFailure.message("Error al codificar el JPEG.") }
         return CaptureResult(jpeg: data as Data, reference: first,
-            details: "Fusionadas \(accepted)/\(frames.count) fotos. \(cg.width) × \(cg.height) px. Alineación por traslación; puede producir dobles contornos si algo se mueve.")
+            details: "Fusionadas \(accepted)/\(frames.count) fotos. \(cg.width) × \(cg.height) px. Alineación por traslación; puede producir dobles contornos si algo se mueve.", mergedFrames: accepted)
     }
 
     private func scale(_ image: CIImage, by weight: CGFloat) -> CIImage {
