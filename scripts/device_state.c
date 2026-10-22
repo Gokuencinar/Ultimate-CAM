@@ -6,8 +6,43 @@
 #include <errno.h>
 #include <sys/sysctl.h>
 
+static uint64_t diagnostic_value(const char *suffix) {
+    char name[192];
+    snprintf(name, sizeof(name), "com.gokuencinar.ultimatecam.diagnostic.%s", suffix);
+    int token = 0;
+    uint64_t value = 0;
+    if (notify_register_check(name, &token) == NOTIFY_STATUS_OK) {
+        notify_get_state(token, &value);
+        notify_cancel(token);
+    }
+    return value;
+}
+
+static void diagnostic_string(const char *suffix, size_t limit) {
+    char key[128];
+    snprintf(key, sizeof(key), "%s.length", suffix);
+    size_t length = (size_t)diagnostic_value(key);
+    if (length > limit) length = limit;
+    printf("diagnostic_%s=", suffix);
+    for (size_t offset = 0; offset < length; offset += 8) {
+        snprintf(key, sizeof(key), "%s.%zu", suffix, offset / 8);
+        uint64_t word = diagnostic_value(key);
+        for (size_t i = 0; i < 8 && offset + i < length; i++) {
+            unsigned char byte = (unsigned char)(word >> (8 * i));
+            putchar(byte >= 32 ? byte : '?');
+        }
+    }
+    putchar('\n');
+}
+
 /* Read-only SSH probe. Does not post notifications or change lock state. */
 int main(void) {
+    printf("diagnostic_pid=%llu\n", (unsigned long long)diagnostic_value("pid"));
+    printf("diagnostic_build=%llu\n", (unsigned long long)diagnostic_value("build"));
+    printf("diagnostic_writeError=%lld\n", (long long)diagnostic_value("writeError"));
+    diagnostic_string("path", 768);
+    diagnostic_string("event", 96);
+    diagnostic_string("errorDomain", 96);
     const char *names[] = {
         "com.apple.springboard.lockstate",
         "com.apple.springboard.lockcomplete",

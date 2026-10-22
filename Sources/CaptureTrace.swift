@@ -7,6 +7,7 @@ enum CaptureTrace {
         .appendingPathComponent("UltimateCAM-capture.jsonl")
 
     static func record(_ event: String, _ fields: [String: Any] = [:]) {
+        RuntimeDiagnostics.record(event, path: file.path)
         queue.async {
             var entry = fields
             entry["event"] = event
@@ -24,7 +25,10 @@ enum CaptureTrace {
                     try handle.seekToEnd()
                     try handle.write(contentsOf: data)
                 }
-            } catch { NSLog("Ultimate CAM: capture trace unavailable: %@", error.localizedDescription) }
+            } catch {
+                RuntimeDiagnostics.writeError(error)
+                NSLog("Ultimate CAM: capture trace unavailable: %@", error.localizedDescription)
+            }
         }
     }
 }
