@@ -109,10 +109,18 @@ struct CameraView: View {
             }
         }
         .foregroundStyle(.white).preferredColorScheme(.dark)
-        .onAppear { camera.start() }
+        .onAppear {
+            UIApplication.shared.isIdleTimerDisabled = true
+            camera.start()
+        }
+        .onDisappear { UIApplication.shared.isIdleTimerDisabled = false }
         .onChange(of: scenePhase) { _, phase in
-            if phase == .active { camera.start() }
+            if phase == .active {
+                UIApplication.shared.isIdleTimerDisabled = true
+                camera.start()
+            }
             else if phase == .background {
+                UIApplication.shared.isIdleTimerDisabled = false
                 countdownTask?.cancel()
                 countdown = 0
                 camera.stop()
