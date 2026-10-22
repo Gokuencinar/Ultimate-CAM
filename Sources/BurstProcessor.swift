@@ -138,8 +138,16 @@ final class BurstProcessor {
         }
         CGImageDestinationAddImage(destination, cg, [kCGImageDestinationLossyCompressionQuality: 0.95] as CFDictionary)
         guard CGImageDestinationFinalize(destination) else { throw CameraFailure.message("Error al codificar el JPEG.") }
+        let details: String
+        if frames.count == 1 {
+            details = "Foto individual con ajustes. \(cg.width) × \(cg.height) px."
+        } else if accepted == 1 {
+            details = "No se pudo alinear la pila. Referencia \(referenceIndex + 1) con ajustes, sin fusión. \(cg.width) × \(cg.height) px."
+        } else {
+            details = "Fusionadas \(accepted)/\(frames.count) fotos. Referencia \(referenceIndex + 1). \(cg.width) × \(cg.height) px. Rechazo de movimiento: \(options.rejectMotion ? "sí" : "no")."
+        }
         return CaptureResult(jpeg: data as Data, reference: referenceData,
-            details: "Fusionadas \(accepted)/\(frames.count) fotos. Referencia \(referenceIndex + 1). \(cg.width) × \(cg.height) px. Rechazo de movimiento: \(options.rejectMotion ? "sí" : "no").", mergedFrames: accepted)
+            details: details, mergedFrames: accepted)
     }
 
     private func sharpness(_ image: CIImage) -> Double {

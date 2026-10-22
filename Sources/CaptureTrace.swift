@@ -12,6 +12,8 @@ enum CaptureTrace {
             var entry = fields
             entry["event"] = event
             entry["time"] = ISO8601DateFormatter().string(from: Date())
+            entry["pid"] = ProcessInfo.processInfo.processIdentifier
+            entry["build"] = Bundle.main.infoDictionary?["CFBundleVersion"] as? String ?? "unknown"
             guard var data = try? JSONSerialization.data(withJSONObject: entry, options: [.sortedKeys]) else { return }
             data.append(0x0A)
             do {
