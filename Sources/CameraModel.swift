@@ -55,9 +55,11 @@ final class CameraModel: NSObject, ObservableObject, AVCapturePhotoCaptureDelega
     private var result: CaptureResult?
     private var interrupted = false
     private var captureStage = "idle"
+    private var diagnosticBridge: DiagnosticBridge?
 
     override init() {
         super.init()
+        diagnosticBridge = DiagnosticBridge { [weak self] stack in self?.capture(stack: stack) }
         CaptureTrace.record("model.init", [
             "processingDelegate": responds(to: NSSelectorFromString("captureOutput:didFinishProcessingPhoto:error:")),
             "completionDelegate": responds(to: NSSelectorFromString("captureOutput:didFinishCaptureForResolvedSettings:error:"))
@@ -321,6 +323,8 @@ final class CameraModel: NSObject, ObservableObject, AVCapturePhotoCaptureDelega
                     guard self.transaction == token, self.inFlight else { return }
                     switch processed {
                     case .success(let result):
+                        CaptureTrace.record("capture.success", ["bytes": result.jpeg.count,
+                            "mergedFrames": result.mergedFrames, "details": result.details])
                         self.result = result
                         self.publish {
                             self.preview = UIImage(data: result.jpeg)
