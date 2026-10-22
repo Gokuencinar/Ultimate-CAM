@@ -1,6 +1,7 @@
 import Foundation
 import CoreImage
 import ImageIO
+import Darwin
 
 /// Runs the production Core Image / Vision processor on macOS without a camera.
 /// These checks do not establish iPhone image quality or hardware compatibility.
@@ -71,7 +72,19 @@ struct ProcessorChecks {
         return sqrt(error / max(1, count))
     }
 
-    static func main() throws {
+    static func log(_ message: String) {
+        FileHandle.standardOutput.write(Data((message + "\n").utf8))
+    }
+
+    static func main() {
+        do { try run() }
+        catch {
+            FileHandle.standardError.write(Data(("CHECK FAILED: \(error)\n").utf8))
+            exit(1)
+        }
+    }
+
+    static func run() throws {
         let processor = BurstProcessor()
         let reference = try bitmap(png(seed: 1))
         let noisy = try [png(seed: 10, noise: 24), png(seed: 20, noise: 24), png(seed: 30, noise: 24)]
@@ -79,7 +92,7 @@ struct ProcessorChecks {
         try require(denoised.mergedFrames == 3, "Noise fixture did not merge all frames")
         let individual = rmse(try bitmap(noisy[0]), against: reference)
         let merged = rmse(try bitmap(denoised.jpeg), against: reference)
-        print("Noise RMSE: individual=\(individual), merged=\(merged)")
+        log("Noise RMSE: individual=\(individual), merged=\(merged)")
         try require(merged < individual * 0.85, "Averaging did not reduce fixture noise sufficiently")
 
         let translated = try processor.process([png(seed: 1), png(seed: 1, dx: 5, dy: -3), png(seed: 1, dx: -4, dy: 2)])
@@ -90,8 +103,8 @@ struct ProcessorChecks {
         for y in 0...10 { for x in 0...10 {
             best = min(best, rmse(result, against: reference, offsetX: x, offsetY: y))
         } }
-        print("Translated fixture best RMSE=\(best), output=\(result.width)x\(result.height)")
+        log("Translated fixture best RMSE=\(best), output=\(result.width)x\(result.height)")
         try require(best < 8, "Translation direction or fusion introduces ghosting in a static fixture")
-        print("PROCESSOR CHECKS PASSED · synthetic fixtures only")
+        log("PROCESSOR CHECKS PASSED · synthetic fixtures only")
     }
 }

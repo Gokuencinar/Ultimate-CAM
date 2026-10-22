@@ -66,10 +66,10 @@ final class BurstProcessor {
                 // Maintain a running mean, forcing evaluation after every merge so the
                 // filter graph does not retain a full burst of decoded images.
                 let count = CGFloat(accepted)
-                let a = scale(accumulator.cropped(to: overlap), by: count / (count + 1))
-                let b = scale(aligned.cropped(to: overlap), by: 1 / (count + 1))
-                let mean = a.applyingFilter("CIAdditionCompositing", parameters: [kCIInputBackgroundImageKey: b])
-                    .cropped(to: overlap)
+                let mean = accumulator.cropped(to: overlap).applyingFilter("CIDissolveTransition", parameters: [
+                    kCIInputTargetImageKey: aligned.cropped(to: overlap),
+                    kCIInputTimeKey: 1 / (count + 1)
+                ]).cropped(to: overlap)
                 guard let rendered = context.createCGImage(mean, from: overlap, format: .RGBAh,
                     colorSpace: CGColorSpace(name: CGColorSpace.extendedLinearSRGB)!) else { return }
                 accumulator = CIImage(cgImage: rendered).transformed(by:
@@ -96,12 +96,4 @@ final class BurstProcessor {
             details: "Fusionadas \(accepted)/\(frames.count) fotos. \(cg.width) × \(cg.height) px. Alineación por traslación; puede producir dobles contornos si algo se mueve.", mergedFrames: accepted)
     }
 
-    private func scale(_ image: CIImage, by weight: CGFloat) -> CIImage {
-        image.applyingFilter("CIColorMatrix", parameters: [
-            "inputRVector": CIVector(x: weight, y: 0, z: 0, w: 0),
-            "inputGVector": CIVector(x: 0, y: weight, z: 0, w: 0),
-            "inputBVector": CIVector(x: 0, y: 0, z: weight, w: 0),
-            "inputAVector": CIVector(x: 0, y: 0, z: 0, w: weight)
-        ])
-    }
 }
