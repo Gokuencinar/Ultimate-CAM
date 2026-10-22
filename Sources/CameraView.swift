@@ -44,12 +44,12 @@ struct CameraView: View {
     @Environment(\.scenePhase) private var scenePhase
     @State private var lens = CameraLens.wide
     @State private var lastBackLens = CameraLens.wide
-    @State private var stack = false
+    @State private var stack = ProcessInfo.processInfo.arguments.contains("-stack-mode")
     @State private var bias: Double = 0
     @State private var manualWB = false
     @State private var temperature: Double = 5000
     @State private var grid = true
-    @State private var showControls = false
+    @State private var showControls = ProcessInfo.processInfo.arguments.contains("-show-controls")
     @State private var showResult = false
     @State private var showReference = false
 
@@ -73,7 +73,6 @@ struct CameraView: View {
                     .multilineTextAlignment(.center)
                     .padding(.horizontal, 14).padding(.vertical, 8)
                     .background(.ultraThinMaterial, in: Capsule())
-                    .accessibilityLiveRegion(.polite)
                 lensSelector
                 captureRow
                 modeSelector
