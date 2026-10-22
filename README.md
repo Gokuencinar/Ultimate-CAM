@@ -6,9 +6,11 @@ El objetivo es combinar captura nocturna por acumulación, como concepto de Lumi
 
 ## Estado real
 
-La versión `0.1.0+git.0e802b6` ha compilado en GitHub Actions con Xcode 16.4 y SDK iOS 18.5. El `.deb` rootless se ha instalado por SSH en un iPhone 11 Pro con iOS 18.7.1; el usuario ha confirmado que abre y muestra la cámara tras aceptar el permiso. La captura, el guardado y la mejora de calidad siguen pendientes de prueba física. No es todavía un modo Night Sight ni un HDR+ completo.
+La versión `0.2.0+build.12.git.f0d41d5` ha compilado con Xcode 16.4 y SDK iOS 18.5 y se ha instalado por SSH en un iPhone 11 Pro con iOS 18.7.1. `dpkg --verify com.gokuencinar.ultimatecam` termina sin diferencias. La primera versión abría y mostraba la cámara, según confirmó el usuario, pero se notificó un tiempo de espera de 30 segundos en Foto y Pila 3. Esta actualización cambia la configuración de sesión y la prioridad de captura e incorpora diagnóstico local. La resolución del bloqueo y la calidad real siguen pendientes de una captura completa en el teléfono. No es un HDR+ ni un Night Sight completo.
 
-[Build y pruebas de esa versión](https://github.com/Gokuencinar/Ultimate-CAM/actions/runs/39726577859): compilación arm64, fusión con imágenes sintéticas y paquete Debian correctos. En la prueba de ruido, el RMSE bajó de 14,15 a 6,10; la prueba de traslación dio 1,30. Son métricas de imágenes artificiales, no de fotos del iPhone. La interfaz también se revisó mediante capturas del simulador de iPhone 11 Pro.
+[Build y pruebas](https://github.com/Gokuencinar/Ultimate-CAM/actions/runs/39730143485): compilación arm64 y paquete Debian correctos. Pasaron las pruebas de ruido (RMSE 14,15 → 6,25), traslación (RMSE 1,30), preferencia por una referencia nítida frente a una borrosa, rechazo de objetos desplazados (RMSE 9,65 → 2,08) y ajustes de una imagen. Son imágenes artificiales en macOS. Los nuevos controles se revisaron en [capturas del simulador](https://github.com/Gokuencinar/Ultimate-CAM/actions/runs/39729796897); eso no valida la cámara física.
+
+Durante la depuración por SSH, el diagnóstico de solo lectura obtuvo `lockstate=1`, `lockcomplete=1`, `displayStatus=0` y cero procesos UltimateCAM. No se forzó el desbloqueo ni se cambiaron permisos. Con la app sin ejecutar y el teléfono bloqueado no se pudo completar una captura física ni dar por reparado el timeout.
 
 Repositorio: [Gokuencinar/Ultimate-CAM](https://github.com/Gokuencinar/Ultimate-CAM).
 
@@ -16,25 +18,30 @@ Repositorio: [Gokuencinar/Ultimate-CAM](https://github.com/Gokuencinar/Ultimate-
 
 Implementación propia inspirada en la captura y descripción públicas de [26CAM de ngkhoi](https://www.reddit.com/r/jailbreak/comments/1vd9zwl/upcoming_26cam_a_tweak_that_bring_ios_26_camera/): visor a pantalla completa, controles flotantes, selector inferior en cápsula, anillo del disparador y botones de lentes. En iOS 18 utiliza materiales translúcidos de SwiftUI; no depende del tweak Liquid (Gl)ass ni incorpora sus binarios. No es una copia de su implementación ni el efecto Liquid Glass nativo de iOS 26.
 
-Los controles muestran únicamente los modos implementados: Foto y Pila 3. La captura de vídeo no está implementada. Exposición, temperatura de color y cuadrícula se despliegan con el botón superior. El visor puede recortar la imagen para llenar la pantalla; la revisión enseña la foto guardable completa.
+Los controles muestran Foto y Pila con un número de fotogramas configurable. La captura de vídeo no está implementada. El botón superior abre un panel desplazable con controles manuales y de procesado. El visor puede recortar la imagen para llenar la pantalla; la revisión enseña la foto guardable completa.
 
 ## Lo que implementa el código
 
 - Vista previa y selección de cámaras físicas: ultra gran angular, principal, teleobjetivo y frontal, según disponibilidad.
-- Foto individual JPEG con prioridad de calidad del sistema.
+- Foto individual JPEG. Cada petición usa prioridad `.speed` para no exigir una fusión adicional al sistema y respetar ISO y obturación bloqueados; la fusión múltiple se hace en la app.
 - Compensación de exposición entre −2 y +2 EV, limitada a lo que admita cada cámara.
 - Balance de blancos automático o manual entre 2500 y 8000 K, con límites de ganancias del dispositivo.
-- Pila experimental de tres fotos consecutivas con exposición y balance de blancos bloqueados. Bloquea también el enfoque cuando la cámara lo permite.
-- Alineación global por traslación con Vision y promedio en RGB lineal mediante Core Image. Rechaza alineaciones fallidas, de poca confianza o con desplazamientos grandes.
-- Recorte del área común. Procesamiento limitado a 2560 píxeles en el lado largo para acotar memoria. Puede reducirse más por el recorte.
-- Revisión y guardado explícito en Fotos del resultado y del primer fotograma original. Si solo hay una foto válida, conserva esa foto sin fingir una fusión.
-- Sesión fuera del hilo principal, protección contra capturas simultáneas, manejo de permisos e interrupciones y límite de 30 segundos por foto sin reintento automático.
+- Pila de 3, 5, 7 o 9 fotos con exposición y balance de blancos bloqueados. Bloquea también el enfoque cuando se admite. Conserva el modo de exposición manual si ya estaba activo.
+- Alineación por traslación con Vision y promedio en RGB lineal mediante Core Image. Rechaza alineaciones fallidas o con desplazamientos grandes. Opcionalmente elige la referencia por nitidez y la conserva en las zonas con diferencias grandes para reducir dobles contornos.
+- Límite de resolución de pila seleccionable: 2048, 2560 o hasta 4096 píxeles en el lado largo. La resolución final depende de las capturas y del recorte; ampliar el límite no inventa detalle.
+- Reducción de ruido, nitidez y elevación de sombras regulables, con esos ajustes adicionales desactivados por defecto.
+- ISO y obturación manuales dentro de los límites del formato activo de cada lente.
+- Enfoque al tocar el visor, enfoque manual donde exista soporte y zoom digital limitado por el dispositivo (hasta 8× sobre la lente elegida). El zoom digital no es superresolución.
+- RAW/DNG + JPEG en Foto cuando la salida de la lente expone Bayer RAW. No fuerza ProRAW ni genera un RAW fusionado a partir de JPEG. Al guardar, el DNG se añade como recurso alternativo de la foto.
+- Temporizador de 3 o 10 segundos, cancelado al pasar a segundo plano.
+- Revisión y guardado explícito en Fotos del resultado y de la referencia seleccionada sin recodificar. Si solo hay una foto válida y no se han pedido ajustes, conserva esa foto sin fingir una fusión.
+- Sesión fuera del hilo principal, protección contra capturas simultáneas y manejo de permisos e interrupciones. Tras 30 segundos sin finalización se bloquean nuevas peticiones y se pide cerrar y reabrir la app para no acumular capturas pendientes. No hay reintentos automáticos.
 
 ## Límites de esta primera versión
 
-La pila usa JPEG ya procesados por iOS, no RAW. Son capturas consecutivas, no una ráfaga de alta velocidad. Promediar tres fotos no reproduce el procesamiento de Google. Solo se corrige traslación: no rotación, paralaje ni movimiento local. Personas, mascotas, hojas y vehículos pueden dejar dobles contornos. Se necesita una escena inmóvil y preferiblemente trípode.
+La pila usa JPEG ya procesados por iOS, no RAW. Son capturas consecutivas, no una ráfaga de alta velocidad. Promediar imágenes no reproduce el procesamiento de Google. Solo se alinea por traslación: no rotación, paralaje ni flujo óptico. El rechazo por diferencias puede confundir ruido, iluminación y movimiento; todavía pueden aparecer artefactos. Se recomienda una escena inmóvil y trípode.
 
-No fuerza exposiciones largas ni añade luz que el sensor no haya registrado. No incluye horquillado HDR, reducción avanzada de ruido, superresolución, astrofotografía, retrato, RAW/DNG o Live Photos. Detecta si una lente ofrece RAW, pero no lo captura todavía. El resultado fusionado no copia los metadatos EXIF de exposición del primer fotograma porque describirían solo una parte de la pila; la referencia original se conserva sin recodificar.
+No excede las exposiciones admitidas por la lente ni añade luz que el sensor no haya registrado. No incluye horquillado HDR, modelos neuronales de Google, superresolución, astrofotografía, retrato o Live Photos. RAW/DNG depende de la capacidad real de la lente y sigue pendiente de prueba física. El resultado fusionado no copia los metadatos EXIF de exposición de la referencia porque describirían solo una parte de la pila.
 
 El motor usa APIs públicas. La distribución actual es un `.deb` para jailbreak rootless convencional con arquitectura Debian `iphoneos-arm64` y raíz `/var/jb`. Instala una app independiente; no inyecta hooks ni modifica Cámara de Apple. No solicita acceso a toda la fototeca ni añade entitlements privilegiados. El código no realiza solicitudes de red. Este paquete no es una variante específica para RootHide.
 
@@ -72,6 +79,14 @@ En Sileo u otro gestor compatible, abre el `.deb` y confirma su instalación. Ta
 
 La ruta es `/var/jb/Applications/UltimateCAM.app`. Para quitarla usa el gestor de paquetes o `sudo dpkg -r com.gokuencinar.ultimatecam`. El script de retirada desregistra únicamente Ultimate CAM. La desinstalación no borra las fotografías guardadas en Fotos.
 
+## Diagnóstico por SSH
+
+La app guarda un registro rotativo de hasta unos 128 KiB en su directorio de caché, `UltimateCAM-capture.jsonl`. Registra estado de sesión, identificadores de solicitud, callbacks, errores y número de bytes recibidos; no incluye imágenes ni EXIF. Es local y no se transmite por red.
+
+El artefacto independiente `Ultimate-CAM-diagnostics-N` contiene `UltimateCAM-device-state`, una utilidad de solo lectura que consulta estados de notificación y busca únicamente el proceso UltimateCAM. No envía notificaciones a SpringBoard ni modifica el bloqueo. Los nombres de estado son señales de diagnóstico del sistema, no una garantía de compatibilidad futura.
+
+Para una prueba de captura sin tocar los controles de la app, esta debe estar abierta en primer plano y con permiso de Cámara. En su caché se puede escribir `UltimateCAM-request.json` con `{"action":"capture","mode":"normal"}` o `{"action":"capture","mode":"stack"}` y enviar `SIGUSR1` al PID exacto de UltimateCAM. El segundo modo prueba la pila de tres por defecto. Una señal sin solicitud local válida no toma fotos. La app consume la solicitud y comprueba su estado de primer plano antes de ejecutarla; si no está activa la ignora. No guarda automáticamente el resultado en Fotos.
+
 ## Primera comprobación en el iPhone
 
 1. Probar permisos concedidos y denegados, abrir y cerrar la app, pasar a segundo plano y cambiar entre las cuatro cámaras.
@@ -81,12 +96,13 @@ La ruta es `/var/jb/Applications/UltimateCAM.app`. Para quitarla usa el gestor d
 5. Comparar por separado con Cámara de Apple, manteniendo escena, lente y encuadre. La referencia de UltimateCAM no es una captura independiente del procesamiento de Apple.
 6. Probar una persona moviéndose para documentar los límites. No considerar esa prueba superada si aparecen dobles contornos.
 7. Medir duración, memoria, temperatura y estabilidad durante varias capturas. No hay medidas reales todavía.
+8. Validar por lente RAW/DNG, controles manuales y pilas largas. Su compilación o disponibilidad anunciada por la API no demuestra que esos escenarios funcionen en el dispositivo.
 
 ## Siguientes etapas
 
 Primero comprobar el build y las pruebas sintéticas de la versión exacta que se vaya a instalar. Después validar permisos, captura, cambio de lentes y calidad en el iPhone.
 
-Con esa base medida: añadir control ISO/obturación y exposición larga dentro de los límites de cada lente; captura RAW en las cámaras que realmente la expongan; selección de fotograma de referencia, alineación local, rechazo de zonas móviles y fusión sensible al ruido. Después, horquillado y mapeo tonal para un modo HDR propio. La astrofotografía y la superresolución deben ser módulos posteriores, con pruebas separadas.
+Con esa base medida: pasar de exportar RAW a una fusión RAW real, añadir alineación local y un modelo de ruido por sensor. Después, horquillado y mapeo tonal para un modo HDR propio. La astrofotografía y la superresolución deben ser módulos posteriores, con pruebas separadas. No llamar Night Sight o HDR+ a los controles de sombras o al promedio JPEG.
 
 ## Referencias
 
@@ -95,5 +111,6 @@ Con esa base medida: añadir control ISO/obturación y exposición larga dentro 
 - [HDR+ with Bracketing on Pixel Phones](https://research.google/blog/hdr-with-bracketing-on-pixel-phones/).
 - [Apple: captura por horquillado](https://developer.apple.com/documentation/avfoundation/avcapturephotobracketsettings).
 - [Apple: alineación por traslación](https://developer.apple.com/documentation/vision/vntranslationalimageregistrationrequest).
+- [Apple: exposición manual y prioridad de captura](https://developer.apple.com/documentation/avfoundation/avcapturedevice/setexposuremodecustom(duration:iso:completionhandler:)).
 
 Las publicaciones describen técnicas y no convierten el código de este prototipo en una implementación equivalente ni autorizan a redistribuir binarios de terceros.
