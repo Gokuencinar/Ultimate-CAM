@@ -37,6 +37,8 @@ final class CameraModel: NSObject, ObservableObject, AVCapturePhotoCaptureDelega
     @Published private(set) var resultDetails = ""
     @Published private(set) var supportsRAW = false
     @Published private(set) var supportsManualExposure = false
+    @Published private(set) var supportsManualFocus = false
+    @Published private(set) var maximumZoom: Double = 1
     @Published private(set) var isoRange: ClosedRange<Double> = 25...3200
     @Published private(set) var shutterRange: ClosedRange<Double> = (1.0 / 8000)...0.33
     let lenses = CameraLens.allCases.filter { $0.device != nil }
@@ -185,11 +187,15 @@ final class CameraModel: NSObject, ObservableObject, AVCapturePhotoCaptureDelega
         let shutterLimits = max(1.0 / 100000, device.activeFormat.minExposureDuration.seconds)...max(1.0 / 100000, device.activeFormat.maxExposureDuration.seconds)
         let rawAvailable = !output.availableRawPhotoPixelFormatTypes.isEmpty
         let manualAvailable = device.isExposureModeSupported(.custom)
+        let focusAvailable = device.isLockingFocusWithCustomLensPositionSupported
+        let zoom = max(1, min(8, Double(device.activeFormat.videoMaxZoomFactor)))
         publish {
             self.isoRange = isoLimits
             self.shutterRange = shutterLimits
             self.supportsRAW = rawAvailable
             self.supportsManualExposure = manualAvailable
+            self.supportsManualFocus = focusAvailable
+            self.maximumZoom = zoom
         }
         output.maxPhotoQualityPrioritization = .quality
         if let dimensions = device.activeFormat.supportedMaxPhotoDimensions.max(by: {
@@ -231,6 +237,50 @@ final class CameraModel: NSObject, ObservableObject, AVCapturePhotoCaptureDelega
                 } else if iso == nil, device.isExposureModeSupported(.continuousAutoExposure) {
                     device.exposureMode = .continuousAutoExposure
                 }
+            } catch { self.message(error.localizedDescription) }
+        }
+    }
+
+    func setFocus(_ position: Double?) {
+        queue.async {
+            guard !self.inFlight, let device = self.input?.device else { return }
+            do {
+                try device.lockForConfiguration()
+                defer { device.unlockForConfiguration() }
+                if let position, device.isLockingFocusWithCustomLensPositionSupported {
+                    device.setFocusModeLocked(lensPosition: Float(min(1, max(0, position))), completionHandler: nil)
+                } else if position == nil, device.isFocusModeSupported(.continuousAutoFocus) {
+                    device.focusMode = .continuousAutoFocus
+                }
+            } catch { self.message(error.localizedDescription) }
+        }
+    }
+
+    func focus(at point: CGPoint) {
+        queue.async {
+            guard !self.inFlight, let device = self.input?.device else { return }
+            do {
+                try device.lockForConfiguration()
+                defer { device.unlockForConfiguration() }
+                if device.isFocusPointOfInterestSupported && device.isFocusModeSupported(.autoFocus) {
+                    device.focusPointOfInterest = point
+                    device.focusMode = .autoFocus
+                }
+                if device.exposureMode != .custom && device.isExposurePointOfInterestSupported && device.isExposureModeSupported(.continuousAutoExposure) {
+                    device.exposurePointOfInterest = point
+                    device.exposureMode = .continuousAutoExposure
+                }
+            } catch { self.message(error.localizedDescription) }
+        }
+    }
+
+    func setZoom(_ zoom: Double) {
+        queue.async {
+            guard !self.inFlight, let device = self.input?.device else { return }
+            do {
+                try device.lockForConfiguration()
+                defer { device.unlockForConfiguration() }
+                device.videoZoomFactor = min(device.maxAvailableVideoZoomFactor, max(device.minAvailableVideoZoomFactor, CGFloat(zoom)))
             } catch { self.message(error.localizedDescription) }
         }
     }

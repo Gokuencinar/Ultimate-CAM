@@ -15,10 +15,21 @@ private final class PreviewSurface: UIView {
 
 private struct CameraPreview: UIViewRepresentable {
     let session: AVCaptureSession
+    let focus: (CGPoint) -> Void
+    final class Coordinator: NSObject {
+        let focus: (CGPoint) -> Void
+        init(focus: @escaping (CGPoint) -> Void) { self.focus = focus }
+        @objc func tap(_ gesture: UITapGestureRecognizer) {
+            guard let view = gesture.view as? PreviewSurface else { return }
+            focus(view.previewLayer.captureDevicePointConverted(fromLayerPoint: gesture.location(in: view)))
+        }
+    }
+    func makeCoordinator() -> Coordinator { Coordinator(focus: focus) }
     func makeUIView(context: Context) -> PreviewSurface {
         let view = PreviewSurface()
         view.previewLayer.session = session
         view.previewLayer.videoGravity = .resizeAspectFill
+        view.addGestureRecognizer(UITapGestureRecognizer(target: context.coordinator, action: #selector(Coordinator.tap(_:))))
         return view
     }
     func updateUIView(_ view: PreviewSurface, context: Context) {}
@@ -61,12 +72,18 @@ struct CameraView: View {
     @State private var timerSeconds = 0
     @State private var countdown = 0
     @State private var countdownTask: Task<Void, Never>?
+    @State private var manualFocus = false
+    @State private var focusPosition: Double = 0.5
+    @State private var zoom: Double = 1
 
     var body: some View {
         ZStack {
             Color.black.ignoresSafeArea()
             GeometryReader { geometry in
-                CameraPreview(session: camera.session)
+                CameraPreview(session: camera.session) { point in
+                    guard !manualFocus, countdown == 0 else { return }
+                    camera.focus(at: point)
+                }
                     .frame(width: geometry.size.width, height: geometry.size.height).clipped()
                 if grid { ViewfinderGrid() }
             }.ignoresSafeArea()
@@ -153,6 +170,20 @@ struct CameraView: View {
                     Slider(value: $shutterStops, in: log2(camera.shutterRange.lowerBound)...log2(camera.shutterRange.upperBound))
                         .onChange(of: shutterStops) { _, _ in applyExposure(enabled: true) }
                 }
+            }
+            if camera.supportsManualFocus {
+                Toggle("Enfoque manual", isOn: $manualFocus)
+                    .onChange(of: manualFocus) { _, enabled in camera.setFocus(enabled ? focusPosition : nil) }
+                if manualFocus {
+                    Slider(value: $focusPosition, in: 0...1)
+                        .onChange(of: focusPosition) { _, value in camera.setFocus(value) }
+                    Text("Cerca ← enfoque → lejos").font(.caption)
+                }
+            }
+            if camera.maximumZoom > 1 {
+                Text("Zoom digital: \(zoom, specifier: "%.1f")×").font(.caption)
+                Slider(value: $zoom, in: 1...camera.maximumZoom)
+                    .onChange(of: zoom) { _, value in camera.setZoom(value) }
             }
             HStack {
                 Label("EXPOSICIÓN", systemImage: "plusminus.circle")
@@ -285,6 +316,8 @@ struct CameraView: View {
         manualWB = false
         manualExposure = false
         rawEnabled = false
+        manualFocus = false
+        zoom = 1
         camera.switchLens(next)
     }
 
