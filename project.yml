@@ -12,6 +12,8 @@ targets:
       path: Info.plist
       properties:
         CFBundleDisplayName: Ultimate CAM
+        CFBundleShortVersionString: $(MARKETING_VERSION)
+        CFBundleVersion: $(CURRENT_PROJECT_VERSION)
         UILaunchScreen: {}
         UISupportedInterfaceOrientations: [UIInterfaceOrientationPortrait]
         NSCameraUsageDescription: UltimateCAM necesita la cámara para tomar fotografías.
@@ -19,7 +21,7 @@ targets:
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.gokuencinar.ultimatecam
-        MARKETING_VERSION: '0.1.0'
+        MARKETING_VERSION: '0.2.0'
         CURRENT_PROJECT_VERSION: '1'
         SWIFT_VERSION: '5.0'
         TARGETED_DEVICE_FAMILY: '1'

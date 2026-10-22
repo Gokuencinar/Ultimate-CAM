@@ -267,7 +267,7 @@ struct CameraView: View {
                 .overlay(Circle().stroke(.white.opacity(0.35), lineWidth: 1))
             }
             .accessibilityLabel("Revisar última captura")
-            .disabled(camera.preview == nil || camera.busy)
+            .disabled(camera.preview == nil || camera.busy || countdown > 0)
             Spacer()
             Button { takePhoto() } label: {
                 ZStack {
