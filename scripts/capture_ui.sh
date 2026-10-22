@@ -11,12 +11,12 @@ xcrun simctl boot "$device"
 xcrun simctl bootstatus "$device" -b
 xcrun simctl status_bar "$device" override --time '9:41' --batteryState charged --batteryLevel 100
 xcrun simctl install "$device" build/Simulator/Build/Products/Debug-iphonesimulator/UltimateCAM.app
-xcrun simctl privacy "$device" grant camera local.ultimatecam.camera
-xcrun simctl launch "$device" local.ultimatecam.camera
+xcrun simctl privacy "$device" grant camera com.gokuencinar.ultimatecam
+xcrun simctl launch "$device" com.gokuencinar.ultimatecam
 sleep 3
 xcrun simctl io "$device" screenshot build/ui/Ultimate-CAM-photo.png
-xcrun simctl terminate "$device" local.ultimatecam.camera
-xcrun simctl launch "$device" local.ultimatecam.camera -show-controls -stack-mode
+xcrun simctl terminate "$device" com.gokuencinar.ultimatecam
+xcrun simctl launch "$device" com.gokuencinar.ultimatecam -show-controls -stack-mode
 sleep 2
 xcrun simctl io "$device" screenshot build/ui/Ultimate-CAM-controls.png
 printf '%s\n' 'Simulator UI only; no camera capture or photo quality validation.' > build/ui/README.txt

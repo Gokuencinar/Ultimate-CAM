@@ -4,6 +4,11 @@ on:
   push:
     branches: [main]
   workflow_dispatch:
+    inputs:
+      ui_preview:
+        description: Generate simulator screenshots
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -27,6 +32,11 @@ jobs:
             brew install xcodegen
           fi
           xcodegen --version
+          for tool in ldid dpkg-deb; do
+            if ! command -v "$tool" >/dev/null 2>&1; then
+              if [ "$tool" = dpkg-deb ]; then brew install dpkg; else brew install ldid; fi
+            fi
+          done
           xcodegen generate
       - name: Build for iPhone without signing
         run: |
@@ -43,33 +53,24 @@ jobs:
           set -euo pipefail
           xcrun --sdk macosx swiftc -O Sources/BurstProcessor.swift Tests/ProcessorChecks.swift -o build/processor-checks
           build/processor-checks 2>&1 | tee build/processor-checks.log
-      - name: Package unsigned IPA
-        run: |
-          set -euo pipefail
-          mkdir -p build/package/Payload
-          ditto build/DerivedData/Build/Products/Release-iphoneos/UltimateCAM.app build/package/Payload/UltimateCAM.app
-          /usr/libexec/PlistBuddy -c 'Print CFBundleIdentifier' build/package/Payload/UltimateCAM.app/Info.plist
-          file build/package/Payload/UltimateCAM.app/UltimateCAM
-          cd build/package
-          ditto -c -k --sequesterRsrc --keepParent Payload ../Ultimate-CAM-unsigned.ipa
-          cd ..
-          shasum -a 256 Ultimate-CAM-unsigned.ipa > SHA256SUMS.txt
-          printf 'Commit: %s\nFirma: sin firmar\n' "$GITHUB_SHA" > BUILD.txt
-      - name: Upload IPA and checksum
+      - name: Package rootless DEB
+        run: bash scripts/package_deb.sh
+      - name: Upload DEB and checksum
         uses: actions/upload-artifact@v4
         with:
-          name: Ultimate-CAM-unsigned-${{ github.run_number }}
+          name: Ultimate-CAM-rootless-${{ github.run_number }}
           path: |
-            build/Ultimate-CAM-unsigned.ipa
+            build/*.deb
             build/SHA256SUMS.txt
             build/BUILD.txt
           if-no-files-found: error
           retention-days: 14
       - name: Capture interface on iPhone 11 Pro simulator
+        if: github.event_name == 'workflow_dispatch' && inputs.ui_preview
         timeout-minutes: 8
         run: bash scripts/capture_ui.sh
       - name: Upload interface previews
-        if: always()
+        if: always() && github.event_name == 'workflow_dispatch' && inputs.ui_preview
         uses: actions/upload-artifact@v4
         with:
           name: Ultimate-CAM-interface-${{ github.run_number }}
