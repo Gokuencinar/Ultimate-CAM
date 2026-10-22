@@ -6,7 +6,18 @@ trap 'rm -rf "$stage"' EXIT
 bundle="$stage/var/jb/Applications/UltimateCAM.app"
 mkdir -p "$stage/DEBIAN" "$(dirname "$bundle")" build
 ditto "$app" "$bundle"
-ldid -S "$bundle/UltimateCAM"
+# Bind this ad-hoc app to its own data container. Without this, platform trust
+# can deny even its own cache (observed NSCocoaErrorDomain 513 on the device).
+# The string form is used by TrollStore for platform-trusted app containers:
+# https://github.com/opa334/TrollStore/blob/main/RootHelper/main.m
+ldid -Sscripts/app-entitlements.plist "$bundle/UltimateCAM"
+ldid -e "$bundle/UltimateCAM" > build/app-entitlements.xml
+python3 - <<'PY'
+import pathlib, plistlib
+actual = plistlib.loads(pathlib.Path('build/app-entitlements.xml').read_bytes())
+expected = plistlib.loads(pathlib.Path('scripts/app-entitlements.plist').read_bytes())
+assert actual == expected, 'Signed app entitlements differ from the declared container binding'
+PY
 codesign -d --verbose=2 "$bundle/UltimateCAM" 2>&1
 commit=$(git rev-parse HEAD)
 build_number=${GITHUB_RUN_NUMBER:-$(git rev-list --count HEAD)}
