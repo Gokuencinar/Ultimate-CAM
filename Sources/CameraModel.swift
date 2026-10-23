@@ -25,6 +25,15 @@ enum CameraLens: String, CaseIterable, Identifiable {
     }
 }
 
+enum CameraFlash: String, CaseIterable, Identifiable {
+    case off, auto, on
+    var id: String { rawValue }
+    var label: String { self == .off ? "OFF" : (self == .auto ? "AUTO" : "ON") }
+    var mode: AVCaptureDevice.FlashMode {
+        switch self { case .off: return .off; case .auto: return .auto; case .on: return .on }
+    }
+}
+
 /// All AVFoundation session mutations and capture state belong to `queue`.
 /// Published UI values are changed only on the main queue.
 final class CameraModel: NSObject, ObservableObject, AVCapturePhotoCaptureDelegate {
@@ -35,6 +44,7 @@ final class CameraModel: NSObject, ObservableObject, AVCapturePhotoCaptureDelega
     @Published private(set) var preview: UIImage?
     @Published private(set) var referencePreview: UIImage?
     @Published private(set) var resultDetails = ""
+    @Published private(set) var supportsFlash = false
     @Published private(set) var supportsRAW = false
     @Published private(set) var supportsManualExposure = false
     @Published private(set) var supportsManualFocus = false
@@ -72,6 +82,7 @@ final class CameraModel: NSObject, ObservableObject, AVCapturePhotoCaptureDelega
     private var captureStage = "idle"
     private var diagnosticBridge: DiagnosticBridge?
     private var processingOptions = ProcessingOptions()
+    private var requestedFlash = CameraFlash.off
     private var rawRequested = false
     private var rawData: Data?
     private var captureRecoveryRequired = false
@@ -81,7 +92,7 @@ final class CameraModel: NSObject, ObservableObject, AVCapturePhotoCaptureDelega
     override init() {
         super.init()
         diagnosticBridge = DiagnosticBridge(capture: { [weak self] request in
-            self?.capture(stack: request.stack, count: request.count, raw: request.raw, options: request.options)
+            self?.capture(stack: request.stack, count: request.count, raw: request.raw, flash: request.flash, options: request.options)
         }, command: { [weak self] object in self?.diagnosticCommand(object) })
         CaptureTrace.record("model.init", [
             "processingDelegate": responds(to: NSSelectorFromString("captureOutput:didFinishProcessingPhoto:error:")),
@@ -240,6 +251,7 @@ final class CameraModel: NSObject, ObservableObject, AVCapturePhotoCaptureDelega
             self.isoRange = isoLimits
             self.shutterRange = shutterLimits
             self.supportsRAW = rawAvailable
+            self.supportsFlash = device.hasFlash && self.output.supportedFlashModes.contains(.on)
             self.supportsManualExposure = manualAvailable
             self.supportsManualFocus = focusAvailable
             self.supportsManualWB = device.isLockingWhiteBalanceWithCustomDeviceGainsSupported
@@ -251,7 +263,8 @@ final class CameraModel: NSObject, ObservableObject, AVCapturePhotoCaptureDelega
         CaptureTrace.record("lens.ready", ["lens": lens.rawValue, "raw": rawAvailable,
             "manualExposure": manualAvailable, "manualFocus": focusAvailable,
             "tapFocus": device.isFocusPointOfInterestSupported,
-            "manualWB": device.isLockingWhiteBalanceWithCustomDeviceGainsSupported])
+            "manualWB": device.isLockingWhiteBalanceWithCustomDeviceGainsSupported,
+            "flash": device.hasFlash && output.supportedFlashModes.contains(.on)])
     }
 
     func setBias(_ bias: Float) {
@@ -429,7 +442,7 @@ final class CameraModel: NSObject, ObservableObject, AVCapturePhotoCaptureDelega
         }
     }
 
-    func capture(stack: Bool, count: Int = 3, raw: Bool = false, options: ProcessingOptions = ProcessingOptions()) {
+    func capture(stack: Bool, count: Int = 3, raw: Bool = false, flash: CameraFlash = .off, options: ProcessingOptions = ProcessingOptions()) {
         queue.async {
             guard self.active, self.session.isRunning, !self.interrupted, !self.inFlight, !self.captureRecoveryRequired,
                   let device = self.input?.device else { return }
@@ -438,6 +451,13 @@ final class CameraModel: NSObject, ObservableObject, AVCapturePhotoCaptureDelega
                 CaptureTrace.record("capture.rejected", ["reason": "RAW unavailable in this configuration"])
                 return
             }
+            guard flash == .off || (!stack && !raw && device.hasFlash && device.isFlashAvailable &&
+                  self.output.supportedFlashModes.contains(flash.mode)) else {
+                self.message("El flash no está disponible. Usa Foto JPEG y una cámara con flash preparado.")
+                CaptureTrace.record("capture.rejected", ["reason": "flash unavailable in this configuration"])
+                return
+            }
+            self.requestedFlash = flash
             self.inFlight = true
             self.transaction = UUID()
             self.frames = []
@@ -494,6 +514,7 @@ final class CameraModel: NSObject, ObservableObject, AVCapturePhotoCaptureDelega
         } else {
             settings = AVCapturePhotoSettings(format: [AVVideoCodecKey: AVVideoCodecType.jpeg])
         }
+        settings.flashMode = requestedFlash.mode
         settings.maxPhotoDimensions = output.maxPhotoDimensions
         // Use one sensor exposure per request; our own burst performs the merge.
         // This also honors custom/locked ISO and shutter settings, per Apple's API contract.
@@ -504,7 +525,7 @@ final class CameraModel: NSObject, ObservableObject, AVCapturePhotoCaptureDelega
             "running": session.isRunning, "enabled": connection.isEnabled,
             "active": connection.isActive, "quality": settings.photoQualityPrioritization.rawValue,
             "width": settings.maxPhotoDimensions.width, "height": settings.maxPhotoDimensions.height,
-            "count": desiredCount, "raw": rawRequested])
+            "count": desiredCount, "raw": rawRequested, "flash": requestedFlash.rawValue])
         captureID = identifier
         expectedFrameCount = frames.count + 1
         output.capturePhoto(with: settings, delegate: self)
@@ -520,7 +541,8 @@ final class CameraModel: NSObject, ObservableObject, AVCapturePhotoCaptureDelega
 
     func photoOutput(_ output: AVCapturePhotoOutput, didFinishProcessingPhoto photo: AVCapturePhoto, error: Error?) {
         CaptureTrace.record("delegate.processing.enter", ["id": photo.resolvedSettings.uniqueID,
-            "raw": photo.isRawPhoto, "error": error?.localizedDescription ?? "none"])
+            "raw": photo.isRawPhoto, "flashEnabled": photo.resolvedSettings.isFlashEnabled,
+            "error": error?.localizedDescription ?? "none"])
         // didFinishCapture follows processing; enqueue both on the same serial queue.
         let data = photo.fileDataRepresentation()
         let identifier = photo.resolvedSettings.uniqueID
@@ -712,7 +734,10 @@ final class CameraModel: NSObject, ObservableObject, AVCapturePhotoCaptureDelega
                 else if let value = number("value", 0...1) { setFocus(value) }
             case "whiteBalance":
                 if object["value"] == "auto" { setWhiteBalance(nil) }
-                else if let value = number("value", 2500...8000) { setWhiteBalance(Float(value)) }
+                else if let value = number("value", 2500...8000) {
+                    if object["tint"] == nil { setWhiteBalance(Float(value)) }
+                    else if let tint = number("tint", -100...100) { setWhiteBalance(Float(value), tint: Float(tint)) }
+                }
             case "exposure":
                 if object["iso"] == "auto" { setManualExposure(iso: nil) }
                 else if let iso = number("iso", 1...100000), let seconds = number("seconds", 0.000001...10) { setManualExposure(iso: iso, seconds: seconds) }
@@ -728,6 +753,9 @@ final class CameraModel: NSObject, ObservableObject, AVCapturePhotoCaptureDelega
                     "seconds": device.exposureDuration.seconds, "exposureMode": device.exposureMode.rawValue,
                     "bias": device.exposureTargetBias, "zoom": device.videoZoomFactor,
                     "whiteBalanceMode": device.whiteBalanceMode.rawValue,
+                    "redGain": device.deviceWhiteBalanceGains.redGain, "greenGain": device.deviceWhiteBalanceGains.greenGain,
+                    "blueGain": device.deviceWhiteBalanceGains.blueGain,
+                    "flashAvailable": device.hasFlash && device.isFlashAvailable,
                     "running": self.session.isRunning, "busy": self.inFlight])
             }
         default: break

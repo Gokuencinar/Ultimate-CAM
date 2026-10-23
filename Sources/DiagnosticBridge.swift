@@ -6,20 +6,23 @@ struct DiagnosticCaptureRequest {
     let stack: Bool
     let count: Int
     let raw: Bool
+    let flash: CameraFlash
     let adjustments: Bool
 
     init?(_ object: [String: String]) {
-        guard Set(object.keys).isSubset(of: ["action", "mode", "count", "raw", "adjustments"]),
+        guard Set(object.keys).isSubset(of: ["action", "mode", "count", "raw", "adjustments", "flash"]),
               object["action"] == "capture",
               ["normal", "stack"].contains(object["mode"] ?? "normal"),
               ["true", "false"].contains(object["raw"] ?? "false"),
               ["true", "false"].contains(object["adjustments"] ?? "false"),
+              let flash = CameraFlash(rawValue: object["flash"] ?? "off"),
               let count = Int(object["count"] ?? "3"), [3, 5, 7, 9].contains(count) else { return nil }
         stack = object["mode"] == "stack"
         self.count = count
         raw = object["raw"] == "true"
         adjustments = object["adjustments"] == "true"
-        guard !(stack && raw) else { return nil }
+        self.flash = flash
+        guard !(stack && raw), flash == .off || (!stack && !raw) else { return nil }
     }
 
     var options: ProcessingOptions {

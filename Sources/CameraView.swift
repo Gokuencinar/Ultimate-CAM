@@ -39,6 +39,7 @@ struct CameraView: View {
     @State private var includeReference = false
     @State private var stackCount = 3
     @State private var rawEnabled = false
+    @State private var flash = CameraFlash.off
     @State private var manualExposure = false
     @State private var iso: Double = 100
     @State private var shutterStops = log2(1.0 / 60)
@@ -101,7 +102,8 @@ struct CameraView: View {
             if next != .front { lastBackLens = next }
         }
         .onChange(of: bias) { _, value in camera.setBias(Float(value)) }
-        .onChange(of: stack) { _, value in if value { rawEnabled = false } }
+        .onChange(of: stack) { _, value in if value { rawEnabled = false; flash = .off } }
+        .onChange(of: rawEnabled) { _, value in if value { flash = .off } }
         .sheet(isPresented: $showControls) { settings }
         .sheet(isPresented: $showResult) { review }
     }
@@ -143,6 +145,18 @@ struct CameraView: View {
             quickButton(rawEnabled ? "RAW+" : "JPEG", symbol: "square.stack.3d.up", selected: rawEnabled) { rawEnabled.toggle() }
                 .disabled(stack || !camera.supportsRAW)
             Spacer()
+            Menu {
+                ForEach(CameraFlash.allCases) { item in
+                    Button("Flash \(item.label)") { flash = item }
+                }
+            } label: {
+                Label(flash.label, systemImage: flash == .off ? "bolt.slash.fill" : "bolt.fill")
+                    .font(.system(size: 11, weight: .bold))
+                    .foregroundStyle(flash == .off ? Color.white : .yellow)
+                    .padding(.horizontal, 10).frame(height: 40)
+                    .background(.black.opacity(0.75), in: Capsule())
+            }.accessibilityLabel("Flash \(flash.label)")
+                .disabled(!controlsEnabled || !camera.supportsFlash || stack || rawEnabled)
             quickButton(timerSeconds == 0 ? "OFF" : "\(timerSeconds)s", symbol: "timer", selected: timerSeconds > 0) {
                 timerSeconds = timerSeconds == 0 ? 3 : (timerSeconds == 3 ? 10 : 0)
             }
@@ -282,6 +296,11 @@ struct CameraView: View {
                 Toggle("RAW + JPEG", isOn: $rawEnabled).disabled(!camera.supportsRAW || stack)
                 if !camera.supportsRAW { Text("RAW no disponible en la cámara actual.").font(.footnote).foregroundStyle(.secondary) }
                 if stack { Text("La pila usa JPEG. RAW se captura en modo Foto.").font(.footnote).foregroundStyle(.secondary) }
+                Picker("Flash", selection: $flash) {
+                    ForEach(CameraFlash.allCases) { item in Text(item.label).tag(item) }
+                }.disabled(!camera.supportsFlash || stack || rawEnabled)
+                Text("El flash se usa en Foto JPEG. RAW y las pilas conservan luz continua sin destellos.")
+                    .font(.footnote).foregroundStyle(.secondary)
                 Picker("Temporizador", selection: $timerSeconds) { Text("Desactivado").tag(0); Text("3 segundos").tag(3); Text("10 segundos").tag(10) }
                 Toggle("Cuadrícula", isOn: $grid)
             }
@@ -380,7 +399,7 @@ struct CameraView: View {
     }
     private func resetUIControls() {
         bias = 0; manualWB = false; manualExposure = false; manualFocus = false
-        rawEnabled = false; tint = 0
+        rawEnabled = false; tint = 0; flash = .off
     }
     private func applyPreset(_ name: String) {
         options.noiseReduction = name == "Luz baja" ? 0.025 : 0
@@ -398,8 +417,9 @@ struct CameraView: View {
         countdownTask?.cancel(); countdownTask = nil; countdown = 0
     }
     private func takePhoto() {
+        let selectedFlash = flash
         let captureStack = stack, count = stackCount, raw = rawEnabled, processing = options
-        if timerSeconds == 0 { camera.capture(stack: captureStack, count: count, raw: raw, options: processing); return }
+        if timerSeconds == 0 { camera.capture(stack: captureStack, count: count, raw: raw, flash: selectedFlash, options: processing); return }
         let delay = timerSeconds
         let id = UUID()
         countdownID = id
@@ -413,7 +433,7 @@ struct CameraView: View {
                 guard countdownID == id else { return }
                 countdown = 0
                 countdownTask = nil
-                camera.capture(stack: captureStack, count: count, raw: raw, options: processing)
+                camera.capture(stack: captureStack, count: count, raw: raw, flash: selectedFlash, options: processing)
             } catch { if countdownID == id { countdown = 0; countdownTask = nil } }
         }
     }
