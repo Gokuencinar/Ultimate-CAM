@@ -21,7 +21,7 @@ targets:
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.gokuencinar.ultimatecam
-        MARKETING_VERSION: '0.2.0'
+        MARKETING_VERSION: '0.3.0'
         CURRENT_PROJECT_VERSION: '1'
         SWIFT_VERSION: '5.0'
         SWIFT_OBJC_BRIDGING_HEADER: Sources/UltimateCAM-Bridging-Header.h
@@ -30,3 +30,23 @@ targets:
         ENABLE_USER_SCRIPT_SANDBOXING: YES
     scheme:
       gatherCoverageData: false
+  UltimateCAMUITests:
+    type: bundle.ui-testing
+    platform: iOS
+    sources: [UITests]
+    dependencies:
+      - target: UltimateCAM
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.gokuencinar.ultimatecam.uitests
+        GENERATE_INFOPLIST_FILE: YES
+        TEST_TARGET_NAME: UltimateCAM
+        SWIFT_VERSION: '5.0'
+schemes:
+  UltimateCAM-UI:
+    build:
+      targets:
+        UltimateCAM: all
+        UltimateCAMUITests: [test]
+    test:
+      targets: [UltimateCAMUITests]

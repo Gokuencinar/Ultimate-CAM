@@ -38,6 +38,14 @@ final class CameraModel: NSObject, ObservableObject, AVCapturePhotoCaptureDelega
     @Published private(set) var supportsRAW = false
     @Published private(set) var supportsManualExposure = false
     @Published private(set) var supportsManualFocus = false
+    @Published private(set) var supportsManualWB = false
+    @Published private(set) var selectedLens = CameraLens.wide
+    @Published private(set) var focusStatus = "Toca el visor para enfocar"
+    @Published private(set) var isFocusLocked = false
+    @Published private(set) var hasRAWResult = false
+    @Published private(set) var hasSeparateReference = false
+    @Published private(set) var savedResult = false
+    @Published private(set) var savedJPEGOnly = false
     @Published private(set) var maximumZoom: Double = 1
     @Published private(set) var isoRange: ClosedRange<Double> = 25...3200
     @Published private(set) var shutterRange: ClosedRange<Double> = (1.0 / 8000)...0.33
@@ -66,12 +74,14 @@ final class CameraModel: NSObject, ObservableObject, AVCapturePhotoCaptureDelega
     private var rawRequested = false
     private var rawData: Data?
     private var captureRecoveryRequired = false
+    private var focusToken = UUID()
+    private var savedKinds = Set<String>()
 
     override init() {
         super.init()
-        diagnosticBridge = DiagnosticBridge { [weak self] request in
+        diagnosticBridge = DiagnosticBridge(capture: { [weak self] request in
             self?.capture(stack: request.stack, count: request.count, raw: request.raw, options: request.options)
-        }
+        }, command: { [weak self] object in self?.diagnosticCommand(object) })
         CaptureTrace.record("model.init", [
             "processingDelegate": responds(to: NSSelectorFromString("captureOutput:didFinishProcessingPhoto:error:")),
             "completionDelegate": responds(to: NSSelectorFromString("captureOutput:didFinishCaptureForResolvedSettings:error:"))
@@ -126,6 +136,7 @@ final class CameraModel: NSObject, ObservableObject, AVCapturePhotoCaptureDelega
     func stop() {
         queue.async {
             self.active = false
+            self.focusToken = UUID()
             self.publish { self.ready = false }
             if self.session.isRunning { self.session.stopRunning() }
         }
@@ -164,12 +175,16 @@ final class CameraModel: NSObject, ObservableObject, AVCapturePhotoCaptureDelega
     func switchLens(_ lens: CameraLens) {
         queue.async {
             guard !self.inFlight, self.configured else { return }
+            self.publish { self.ready = false }
             do {
                 try self.configure(lens)
                 let rawAvailable = !self.output.availableRawPhotoPixelFormatTypes.isEmpty
-                self.publish { self.supportsRAW = rawAvailable }
-                self.message("\(lens.label) · RAW disponible: \(self.output.availableRawPhotoPixelFormatTypes.isEmpty ? "no" : "sí"). Captura actual: JPEG.")
-            } catch { self.message(error.localizedDescription) }
+                self.publish { self.supportsRAW = rawAvailable; self.ready = self.session.isRunning }
+                self.message("Cámara \(lens.label) lista.")
+            } catch {
+                self.publish { self.ready = self.session.isRunning }
+                self.message(error.localizedDescription)
+            }
         }
     }
 
@@ -177,7 +192,8 @@ final class CameraModel: NSObject, ObservableObject, AVCapturePhotoCaptureDelega
         guard let device = lens.device else { throw CameraFailure.message("Cámara no disponible.") }
         let next = try AVCaptureDeviceInput(device: device)
         session.beginConfiguration()
-        defer { session.commitConfiguration() }
+        var committed = false
+        defer { if !committed { session.commitConfiguration() } }
         session.sessionPreset = .photo
         let old = input
         if let old { session.removeInput(old) }
@@ -193,18 +209,17 @@ final class CameraModel: NSObject, ObservableObject, AVCapturePhotoCaptureDelega
         }
         let isoLimits = Double(device.activeFormat.minISO)...Double(device.activeFormat.maxISO)
         let shutterLimits = max(1.0 / 100000, device.activeFormat.minExposureDuration.seconds)...max(1.0 / 100000, device.activeFormat.maxExposureDuration.seconds)
-        let rawAvailable = !output.availableRawPhotoPixelFormatTypes.isEmpty
+        focusToken = UUID()
+        try device.lockForConfiguration()
+        if device.isExposureModeSupported(.continuousAutoExposure) { device.exposureMode = .continuousAutoExposure }
+        if device.isFocusModeSupported(.continuousAutoFocus) { device.focusMode = .continuousAutoFocus }
+        if device.isWhiteBalanceModeSupported(.continuousAutoWhiteBalance) { device.whiteBalanceMode = .continuousAutoWhiteBalance }
+        device.videoZoomFactor = max(1, device.minAvailableVideoZoomFactor)
+        device.setExposureTargetBias(0, completionHandler: nil)
+        device.unlockForConfiguration()
         let manualAvailable = device.isExposureModeSupported(.custom)
         let focusAvailable = device.isLockingFocusWithCustomLensPositionSupported
         let zoom = max(1, min(8, Double(device.activeFormat.videoMaxZoomFactor)))
-        publish {
-            self.isoRange = isoLimits
-            self.shutterRange = shutterLimits
-            self.supportsRAW = rawAvailable
-            self.supportsManualExposure = manualAvailable
-            self.supportsManualFocus = focusAvailable
-            self.maximumZoom = zoom
-        }
         output.maxPhotoQualityPrioritization = .quality
         if let dimensions = device.activeFormat.supportedMaxPhotoDimensions.max(by: {
             Int64($0.width) * Int64($0.height) < Int64($1.width) * Int64($1.height)
@@ -216,6 +231,25 @@ final class CameraModel: NSObject, ObservableObject, AVCapturePhotoCaptureDelega
                 connection.isVideoMirrored = false
             }
         }
+        session.commitConfiguration()
+        committed = true
+        let rawAvailable = !output.availableRawPhotoPixelFormatTypes.isEmpty
+        publish {
+            self.selectedLens = lens
+            self.isoRange = isoLimits
+            self.shutterRange = shutterLimits
+            self.supportsRAW = rawAvailable
+            self.supportsManualExposure = manualAvailable
+            self.supportsManualFocus = focusAvailable
+            self.supportsManualWB = device.isLockingWhiteBalanceWithCustomDeviceGainsSupported
+            self.maximumZoom = zoom
+            self.isFocusLocked = false
+            self.focusStatus = device.isFocusPointOfInterestSupported ? "Toca para enfocar · mantén para bloquear" : "Lente de enfoque fijo · toca para medir la luz"
+        }
+        CaptureTrace.record("lens.ready", ["lens": lens.rawValue, "raw": rawAvailable,
+            "manualExposure": manualAvailable, "manualFocus": focusAvailable,
+            "tapFocus": device.isFocusPointOfInterestSupported,
+            "manualWB": device.isLockingWhiteBalanceWithCustomDeviceGainsSupported])
     }
 
     func setBias(_ bias: Float) {
@@ -226,6 +260,7 @@ final class CameraModel: NSObject, ObservableObject, AVCapturePhotoCaptureDelega
                 defer { device.unlockForConfiguration() }
                 device.setExposureTargetBias(min(device.maxExposureTargetBias,
                     max(device.minExposureTargetBias, bias)), completionHandler: nil)
+                CaptureTrace.record("control.bias", ["requested": bias, "applied": device.exposureTargetBias])
             } catch { self.message(error.localizedDescription) }
         }
     }
@@ -241,9 +276,12 @@ final class CameraModel: NSObject, ObservableObject, AVCapturePhotoCaptureDelega
                     let duration = min(device.activeFormat.maxExposureDuration.seconds,
                                        max(device.activeFormat.minExposureDuration.seconds, seconds))
                     device.setExposureModeCustom(duration: CMTime(seconds: duration, preferredTimescale: 1_000_000),
-                                                 iso: clampedISO, completionHandler: nil)
+                                                 iso: clampedISO) { _ in
+                        CaptureTrace.record("control.exposure", ["iso": device.iso, "seconds": device.exposureDuration.seconds, "custom": true])
+                    }
                 } else if iso == nil, device.isExposureModeSupported(.continuousAutoExposure) {
                     device.exposureMode = .continuousAutoExposure
+                    CaptureTrace.record("control.exposure", ["custom": false])
                 }
             } catch { self.message(error.localizedDescription) }
         }
@@ -253,20 +291,29 @@ final class CameraModel: NSObject, ObservableObject, AVCapturePhotoCaptureDelega
         queue.async {
             guard !self.inFlight, let device = self.input?.device else { return }
             do {
+                self.focusToken = UUID()
                 try device.lockForConfiguration()
                 defer { device.unlockForConfiguration() }
                 if let position, device.isLockingFocusWithCustomLensPositionSupported {
-                    device.setFocusModeLocked(lensPosition: Float(min(1, max(0, position))), completionHandler: nil)
+                    device.setFocusModeLocked(lensPosition: Float(min(1, max(0, position)))) { _ in
+                        CaptureTrace.record("control.focus", ["manual": true, "position": device.lensPosition])
+                    }
+                    self.publish { self.focusStatus = "Enfoque manual"; self.isFocusLocked = false }
                 } else if position == nil, device.isFocusModeSupported(.continuousAutoFocus) {
                     device.focusMode = .continuousAutoFocus
+                    self.publish { self.focusStatus = "Enfoque automático"; self.isFocusLocked = false }
+                    CaptureTrace.record("control.focus", ["manual": false])
                 }
             } catch { self.message(error.localizedDescription) }
         }
     }
 
-    func focus(at point: CGPoint) {
+    func focus(at point: CGPoint, lock: Bool = false) {
         queue.async {
-            guard !self.inFlight, let device = self.input?.device else { return }
+            guard !self.inFlight, self.active, let device = self.input?.device else { return }
+            let point = CGPoint(x: min(1, max(0, point.x)), y: min(1, max(0, point.y)))
+            let token = UUID()
+            self.focusToken = token
             do {
                 try device.lockForConfiguration()
                 defer { device.unlockForConfiguration() }
@@ -278,8 +325,40 @@ final class CameraModel: NSObject, ObservableObject, AVCapturePhotoCaptureDelega
                     device.exposurePointOfInterest = point
                     device.exposureMode = .continuousAutoExposure
                 }
+                self.publish { self.isFocusLocked = false; self.focusStatus = device.isFocusPointOfInterestSupported ? "Enfocando…" : "Enfoque fijo · ajustando la luz" }
+                CaptureTrace.record("focus.request", ["x": point.x, "y": point.y, "lock": lock,
+                    "supported": device.isFocusPointOfInterestSupported, "lens": self.selectedLens.rawValue])
+                self.queue.asyncAfter(deadline: .now() + 0.2) { self.finishFocus(token, device: device, lock: lock, remaining: 20) }
             } catch { self.message(error.localizedDescription) }
         }
+    }
+
+    private func finishFocus(_ token: UUID, device: AVCaptureDevice, lock: Bool, remaining: Int) {
+        guard token == focusToken, active, input?.device === device, !inFlight else { return }
+        if device.isAdjustingFocus || device.isAdjustingExposure {
+            if remaining > 0 {
+                queue.asyncAfter(deadline: .now() + 0.15) { self.finishFocus(token, device: device, lock: lock, remaining: remaining - 1) }
+            } else {
+                publish { self.focusStatus = "No se ha estabilizado el enfoque. Prueba un borde con más contraste." }
+                CaptureTrace.record("focus.unsettled")
+            }
+            return
+        }
+        do {
+            if lock {
+                try device.lockForConfiguration()
+                if device.isFocusModeSupported(.locked) { device.focusMode = .locked }
+                if device.exposureMode != .custom && device.isExposureModeSupported(.locked) { device.exposureMode = .locked }
+                device.unlockForConfiguration()
+            }
+            publish {
+                self.isFocusLocked = lock
+                self.focusStatus = lock ? "AF / AE bloqueados · toca para liberar" :
+                    (device.isFocusPointOfInterestSupported ? "Enfoque ajustado" : "Enfoque fijo · luz ajustada")
+            }
+            CaptureTrace.record("focus.settled", ["locked": lock, "position": device.lensPosition,
+                "focusMode": device.focusMode.rawValue, "exposureMode": device.exposureMode.rawValue])
+        } catch { message(error.localizedDescription) }
     }
 
     func setZoom(_ zoom: Double) {
@@ -289,6 +368,7 @@ final class CameraModel: NSObject, ObservableObject, AVCapturePhotoCaptureDelega
                 try device.lockForConfiguration()
                 defer { device.unlockForConfiguration() }
                 device.videoZoomFactor = min(device.maxAvailableVideoZoomFactor, max(device.minAvailableVideoZoomFactor, CGFloat(zoom)))
+                CaptureTrace.record("control.zoom", ["requested": zoom, "applied": device.videoZoomFactor])
             } catch { self.message(error.localizedDescription) }
         }
     }
@@ -306,8 +386,10 @@ final class CameraModel: NSObject, ObservableObject, AVCapturePhotoCaptureDelega
                     gains.greenGain = min(device.maxWhiteBalanceGain, max(1, gains.greenGain))
                     gains.blueGain = min(device.maxWhiteBalanceGain, max(1, gains.blueGain))
                     device.setWhiteBalanceModeLocked(with: gains, completionHandler: nil)
+                    CaptureTrace.record("control.whiteBalance", ["manual": true, "temperature": kelvin])
                 } else if kelvin == nil && device.isWhiteBalanceModeSupported(.continuousAutoWhiteBalance) {
                     device.whiteBalanceMode = .continuousAutoWhiteBalance
+                    CaptureTrace.record("control.whiteBalance", ["manual": false])
                 } else { self.message("Esta cámara no admite ese control de balance de blancos.") }
             } catch { self.message(error.localizedDescription) }
         }
@@ -453,10 +535,15 @@ final class CameraModel: NSObject, ObservableObject, AVCapturePhotoCaptureDelega
                             "mergedFrames": result.mergedFrames, "rawBytes": result.raw?.count ?? 0,
                             "details": result.details])
                         self.result = result
+                        self.savedKinds = []
                         self.publish {
                             self.preview = UIImage(data: result.jpeg)
                             self.referencePreview = UIImage(data: result.reference)
                             self.resultDetails = result.details
+                            self.hasRAWResult = result.raw != nil
+                            self.hasSeparateReference = result.jpeg != result.reference
+                            self.savedResult = false
+                            self.savedJPEGOnly = false
                             if result.raw != nil { self.resultDetails += " · Incluye RAW/DNG" }
                             self.busy = false
                             self.status = "Captura preparada. Revisa el resultado antes de guardarlo."
@@ -510,43 +597,101 @@ final class CameraModel: NSObject, ObservableObject, AVCapturePhotoCaptureDelega
         queue.async { if self.captureID == resolvedSettings.uniqueID { self.captureStage = "exposed" } }
     }
 
-    func save() {
+    func save(jpegOnly: Bool = false, includeReference: Bool = false) {
         queue.async {
             guard !self.inFlight, let result = self.result else { return }
+            let kind = jpegOnly ? "jpeg" : "all"
+            guard !self.savedKinds.contains(kind) else {
+                self.message("Esta captura ya está guardada.")
+                CaptureTrace.record("save.duplicateBlocked", ["kind": kind])
+                return
+            }
             self.inFlight = true
             self.publish { self.busy = true }
+            self.message("Guardando en Fotos…")
+            CaptureTrace.record("save.request", ["raw": result.raw != nil && !jpegOnly,
+                "jpegOnly": jpegOnly, "reference": includeReference])
             PHPhotoLibrary.requestAuthorization(for: .addOnly) { authorization in
                 guard authorization == .authorized || authorization == .limited else {
-                    self.queue.async { self.finishFailure(CameraFailure.message("Permite añadir fotos en Ajustes. La captura sigue disponible para reintentar.")) }
-                    return
-                }
-                PHPhotoLibrary.shared().performChanges({
-                    let request = PHAssetCreationRequest.forAsset()
-                    let options = PHAssetResourceCreationOptions()
-                    options.originalFilename = "UltimateCAM-result.jpg"
-                    request.addResource(with: .photo, data: result.jpeg, options: options)
-                    if let raw = result.raw {
-                        let rawOptions = PHAssetResourceCreationOptions()
-                        rawOptions.originalFilename = "UltimateCAM-original.dng"
-                        rawOptions.uniformTypeIdentifier = "com.adobe.raw-image"
-                        request.addResource(with: .alternatePhoto, data: raw, options: rawOptions)
-                    }
-                    if result.jpeg != result.reference {
-                        let reference = PHAssetCreationRequest.forAsset()
-                        let options = PHAssetResourceCreationOptions()
-                        options.originalFilename = "UltimateCAM-reference.jpg"
-                        reference.addResource(with: .photo, data: result.reference, options: options)
-                    }
-                }) { success, error in
                     self.queue.async {
                         self.inFlight = false
-                        self.publish {
-                            self.busy = false
-                            self.status = success ? "Guardado en Fotos." : (error?.localizedDescription ?? "No se pudo guardar.")
+                        self.publish { self.busy = false }
+                        self.message("Permite añadir fotos en Ajustes. La captura sigue disponible para reintentar.")
+                        CaptureTrace.record("save.denied", ["authorization": authorization.rawValue])
+                    }
+                    return
+                }
+                self.processing.async {
+                    PhotoLibraryWriter.save(result, jpegOnly: jpegOnly, includeReference: includeReference) { outcome in
+                        self.queue.async {
+                            self.inFlight = false
+                            self.publish { self.busy = false }
+                            switch outcome {
+                            case .success(let ids):
+                                self.savedKinds.insert(kind)
+                                CaptureTrace.record("save.success", ["assets": ids, "raw": result.raw != nil && !jpegOnly])
+                                self.publish {
+                                    if jpegOnly { self.savedJPEGOnly = true }
+                                    else { self.savedResult = true }
+                                }
+                                self.message(result.raw != nil && !jpegOnly ? "RAW + JPEG guardados en Fotos." : "Foto guardada en Fotos.")
+                            case .failure(let error):
+                                let value = error as NSError
+                                CaptureTrace.record("save.failure", ["domain": value.domain, "code": value.code,
+                                    "description": value.localizedDescription,
+                                    "underlying": (value.userInfo[NSUnderlyingErrorKey] as? NSError)?.description ?? "none"])
+                                self.message("No se pudo guardar (\(value.domain) \(value.code)). La captura sigue disponible. \(result.raw != nil ? "Puedes guardar solo el JPEG." : "")")
+                            }
                         }
                     }
                 }
             }
+        }
+    }
+
+    private func diagnosticCommand(_ object: [String: String]) {
+        func number(_ key: String, _ range: ClosedRange<Double>) -> Double? {
+            guard let text = object[key], let value = Double(text), value.isFinite, range.contains(value) else { return nil }
+            return value
+        }
+        switch object["action"] {
+        case "save":
+            guard ["all", "jpeg"].contains(object["format"] ?? "all") else { return }
+            save(jpegOnly: object["format"] == "jpeg", includeReference: object["reference"] == "true")
+        case "focus":
+            guard let x = number("x", 0...1), let y = number("y", 0...1) else { return }
+            focus(at: CGPoint(x: x, y: y), lock: object["lock"] == "true")
+        case "lens":
+            guard let value = object["lens"], let lens = CameraLens(rawValue: value) else { return }
+            switchLens(lens)
+        case "control":
+            switch object["parameter"] {
+            case "bias": if let value = number("value", -2...2) { setBias(Float(value)) }
+            case "zoom": if let value = number("value", 1...8) { setZoom(value) }
+            case "focus":
+                if object["value"] == "auto" { setFocus(nil) }
+                else if let value = number("value", 0...1) { setFocus(value) }
+            case "whiteBalance":
+                if object["value"] == "auto" { setWhiteBalance(nil) }
+                else if let value = number("value", 2500...8000) { setWhiteBalance(Float(value)) }
+            case "exposure":
+                if object["iso"] == "auto" { setManualExposure(iso: nil) }
+                else if let iso = number("iso", 1...100000), let seconds = number("seconds", 0.000001...10) { setManualExposure(iso: iso, seconds: seconds) }
+            default: break
+            }
+        case "inspect":
+            queue.async {
+                guard let device = self.input?.device else { return }
+                CaptureTrace.record("diagnostic.state", ["raw": !self.output.availableRawPhotoPixelFormatTypes.isEmpty,
+                    "focusPosition": device.lensPosition, "focusMode": device.focusMode.rawValue,
+                    "focusPointX": device.focusPointOfInterest.x, "focusPointY": device.focusPointOfInterest.y,
+                    "adjustingFocus": device.isAdjustingFocus, "iso": device.iso,
+                    "seconds": device.exposureDuration.seconds, "exposureMode": device.exposureMode.rawValue,
+                    "bias": device.exposureTargetBias, "zoom": device.videoZoomFactor,
+                    "whiteBalanceMode": device.whiteBalanceMode.rawValue,
+                    "running": self.session.isRunning, "busy": self.inFlight])
+            }
+        default: break
         }
     }
 }

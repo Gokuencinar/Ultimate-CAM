@@ -37,14 +37,16 @@ struct DiagnosticCaptureRequest {
 /// file plus foreground state and the normal camera authorization are required.
 final class DiagnosticBridge {
     private var source: DispatchSourceSignal?
-    init(capture: @escaping (DiagnosticCaptureRequest) -> Void) {
+    init(capture: @escaping (DiagnosticCaptureRequest) -> Void,
+         command: @escaping ([String: String]) -> Void) {
         signal(SIGUSR1, SIG_IGN)
         let source = DispatchSource.makeSignalSource(signal: SIGUSR1, queue: .main)
         source.setEventHandler {
             let path = CaptureTrace.file.deletingLastPathComponent().appendingPathComponent("UltimateCAM-request.json")
             guard let data = try? Data(contentsOf: path),
                   let object = try? JSONSerialization.jsonObject(with: data) as? [String: String],
-                  let request = DiagnosticCaptureRequest(object) else {
+                  let action = object["action"],
+                  ["capture", "focus", "lens", "control", "save", "inspect"].contains(action) else {
                 CaptureTrace.record("diagnostic.ignored", ["reason": "no local request"])
                 return
             }
@@ -53,10 +55,19 @@ final class DiagnosticBridge {
                 CaptureTrace.record("diagnostic.ignored", ["reason": "application not foreground"])
                 return
             }
-            CaptureTrace.record("diagnostic.capture", ["mode": request.stack ? "stack" : "normal",
-                "count": request.stack ? request.count : 1, "raw": request.raw,
-                "adjustments": request.adjustments])
-            capture(request)
+            if action == "capture" {
+                guard let request = DiagnosticCaptureRequest(object) else {
+                    CaptureTrace.record("diagnostic.ignored", ["reason": "invalid capture request"])
+                    return
+                }
+                CaptureTrace.record("diagnostic.capture", ["mode": request.stack ? "stack" : "normal",
+                    "count": request.stack ? request.count : 1, "raw": request.raw,
+                    "adjustments": request.adjustments])
+                capture(request)
+            } else {
+                CaptureTrace.record("diagnostic.command", ["action": action])
+                command(object)
+            }
         }
         source.resume()
         self.source = source
