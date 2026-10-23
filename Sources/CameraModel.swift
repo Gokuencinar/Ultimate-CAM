@@ -480,8 +480,8 @@ final class CameraModel: NSObject, ObservableObject, AVCapturePhotoCaptureDelega
                     guard device.isExposureModeSupported(.locked), device.isWhiteBalanceModeSupported(.locked) else {
                         throw CameraFailure.message("Esta cámara no admite los bloqueos necesarios para la pila.")
                     }
-                    if night && (device.exposureMode == .custom || !device.isExposureModeSupported(.custom)) {
-                        throw CameraFailure.message("Noche estática necesita exposición automática y soporte de exposición manual de la lente.")
+                    if night && (device.exposureMode == .custom || device.exposureMode == .locked || !device.isExposureModeSupported(.custom)) {
+                        throw CameraFailure.message("Noche estática necesita exposición automática: desactiva ISO manual o toca el visor para liberar AE. Puedes fijar solo el enfoque con el control manual.")
                     }
                     let plan = night ? try NightCapturePlan.make(iso: Double(device.iso), seconds: device.exposureDuration.seconds,
                         isoRange: Double(device.activeFormat.minISO)...Double(device.activeFormat.maxISO),
