@@ -503,7 +503,8 @@ final class CameraModel: NSObject, ObservableObject, AVCapturePhotoCaptureDelega
                     }
                     let plan = night ? try NightCapturePlan.make(iso: Double(device.iso), seconds: device.exposureDuration.seconds,
                         isoRange: Double(device.activeFormat.minISO)...Double(device.activeFormat.maxISO),
-                        durationRange: device.activeFormat.minExposureDuration.seconds...device.activeFormat.maxExposureDuration.seconds) : nil
+                        durationRange: device.activeFormat.minExposureDuration.seconds...device.activeFormat.maxExposureDuration.seconds,
+                        targetOffset: Double(device.exposureTargetOffset)) : nil
                     try device.lockForConfiguration()
                     defer { device.unlockForConfiguration() }
                     if device.exposureMode != .custom { self.savedExposure = device.exposureMode }
@@ -520,6 +521,7 @@ final class CameraModel: NSObject, ObservableObject, AVCapturePhotoCaptureDelega
                         CaptureTrace.record("night.plan", ["seconds": plan.seconds, "iso": plan.iso,
                             "count": plan.count, "source": self.rawRequested ? "RAW" : "JPEG",
                             "totalExposureSeconds": plan.seconds * Double(plan.count),
+                            "compensationEV": plan.compensationEV, "meteredOffsetEV": device.exposureTargetOffset,
                             "minFrameSeconds": device.activeVideoMinFrameDuration.seconds, "maxFrameSeconds": device.activeVideoMaxFrameDuration.seconds])
                         self.message("Noche estática: \(plan.count) fotos. Apoya el iPhone hasta terminar.")
                         self.captureStage = "night-setup"
@@ -912,7 +914,8 @@ final class CameraModel: NSObject, ObservableObject, AVCapturePhotoCaptureDelega
                     "adjustingFocus": device.isAdjustingFocus, "iso": device.iso,
                     "seconds": device.exposureDuration.seconds, "exposureMode": device.exposureMode.rawValue,
                     "minFrameSeconds": device.activeVideoMinFrameDuration.seconds, "maxFrameSeconds": device.activeVideoMaxFrameDuration.seconds,
-                    "bias": device.exposureTargetBias, "zoom": device.videoZoomFactor,
+                    "bias": device.exposureTargetBias, "targetOffsetEV": device.exposureTargetOffset, "zoom": device.videoZoomFactor,
+                    "maxExposureSeconds": device.activeFormat.maxExposureDuration.seconds,
                     "whiteBalanceMode": device.whiteBalanceMode.rawValue,
                     "redGain": device.deviceWhiteBalanceGains.redGain, "greenGain": device.deviceWhiteBalanceGains.greenGain,
                     "blueGain": device.deviceWhiteBalanceGains.blueGain,

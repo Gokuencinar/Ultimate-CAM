@@ -48,6 +48,8 @@ final class BurstProcessor {
                 // Gamut mapping is nonlinear and clips noisy negative components
                 // before temporal averaging, producing colored shadow bias here.
                 filter.isGamutMappingEnabled = false
+                filter.shadowBias = 0
+                filter.boostShadowAmount = 0
                 filter.boostAmount = 0
                 filter.baselineExposure = 0
                 filter.exposure = 0
@@ -258,6 +260,7 @@ final class BurstProcessor {
         }
         let info: [String: Any] = ["temperature": filter.neutralTemperature, "tint": filter.neutralTint,
             "baselineExposure": filter.baselineExposure, "boost": filter.boostAmount,
+            "shadowBias": filter.shadowBias, "boostShadows": filter.boostShadowAmount,
             "colorNR": filter.colorNoiseReductionAmount, "lumaNR": filter.luminanceNoiseReductionAmount]
         try JSONSerialization.data(withJSONObject: info, options: [.sortedKeys]).write(to: directory.appendingPathComponent("raw-settings.json"))
         func write(_ image: CIImage?, _ name: String) throws {
@@ -275,6 +278,8 @@ final class BurstProcessor {
         try write(filter.outputImage, "raw-linear.jpg")
         if let linear = filter.outputImage { try write(nightTone(linear), "raw-linear-toned.jpg") }
         filter.isGamutMappingEnabled = false
+        filter.shadowBias = 0
+        filter.boostShadowAmount = 0
         if let linear = filter.outputImage { try write(nightTone(linear, maximumGain: 32), "raw-no-gamut-toned.jpg") }
         if filter.isLuminanceNoiseReductionSupported { filter.luminanceNoiseReductionAmount = 0.72 }
         if let linear = filter.outputImage { try write(nightTone(linear, maximumGain: 32), "raw-denoised-toned.jpg") }

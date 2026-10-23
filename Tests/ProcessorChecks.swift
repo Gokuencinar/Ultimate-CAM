@@ -92,7 +92,15 @@ struct ProcessorChecks {
         let bright = try NightCapturePlan.make(iso: 25, seconds: 0.001, isoRange: 25...3200, durationRange: 0.00001...0.333)
         try require(abs(bright.seconds - 0.001) < 0.000001, "Night plan overexposes a minimum-ISO scene")
         let long = try NightCapturePlan.make(iso: 3200, seconds: 0.06, isoRange: 25...3200, durationRange: 0.00001...1)
-        try require(long.count == 8 && long.seconds == 0.5 && long.seconds * Double(long.count) <= 4, "Static exposure exceeds collection budget")
+        try require(long.count == 8 && long.seconds == 1 && long.seconds * Double(long.count) <= 8, "Static exposure exceeds collection budget")
+        let shortfall = try NightCapturePlan.make(iso: 3200, seconds: 0.06, isoRange: 25...3200,
+            durationRange: 0.00001...1, targetOffset: -5)
+        try require(shortfall.compensationEV == 2 && abs(shortfall.iso * shortfall.seconds - 768) < 0.001,
+            "Night AE shortfall was not capped at 2 EV")
+        let brightOffset = try NightCapturePlan.make(iso: 25, seconds: 0.001, isoRange: 25...3200,
+            durationRange: 0.00001...1, targetOffset: -5)
+        try require(brightOffset.compensationEV == 0 && abs(brightOffset.iso * brightOffset.seconds - 0.025) < 0.000001,
+            "Night shortfall compensation changed a low-ISO bright scene")
         do {
             _ = try NightCapturePlan.make(iso: .nan, seconds: 0.01, isoRange: 25...3200, durationRange: 0.00001...1)
             throw CameraFailure.message("Invalid metering accepted")
