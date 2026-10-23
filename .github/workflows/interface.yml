@@ -9,7 +9,7 @@ permissions:
 jobs:
   preview:
     runs-on: macos-15
-    timeout-minutes: 15
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
       - name: Generate Xcode project
@@ -18,7 +18,7 @@ jobs:
           if ! command -v xcodegen >/dev/null 2>&1; then brew install xcodegen; fi
           xcodegen generate
       - name: Capture interface on iPhone 11 Pro simulator
-        timeout-minutes: 10
+        timeout-minutes: 15
         run: bash scripts/capture_ui.sh
       - name: Upload screenshots and build log
         if: always()
