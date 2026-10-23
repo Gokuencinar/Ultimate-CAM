@@ -127,8 +127,33 @@ final class BurstProcessor {
                 #endif
                 guard let observation = request.results?.first,
                       observation.confidence >= 0.5 else { return }
-                let transform = CGAffineTransform(translationX: observation.alignmentTransform.tx / registrationScale,
+                var transform = CGAffineTransform(translationX: observation.alignmentTransform.tx / registrationScale,
                     y: observation.alignmentTransform.ty / registrationScale)
+                // Vision's reduced estimate is quantized in reduced pixels. Refine a
+                // central full-resolution patch so a one-pixel estimate does not
+                // become several pixels of blur in the final photograph.
+                if registrationScale < 1 {
+                    let overlap = reference.extent.intersection(image.transformed(by: transform).extent)
+                    let side = min(768, min(overlap.width, overlap.height) - 16)
+                    if side > 128 {
+                        let patch = CGRect(x: overlap.midX - side / 2, y: overlap.midY - side / 2,
+                            width: side, height: side).integral
+                        let aligned = image.transformed(by: transform)
+                        if let target = context.createCGImage(aligned, from: patch, format: .RGBA8,
+                            colorSpace: CGColorSpace(name: CGColorSpace.sRGB)!),
+                           let anchor = context.createCGImage(reference, from: patch, format: .RGBA8,
+                            colorSpace: CGColorSpace(name: CGColorSpace.sRGB)!) {
+                            let refinement = VNTranslationalImageRegistrationRequest(targetedCGImage: target)
+                            try VNImageRequestHandler(cgImage: anchor).perform([refinement])
+                            if let residual = refinement.results?.first, residual.confidence >= 0.5,
+                               abs(residual.alignmentTransform.tx) <= max(4, 2 / registrationScale),
+                               abs(residual.alignmentTransform.ty) <= max(4, 2 / registrationScale) {
+                                transform.tx += residual.alignmentTransform.tx
+                                transform.ty += residual.alignmentTransform.ty
+                            }
+                        }
+                    }
+                }
                 guard abs(transform.tx) < reference.extent.width * 0.04,
                       abs(transform.ty) < reference.extent.height * 0.04 else { return }
                 var aligned = image.transformed(by: transform)

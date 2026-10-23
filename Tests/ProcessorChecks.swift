@@ -141,6 +141,7 @@ struct ProcessorChecks {
         for y in 14...18 { for x in 0...2 {
             largeError = min(largeError, rmse(largePixels, against: largeReference, offsetX: x, offsetY: y))
         } }
+        log("Large registration RMSE=\(largeError)")
         try require(largeError < 8, "Reduced registration did not rescale translation correctly")
         log("Reduced registration/full resolution RMSE=\(largeError)")
         let blurredImage = cleanImage.clampedToExtent().applyingFilter("CIGaussianBlur", parameters: [kCIInputRadiusKey: 3])
