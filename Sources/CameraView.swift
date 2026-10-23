@@ -58,10 +58,31 @@ struct CameraView: View {
     private var controlsEnabled: Bool { !camera.busy && countdown == 0 }
 
     var body: some View {
-        VStack(spacing: 0) {
-            header.padding(.horizontal, 20).padding(.vertical, 10)
-            viewfinder
-            bottomDock
+        ZStack {
+            Color.black.ignoresSafeArea()
+            viewfinder.ignoresSafeArea()
+        }
+        .overlay(alignment: .top) {
+            VStack(spacing: 0) {
+                header.padding(.horizontal, 20).padding(.vertical, 10)
+                quickControls.padding(.horizontal, 12).padding(.bottom, 12)
+            }
+            .background {
+                LinearGradient(colors: [.black.opacity(0.8), .black.opacity(0)],
+                               startPoint: .top, endPoint: .bottom)
+                    .ignoresSafeArea(edges: .top).allowsHitTesting(false)
+            }
+        }
+        .overlay(alignment: .bottom) {
+            VStack(spacing: 0) {
+                focusInfo.padding(.horizontal, 20).padding(.bottom, 8)
+                bottomDock
+            }
+            .background {
+                LinearGradient(colors: [.black.opacity(0), .black.opacity(0.85)],
+                               startPoint: .top, endPoint: .bottom)
+                    .ignoresSafeArea(edges: .bottom).allowsHitTesting(false)
+            }
         }
         .background(Color.black).foregroundStyle(.white).preferredColorScheme(.dark)
         .onAppear { UIApplication.shared.isIdleTimerDisabled = true; camera.start() }
@@ -101,49 +122,46 @@ struct CameraView: View {
     }
 
     private var viewfinder: some View {
-        GeometryReader { geometry in
-            let height = min(geometry.size.height, geometry.size.width * 4 / 3)
-            let width = height * 3 / 4
-            ZStack {
-                CameraPreview(session: camera.session, zoom: zoom, focus: { point, locked in
-                    manualFocus = false
-                    camera.focus(at: point, lock: locked)
-                }, changeZoom: { value in zoom = min(camera.maximumZoom, max(1, value)) })
-                    .allowsHitTesting(controlsEnabled)
-                if grid { ViewfinderGrid() }
-                if countdown > 0 {
-                    Text("\(countdown)").font(.system(size: 80, weight: .light, design: .rounded))
-                        .shadow(color: .black, radius: 10).allowsHitTesting(false)
-                }
+        ZStack {
+            CameraPreview(session: camera.session, zoom: zoom, focus: { point, locked in
+                manualFocus = false
+                camera.focus(at: point, lock: locked)
+            }, changeZoom: { value in zoom = min(camera.maximumZoom, max(1, value)) })
+                .allowsHitTesting(controlsEnabled)
+            if grid { ViewfinderGrid() }
+            if countdown > 0 {
+                Text("\(countdown)").font(.system(size: 80, weight: .light, design: .rounded))
+                    .shadow(color: .black, radius: 10).allowsHitTesting(false)
             }
-            .overlay(alignment: .top) {
-                    HStack(spacing: 8) {
-                        quickButton(rawEnabled ? "RAW+" : "JPEG", symbol: "square.stack.3d.up", selected: rawEnabled) { rawEnabled.toggle() }
-                            .disabled(stack || !camera.supportsRAW)
-                        Spacer()
-                        quickButton(timerSeconds == 0 ? "OFF" : "\(timerSeconds)s", symbol: "timer", selected: timerSeconds > 0) {
-                            timerSeconds = timerSeconds == 0 ? 3 : (timerSeconds == 3 ? 10 : 0)
-                        }
-                        quickButton("", symbol: "grid", selected: grid) { grid.toggle() }
-                    }.padding(12)
-            }.overlay(alignment: .bottom) {
-                    HStack {
-                        Text(manualFocus ? "Enfoque manual · toca para volver a AF" : camera.focusStatus).font(.system(size: 11, weight: .semibold))
-                            .padding(.horizontal, 10).padding(.vertical, 7)
-                            .background(.black.opacity(0.7), in: Capsule())
-                            .allowsHitTesting(false)
-                        Spacer(minLength: 0)
-                        if zoom > 1.01 {
-                            Text("\(zoom, specifier: "%.1f")×").font(.caption.monospacedDigit().bold())
-                                .padding(8).background(.black.opacity(0.7), in: Capsule()).allowsHitTesting(false)
-                        }
-                    }
-                .padding(12).allowsHitTesting(false)
-            }
-            .frame(width: width, height: height).clipped()
-            .clipShape(RoundedRectangle(cornerRadius: 18))
-            .position(x: geometry.size.width / 2, y: geometry.size.height / 2)
         }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .clipped()
+    }
+
+    private var quickControls: some View {
+        HStack(spacing: 8) {
+            quickButton(rawEnabled ? "RAW+" : "JPEG", symbol: "square.stack.3d.up", selected: rawEnabled) { rawEnabled.toggle() }
+                .disabled(stack || !camera.supportsRAW)
+            Spacer()
+            quickButton(timerSeconds == 0 ? "OFF" : "\(timerSeconds)s", symbol: "timer", selected: timerSeconds > 0) {
+                timerSeconds = timerSeconds == 0 ? 3 : (timerSeconds == 3 ? 10 : 0)
+            }
+            quickButton("", symbol: "grid", selected: grid) { grid.toggle() }
+        }
+    }
+
+    private var focusInfo: some View {
+        HStack {
+            Text(manualFocus ? "Enfoque manual · toca para volver a AF" : camera.focusStatus)
+                .font(.system(size: 11, weight: .semibold))
+                .padding(.horizontal, 10).padding(.vertical, 7)
+                .background(.black.opacity(0.7), in: Capsule())
+            Spacer(minLength: 0)
+            if zoom > 1.01 {
+                Text("\(zoom, specifier: "%.1f")×").font(.caption.monospacedDigit().bold())
+                    .padding(8).background(.black.opacity(0.7), in: Capsule())
+            }
+        }.allowsHitTesting(false)
     }
 
     private func quickButton(_ text: String, symbol: String, selected: Bool, action: @escaping () -> Void) -> some View {

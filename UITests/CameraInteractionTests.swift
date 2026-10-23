@@ -8,6 +8,8 @@ final class CameraInteractionTests: XCTestCase {
         let viewfinder = app.descendants(matching: .any).matching(identifier: "camera.viewfinder").firstMatch
         XCTAssertTrue(viewfinder.waitForExistence(timeout: 10))
         XCTAssertTrue(viewfinder.isHittable)
+        XCTAssertEqual(viewfinder.frame.width, app.frame.width, accuracy: 2)
+        XCTAssertEqual(viewfinder.frame.height, app.frame.height, accuracy: 2)
         let point = viewfinder.coordinate(withNormalizedOffset: CGVector(dx: 0.45, dy: 0.45))
         point.tap()
         point.press(forDuration: 0.8)
