@@ -6,13 +6,27 @@ El objetivo es combinar captura nocturna por acumulación, como concepto de Lumi
 
 ## Noche estática experimental (0.4)
 
-El selector **NOCHE** y el perfil **Noche estática** sustituyen al antiguo perfil Luz baja. El modo mide la exposición automática y distribuye el presupuesto entre 3 y 9 capturas consecutivas: hasta 0,5 segundos por exposición y unos 4 segundos de integración solicitada. El tiempo total incluye entrega del sensor, revelado y fusión y puede ser bastante mayor. Se necesita una escena inmóvil y el teléfono apoyado; no mide movimiento ni prolonga la exposición más allá de lo permitido por el formato.
+El selector **NOCHE** y el perfil **Noche estática** sustituyen al antiguo perfil Luz baja. El modo mide la exposición automática y distribuye el presupuesto entre 3 y 16 capturas consecutivas: hasta 1 segundo por exposición y un presupuesto de hasta 8 segundos de integración solicitada. El tiempo total incluye entrega del sensor, revelado y fusión y puede ser bastante mayor. Se necesita una escena inmóvil y el teléfono apoyado; no mide movimiento ni prolonga la exposición más allá de lo permitido por el formato.
 
-Por defecto fusiona JPEG de cámara para conservar el color del procesado de iOS. En las lentes con Bayer RAW se puede activar **Fusionar DNG** en Procesado: revela DNG mediante CIRAWFilter y los fusiona en RGB lineal, usando los JPEG para elegir la referencia. Esta ruta es experimental, más lenta y tiene dominantes de color pendientes de calibrar en sombras profundas. Guarda el DNG original de la referencia, no un RAW fusionado. El mapeo tonal se aplica después de la acumulación, con ganancia limitada y compresión suave de luces. Hay rechazo conservador de movimiento y alineación por traslación, sin alineación local ni rotación.
+Por defecto fusiona JPEG de cámara para conservar el color del procesado de iOS. En las lentes con Bayer RAW se puede activar **Fusionar DNG** en Procesado: revela DNG mediante CIRAWFilter y los fusiona en RGB lineal, usando los JPEG para elegir la referencia. Esta ruta es experimental, más lenta y todavía necesita calibración de color y ruido en sombras profundas. Guarda el DNG original de la referencia, no un RAW fusionado. El mapeo tonal se aplica después de la acumulación: levanta sombras con ganancia limitada, conserva luces expuestas y comprime solo el extremo superior. No es horquillado HDR. Hay rechazo conservador de movimiento y alineación por traslación, sin alineación local ni rotación.
 
 La primera prueba física de build30 completó 8 exposiciones RAW de 0,5 s nominales a ISO400, fusionó 8/8 y generó un JPEG de 3008 × 3952. Tardó 28,45 s según el cliente de diagnóstico. La inspección visual detectó dominante magenta y ruido de color; también quedó alterada la cadencia del visor al volver a automático. Es evidencia de captura/fusión, no de calidad equivalente a Night Sight ni al modo Noche de Apple. Build37 confirmó la restauración de los límites de fotograma y de la exposición a 1/15 s; enfoque posterior, Foto y Pila 3 terminaron correctamente. La fusión DNG todavía tardó 27,73 s en total (21,02 s de procesado), con dominante de color. Se mantiene como opción experimental y no como ruta predeterminada.
 
-Noche exige exposición automática y flash desactivado. Conserva los bloqueos y modos anteriores para restaurarlos tras captura o error. Si el revelado falla, conserva la referencia y avisa que no hay fusión. No repite capturas automáticamente. La configuración nocturna y el procesamiento tienen límites de espera independientes.
+El revelado DNG desactiva la curva global, la sustracción creativa de sombras (`shadowBias`) y el mapeo de gama antes de promediar; conserva el balance de blancos del DNG. No incluye AWB aprendido. Cada DNG se materializa una sola vez en un búfer lineal para reutilizarlo en alineación y fusión.
+
+Noche exige exposición automática y flash desactivado. Los tiempos largos se seleccionan entre valores fijos y se ajusta el ISO para conservar la medición. Solo si el automático está cerca del ISO máximo, una falta de exposición medida por `exposureTargetOffset` puede compensarse hasta 2 EV. No se interpreta esa señal como detección de movimiento ni como protección completa contra luces recortadas. Conserva los bloqueos y modos anteriores para restaurarlos tras captura o error. Si el revelado falla, conserva la referencia y avisa que no hay fusión. No repite capturas automáticamente. La configuración nocturna y el procesamiento tienen límites de espera independientes.
+
+## Estado instalado: build43
+
+`0.4.0+build.43.git.9aca748`, commit `9aca74887a3579c476fc74ee70a85104d4487f2e`, compilado en [Actions](https://github.com/Gokuencinar/Ultimate-CAM/actions/runs/40012174142) e instalado por SSH. SHA-256: `6178d40ed72440fc2cebd3626119508f21149894d8728eaeaa84f32184f39907`. `dpkg --verify` sin diferencias; sin reinicio ni respring.
+
+En la última escena, una pared con una fuente de luz directa, se completaron 14 pasos de diagnóstico: JPEG normal, Noche JPEG 16/16, enfoque posterior, Foto posterior, Pila 3/3, Noche DNG 16/16, exportaciones propias y consultas de restauración. Ambas pilas usaron 1/30 s nominal a ISO50, unos 0,53 s de integración total: la escena ya tenía bastante más luz que las pruebas iniciales. La inspección del JPEG procedente de DNG mostró color neutro sin la dominante magenta anterior en esta escena; no demuestra calibración en oscuridad profunda. El cliente midió 7,30 s totales para Noche JPEG (4,20 s de procesado) y 21,70 s para DNG (17,56 s de procesado). Esos tiempos no predicen una pila de ocho segundos de integración.
+
+El máximo de 1 s por foto/8 s de integración y la compensación de falta de exposición de hasta 2 EV están comprobados en el planificador con datos sintéticos; no se han validado físicamente en build43 con una escena suficientemente oscura. En versiones anteriores sí se recibieron DNG de 0,5 s; build41 rechazó una duración fraccionaria cuyo EXIF declaró 1 s, por lo que ahora se eligen tiempos fijos.
+
+El guardado de una nueva imagen nocturna se confirmó mediante PhotoKit en build38; no se repitió en build43 y no implica revisión visual del álbum. La vuelta de obturación manual de 0,5 s a automática se comprobó en build40. Las [pruebas de interfaz](https://github.com/Gokuencinar/Ultimate-CAM/actions/runs/40009305004), con el mismo archivo CameraView que build43, completaron un caso compuesto sin fallos: visor completo, gestos AF/AE, selección del temporizador y perfil Noche. Son pruebas de simulador, sin calidad óptica.
+
+La valoración del usuario sigue siendo que el modo Noche nativo funciona mucho mejor. No se ha hecho una comparación controlada con ese modo ni con GCam. La alineación global, el rechazo de movimiento y el ruido del revelado todavía necesitan trabajo; el número de fotos fusionadas no demuestra equivalencia de calidad.
 
 ## Auditoría anterior: 0.3 / build26
 
@@ -119,7 +133,7 @@ Para una prueba de captura sin tocar los controles de la app, esta debe estar ab
 
 Primero comprobar el build y las pruebas sintéticas de la versión exacta que se vaya a instalar. Después validar permisos, captura, cambio de lentes y calidad en el iPhone.
 
-Con esa base medida: mejorar el revelado y color de la fusión RAW, añadir alineación local y un modelo de ruido por sensor. Después, horquillado y mapeo tonal para un modo HDR propio. La astrofotografía y la superresolución deben ser módulos posteriores, con pruebas separadas. No llamar Night Sight o HDR+ a los controles de sombras o al promedio JPEG.
+Con esa base medida: calibrar el revelado y ruido por ISO, añadir alineación local y corrección de pequeñas rotaciones, medir movimiento y revisar el detalle conservado frente a la referencia. La prueba del usuario sigue situando el modo Noche nativo por delante; los conteos de fotogramas no refutan esa observación. Después, horquillado y mapeo tonal para un modo HDR propio. La astrofotografía y la superresolución deben ser módulos posteriores, con pruebas separadas. No llamar Night Sight o HDR+ a los controles de sombras o al promedio JPEG.
 
 ## Referencias
 
@@ -128,6 +142,8 @@ Con esa base medida: mejorar el revelado y color de la fusión RAW, añadir alin
 - [HDR+ with Bracketing on Pixel Phones](https://research.google/blog/hdr-with-bracketing-on-pixel-phones/).
 - [Apple: captura por horquillado](https://developer.apple.com/documentation/avfoundation/avcapturephotobracketsettings).
 - [Apple: alineación por traslación](https://developer.apple.com/documentation/vision/vntranslationalimageregistrationrequest).
+- [Apple: desfase medido de exposición](https://developer.apple.com/documentation/avfoundation/avcapturedevice/exposuretargetoffset).
+- [Apple: sustracción de sombras del revelador RAW](https://developer.apple.com/documentation/coreimage/cirawfilter/shadowbias).
 - [Apple: exposición manual y prioridad de captura](https://developer.apple.com/documentation/avfoundation/avcapturedevice/setexposuremodecustom(duration:iso:completionhandler:)).
 
 Las publicaciones describen técnicas y no convierten el código de este prototipo en una implementación equivalente ni autorizan a redistribuir binarios de terceros.
