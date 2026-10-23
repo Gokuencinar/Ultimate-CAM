@@ -6,23 +6,23 @@ El objetivo es combinar captura nocturna por acumulación, como concepto de Lumi
 
 ## Estado real
 
-La versión `0.2.0+build.19.git.82dd1b6` está compilada e instalada por SSH en un iPhone 11 Pro con iOS 18.7.1. `dpkg --verify com.gokuencinar.ultimatecam` termina sin diferencias. [Build y pruebas](https://github.com/Gokuencinar/Ultimate-CAM/actions/runs/39836718232): Xcode 16.4, SDK iOS 18.5, arm64, paquete rootless y comprobaciones sintéticas correctos.
+La versión `0.3.0+build.21.git.215e733` está compilada e instalada por SSH en un iPhone 11 Pro con iOS 18.7.1. `dpkg --verify com.gokuencinar.ultimatecam` termina sin diferencias. [Build y pruebas](https://github.com/Gokuencinar/Ultimate-CAM/actions/runs/39957311334): arm64, firma, paquete rootless y pruebas sintéticas correctos.
 
-La compilación 18 ya completó en el teléfono Foto, pilas 3/5/7/9, RAW+JPEG y Foto con ajustes, en una secuencia de 27 solicitudes al sensor sin timeout ni fallo. Se fusionaron 3/3, 4/5, 6/7 y 5/9 imágenes; las demás se descartaron en las comprobaciones de alineación. RAW devolvió 9.699.857 bytes además del JPEG. Los ajustes conservaron 3024 × 4032. No se guardó automáticamente nada en Fotos ni se exportaron imágenes para inspección.
+Esta revisión responde a dos fallos notificados: RAW no se guardaba en Fotos y tocar el visor no enfocaba. Se ha reimplementado la importación de RAW, separado los controles del visor, añadido retícula y confirmación de AF/AE y rediseñado la interfaz. El guardado usa DNG primario desde archivo y JPEG de cámara alternativo, siguiendo el [ejemplo actual de Apple](https://developer.apple.com/documentation/avfoundation/capturing-photos-in-raw-and-apple-proraw-formats). Incluye guardar solo JPEG y protección contra duplicados. Es una corrección implementada; todavía no está validada físicamente porque el teléfono estaba bloqueado.
 
-La compilación 19 corrige el texto que llamaba «fusionada» a una foto individual con ajustes y añade versión y PID a los registros. En esta versión exacta se comprobaron arranque y captura con ajustes a resolución completa, con la descripción correcta. No se repitió la secuencia completa de pilas y RAW tras ese cambio de texto y diagnóstico; esas pruebas corresponden a la 18.
+[XCTest de interfaz](https://github.com/Gokuencinar/Ultimate-CAM/actions/runs/39957526080) pasó con un toque y una pulsación larga sobre el UIView real del visor, selección OFF/3s/10s/OFF del temporizador, apertura de ajustes y selección del perfil Luz baja. El registro confirma ambos gestos. Eso comprueba la ruta de entrada en el simulador, no el movimiento óptico del enfoque ni el guardado en la fototeca del teléfono.
 
-El bloqueo original de 30 segundos se abordó corrigiendo configuración de sesión, prioridad de captura y acceso al contenedor. La compilación 15 devolvía `NSCocoaErrorDomain 513` al escribir su caché; con la vinculación al contenedor, la 16 pudo registrar y completar Foto/Pila 3. No se aisló una única causa mediante una reversión controlada al código original.
+Las pruebas físicas históricas pertenecen a la compilación 18: Foto, pilas 3/5/7/9, RAW+JPEG y ajustes, con 27 solicitudes sin timeout. Se fusionaron 3/3, 4/5, 6/7 y 5/9 imágenes; RAW devolvió 9.699.857 bytes. La 19 confirmó ajustes a 3024 × 4032. No se trasladan esos resultados automáticamente al nuevo código de configuración/captura de 0.3.
 
-Pasaron las pruebas sintéticas de ruido (RMSE 14,15 → 6,25), traslación (1,30), referencia nítida, rechazo de objetos desplazados (9,65 → 2,08), ajustes y resolución completa. Son pruebas de macOS; la [revisión de interfaz en simulador](https://github.com/Gokuencinar/Ultimate-CAM/actions/runs/39729796897) también tiene un alcance distinto. La calidad visual, otras lentes, controles manuales y guardado siguen pendientes. No es un HDR+ ni un Night Sight completo.
+Pasaron las pruebas sintéticas de ruido, traslación, referencia nítida, rechazo de movimiento y resolución completa. La comparación visual con Cámara de Apple o GCam, el nuevo guardado y el enfoque óptico siguen pendientes. No es un HDR+ ni un Night Sight completo.
 
 Repositorio: [Gokuencinar/Ultimate-CAM](https://github.com/Gokuencinar/Ultimate-CAM).
 
 ## Interfaz
 
-Implementación propia inspirada en la captura y descripción públicas de [26CAM de ngkhoi](https://www.reddit.com/r/jailbreak/comments/1vd9zwl/upcoming_26cam_a_tweak_that_bring_ios_26_camera/): visor a pantalla completa, controles flotantes, selector inferior en cápsula, anillo del disparador y botones de lentes. En iOS 18 utiliza materiales translúcidos de SwiftUI; no depende del tweak Liquid (Gl)ass ni incorpora sus binarios. No es una copia de su implementación ni el efecto Liquid Glass nativo de iOS 26.
+Interfaz propia con visor 4:3 separado de los controles, botones grandes sobre fondo oscuro, retícula AF/AE, bloqueo por pulsación larga, formato/temporizador/cuadrícula rápidos y exposición visible. El zoom admite pellizco. Los ajustes se dividen en Captura, Manual y Procesado; la revisión mantiene Guardar siempre accesible y ofrece JPEG como alternativa al RAW. Conserva la referencia visual inicial de 26CAM sin incorporar su código o binarios.
 
-Los controles muestran Foto y Pila con un número de fotogramas configurable. La captura de vídeo no está implementada. El botón superior abre un panel desplazable con controles manuales y de procesado. El visor puede recortar la imagen para llenar la pantalla; la revisión enseña la foto guardable completa.
+Los perfiles Natural, Detalle y Luz baja ajustan los controles de procesado existentes. Luz baja selecciona una pila de siete y ajustes moderados; no reproduce el algoritmo de Google. Los atajos Cerca/Lejos cambian posiciones normalizadas de la lente, sin prometer distancias calibradas. Los controles se limitan a las capacidades de cada cámara.
 
 ## Lo que implementa el código
 
@@ -36,9 +36,9 @@ Los controles muestran Foto y Pila con un número de fotogramas configurable. La
 - Reducción de ruido, nitidez y elevación de sombras regulables, con esos ajustes adicionales desactivados por defecto.
 - ISO y obturación manuales dentro de los límites del formato activo de cada lente.
 - Enfoque al tocar el visor, enfoque manual donde exista soporte y zoom digital limitado por el dispositivo (hasta 8× sobre la lente elegida). El zoom digital no es superresolución.
-- RAW/DNG + JPEG en Foto cuando la salida de la lente expone Bayer RAW. No fuerza ProRAW ni genera un RAW fusionado a partir de JPEG. Al guardar, el DNG se añade como recurso alternativo de la foto.
+- RAW/DNG + JPEG en Foto cuando la salida de la lente expone Bayer RAW. No fuerza ProRAW ni genera un RAW fusionado a partir de JPEG. Al guardar, el DNG es el recurso principal y el JPEG de cámara es su alternativo. Si existe un JPEG ajustado distinto, se añade como otra foto.
 - Temporizador de 3 o 10 segundos, cancelado al pasar a segundo plano. Mantiene la pantalla despierta mientras la cámara está en primer plano; no impide el bloqueo manual.
-- Revisión y guardado explícito en Fotos del resultado y de la referencia seleccionada sin recodificar. Si solo hay una foto válida y no se han pedido ajustes, conserva esa foto sin fingir una fusión.
+- Revisión y guardado explícito en Fotos del resultado, con referencia opcional sin recodificar y alternativa JPEG en capturas RAW. Si solo hay una foto válida y no se han pedido ajustes, conserva esa foto sin fingir una fusión.
 - Sesión fuera del hilo principal, protección contra capturas simultáneas y manejo de permisos e interrupciones. Tras 30 segundos sin finalización se bloquean nuevas peticiones y se pide cerrar y reabrir la app para no acumular capturas pendientes. No hay reintentos automáticos.
 
 ## Límites de esta primera versión
@@ -85,7 +85,7 @@ La ruta es `/var/jb/Applications/UltimateCAM.app`. Para quitarla usa el gestor d
 
 ## Diagnóstico por SSH
 
-La app guarda un registro rotativo de hasta unos 128 KiB en su directorio de caché, `UltimateCAM-capture.jsonl`. Registra estado de sesión, identificadores de solicitud, callbacks, errores y número de bytes recibidos; no incluye imágenes ni EXIF. Es local y no se transmite por red.
+La app guarda un registro rotativo de hasta unos 128 KiB en su directorio de caché, `UltimateCAM-capture.jsonl`. Registra estado de sesión, identificadores de solicitud, callbacks, errores y número de bytes recibidos; no incluye imágenes ni EXIF. El guardado registra únicamente el resultado de PhotoKit, errores e identificadores de los elementos recién creados. Es local y no se transmite por red.
 
 El artefacto independiente `Ultimate-CAM-diagnostics-N` contiene `UltimateCAM-device-state`, una utilidad de solo lectura que consulta estados de notificación y busca únicamente el proceso UltimateCAM. También lee versión, PID, último evento, ruta del registro y error de escritura publicados por la app mediante estados locales. No acepta órdenes por ese canal ni envía notificaciones a SpringBoard ni modifica el bloqueo. Los nombres de estado son señales de diagnóstico del sistema, no una garantía de compatibilidad futura.
 
@@ -118,3 +118,7 @@ Con esa base medida: pasar de exportar RAW a una fusión RAW real, añadir aline
 - [Apple: exposición manual y prioridad de captura](https://developer.apple.com/documentation/avfoundation/avcapturedevice/setexposuremodecustom(duration:iso:completionhandler:)).
 
 Las publicaciones describen técnicas y no convierten el código de este prototipo en una implementación equivalente ni autorizan a redistribuir binarios de terceros.
+
+### Auditoría de 0.3
+
+El canal local de diagnóstico conserva el requisito de primer plano y solicitud JSON + SIGUSR1. Además de captura, admite órdenes acotadas `focus`, `lens`, `control`, `inspect` y `save`. La última realiza un guardado explícito del resultado actual, con `format` igual a `all` o `jpeg` y `reference` opcional. Estas pruebas escriben en Fotos y solo deben usarse dentro de una sesión de pruebas autorizada. No hay órdenes de borrado ni ejecución arbitraria. La confirmación del callback de PhotoKit se distingue de una revisión visual del álbum.
