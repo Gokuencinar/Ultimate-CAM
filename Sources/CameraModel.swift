@@ -72,6 +72,7 @@ final class CameraModel: NSObject, ObservableObject, AVCapturePhotoCaptureDelega
     private var inFlight = false
     private var frames = [Data]()
     private var desiredCount = 1
+    private var manualFrameDurations: [String: (min: CMTime, max: CMTime)] = [:]
     private var savedFrameDurations: (min: CMTime, max: CMTime)?
     private var savedExposure: AVCaptureDevice.ExposureMode?
     private var savedWhiteBalance: AVCaptureDevice.WhiteBalanceMode?
@@ -230,6 +231,9 @@ final class CameraModel: NSObject, ObservableObject, AVCapturePhotoCaptureDelega
         focusToken = UUID()
         try device.lockForConfiguration()
         if device.isExposureModeSupported(.continuousAutoExposure) { device.exposureMode = .continuousAutoExposure }
+        if let saved = manualFrameDurations.removeValue(forKey: device.uniqueID) {
+            restoreFrameDurations(saved, on: device)
+        }
         if device.isFocusModeSupported(.continuousAutoFocus) { device.focusMode = .continuousAutoFocus }
         if device.isWhiteBalanceModeSupported(.continuousAutoWhiteBalance) { device.whiteBalanceMode = .continuousAutoWhiteBalance }
         device.videoZoomFactor = max(1, device.minAvailableVideoZoomFactor)
@@ -294,6 +298,9 @@ final class CameraModel: NSObject, ObservableObject, AVCapturePhotoCaptureDelega
                 try device.lockForConfiguration()
                 defer { device.unlockForConfiguration() }
                 if let iso, device.isExposureModeSupported(.custom) {
+                    if self.manualFrameDurations[device.uniqueID] == nil {
+                        self.manualFrameDurations[device.uniqueID] = (device.activeVideoMinFrameDuration, device.activeVideoMaxFrameDuration)
+                    }
                     let clampedISO = min(device.activeFormat.maxISO, max(device.activeFormat.minISO, Float(iso)))
                     let duration = min(device.activeFormat.maxExposureDuration.seconds,
                                        max(device.activeFormat.minExposureDuration.seconds, seconds))
@@ -303,7 +310,12 @@ final class CameraModel: NSObject, ObservableObject, AVCapturePhotoCaptureDelega
                     }
                 } else if iso == nil, device.isExposureModeSupported(.continuousAutoExposure) {
                     device.exposureMode = .continuousAutoExposure
-                    CaptureTrace.record("control.exposure", ["custom": false])
+                    if let saved = self.manualFrameDurations.removeValue(forKey: device.uniqueID) {
+                        self.restoreFrameDurations(saved, on: device)
+                    }
+                    CaptureTrace.record("control.exposure", ["custom": false,
+                        "minFrameSeconds": device.activeVideoMinFrameDuration.seconds,
+                        "maxFrameSeconds": device.activeVideoMaxFrameDuration.seconds])
                 }
             } catch { self.message(error.localizedDescription) }
         }
@@ -713,6 +725,17 @@ final class CameraModel: NSObject, ObservableObject, AVCapturePhotoCaptureDelega
         }
     }
 
+    /// Caller holds the device configuration lock. Order keeps min <= max throughout.
+    private func restoreFrameDurations(_ saved: (min: CMTime, max: CMTime), on device: AVCaptureDevice) {
+        if CMTimeCompare(saved.min, device.activeVideoMaxFrameDuration) > 0 {
+            device.activeVideoMaxFrameDuration = saved.max
+            device.activeVideoMinFrameDuration = saved.min
+        } else {
+            device.activeVideoMinFrameDuration = saved.min
+            device.activeVideoMaxFrameDuration = saved.max
+        }
+    }
+
     private func restoreDevice() {
         guard let device = input?.device,
               savedExposure != nil || savedWhiteBalance != nil || savedFocus != nil || savedFrameDurations != nil else { return }
@@ -721,13 +744,7 @@ final class CameraModel: NSObject, ObservableObject, AVCapturePhotoCaptureDelega
             defer { device.unlockForConfiguration() }
             if let mode = savedExposure { device.exposureMode = mode }
             if let saved = savedFrameDurations {
-                if CMTimeCompare(saved.min, device.activeVideoMaxFrameDuration) > 0 {
-                    device.activeVideoMaxFrameDuration = saved.max
-                    device.activeVideoMinFrameDuration = saved.min
-                } else {
-                    device.activeVideoMinFrameDuration = saved.min
-                    device.activeVideoMaxFrameDuration = saved.max
-                }
+                restoreFrameDurations(saved, on: device)
                 CaptureTrace.record("night.device.restored", ["minFrameSeconds": device.activeVideoMinFrameDuration.seconds,
                     "maxFrameSeconds": device.activeVideoMaxFrameDuration.seconds, "exposureMode": device.exposureMode.rawValue])
                 savedFrameDurations = nil
