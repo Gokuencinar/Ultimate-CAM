@@ -259,8 +259,9 @@ final class CameraModel: NSObject, ObservableObject, AVCapturePhotoCaptureDelega
                 try device.lockForConfiguration()
                 defer { device.unlockForConfiguration() }
                 device.setExposureTargetBias(min(device.maxExposureTargetBias,
-                    max(device.minExposureTargetBias, bias)), completionHandler: nil)
-                CaptureTrace.record("control.bias", ["requested": bias, "applied": device.exposureTargetBias])
+                    max(device.minExposureTargetBias, bias))) { _ in
+                    CaptureTrace.record("control.bias", ["requested": bias, "applied": device.exposureTargetBias])
+                }
             } catch { self.message(error.localizedDescription) }
         }
     }
@@ -333,7 +334,7 @@ final class CameraModel: NSObject, ObservableObject, AVCapturePhotoCaptureDelega
         }
     }
 
-    private func finishFocus(_ token: UUID, device: AVCaptureDevice, lock: Bool, remaining: Int) {
+    private func finishFocus(_ token: UUID, device: AVCaptureDevice, lock: Bool, remaining: Int, stable: Int = 0) {
         guard token == focusToken, active, input?.device === device else { return }
         if inFlight {
             if remaining > 0 {
@@ -341,12 +342,20 @@ final class CameraModel: NSObject, ObservableObject, AVCapturePhotoCaptureDelega
             } else { publish { self.focusStatus = "Toca el visor para enfocar" } }
             return
         }
-        if device.isAdjustingFocus || device.isAdjustingExposure {
+        // A newly requested one-shot AF can still report adjusting=false before
+        // its scan starts. Wait for it to leave autoFocus and remain stable.
+        if device.isAdjustingFocus || device.isAdjustingExposure || device.focusMode == .autoFocus {
             if remaining > 0 {
                 queue.asyncAfter(deadline: .now() + 0.15) { self.finishFocus(token, device: device, lock: lock, remaining: remaining - 1) }
             } else {
                 publish { self.focusStatus = "No se ha estabilizado el enfoque. Prueba un borde con más contraste." }
                 CaptureTrace.record("focus.unsettled")
+            }
+            return
+        }
+        if stable < 2 {
+            queue.asyncAfter(deadline: .now() + 0.15) {
+                self.finishFocus(token, device: device, lock: lock, remaining: remaining, stable: stable + 1)
             }
             return
         }
