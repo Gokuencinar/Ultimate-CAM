@@ -125,7 +125,9 @@ struct ProcessorChecks {
         let cleanData = try png(seed: 1)
         let cleanImage = CIImage(data: cleanData)!
         let large = cleanImage.transformed(by: CGAffineTransform(scaleX: 8, y: 8))
-        let shiftedLarge = large.transformed(by: CGAffineTransform(translationX: 24, y: -16)).cropped(to: large.extent)
+        let canvas = CIImage(color: .black).cropped(to: large.extent)
+        let shiftedLarge = large.transformed(by: CGAffineTransform(translationX: 24, y: -16))
+            .composited(over: canvas).cropped(to: large.extent)
         let largeData = context.pngRepresentation(of: large, format: .RGBA8, colorSpace: space)!
         let shiftedData = context.pngRepresentation(of: shiftedLarge, format: .RGBA8, colorSpace: space)!
         var largeOptions = fixedReference
