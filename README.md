@@ -6,19 +6,17 @@ El objetivo es combinar captura nocturna por acumulación, como concepto de Lumi
 
 ## Estado real
 
-La versión disponible `0.3.0+build.25.git.9216aa1` está [compilada y empaquetada](https://github.com/Gokuencinar/Ultimate-CAM/actions/runs/39964428732), con pruebas sintéticas correctas. La última instalada por SSH es `0.3.0+build.24.git.9a03264`, con `dpkg --verify` sin diferencias. A petición del usuario se omiten nuevas pruebas en el iPhone, que no está disponible: build25 queda pendiente de instalación y validación física.
+La versión `0.3.0+build.26.git.1b4f237` está [compilada](https://github.com/Gokuencinar/Ultimate-CAM/actions/runs/39996357339) e instalada por SSH en el iPhone 11 Pro con iOS 18.7.1. Se verificaron SHA-256, manifiesto y `dpkg --verify`, sin diferencias ni respring.
 
-El visor ocupa toda la pantalla, con controles flotantes sobre degradados para conservar legibilidad. La vista previa recorta para llenar el formato de pantalla; las fotos conservan su formato y resolución originales. [XCTest de build25](https://github.com/Gokuencinar/Ultimate-CAM/actions/runs/39964432016) comprueba el ancho y alto del visor frente a la pantalla, toques, pulsación larga, temporizador OFF/3s/10s/OFF y ajustes/perfil Luz baja.
+Se completaron 63 casos funcionales por SSH, más una captura frontal con flash y cuatro comprobaciones de protección/restauración, con 34 solicitudes al sensor: RAW y guardado en Fotos, protección contra duplicados, flash JPEG, zoom, EV, WB con matiz, enfoque manual/automático, bloqueo AF/AE, exposición manual, las cuatro cámaras y pilas 3/5/7/9. Se crearon 3 elementos nuevos en Fotos y no se borró ninguno. El callback de PhotoKit no sustituye una revisión visual del álbum.
 
-Build25 sincroniza el zoom visible con el valor aplicado y el límite disponible de la lente. Añade matiz verde/magenta al balance de blancos, botón de liberación del bloqueo y mensajes según enfoque/exposición realmente bloqueados. El temporizador permite cancelar si la cámara deja de estar lista y desactiva Ajustes durante la cuenta atrás. Estas modificaciones compilan; zoom, color, bloqueo y temporizador real siguen pendientes de prueba en el dispositivo.
+El flash ON devolvió `flashEnabled=true` en principal y frontal; AUTO decidió no activarlo en esta escena. La frontal expone soporte de flash en este dispositivo. Se ofrece solo en Foto JPEG y lentes con flash soportado/preparado, con OFF por defecto; RAW y pilas no usan flash. Se consulta el soporte de la salida y la disponibilidad antes de enviar la petición. No se ha medido la iluminación resultante.
 
-La auditoría física reprodujo el fallo RAW en build 21: `PHPhotosErrorDomain 3300`. Build 23 importa el JPEG de cámara como recurso principal y el DNG como alternativo desde archivo, retenido hasta el callback. PhotoKit confirmó dos guardados RAW, uno con JPEG ajustado separado. También se comprobó el bloqueo de duplicados. Guardar solo JPEG y guardar pila más referencia funcionaron en build 21, en la misma ruta JPEG conservada por 23. Las pruebas crearon 6 elementos nuevos en Fotos y no borraron ninguno. Falta revisar visualmente su presentación en Fotos.
+A 5000 K, los matices -35/+35 produjeron ganancias distintas, verificadas por consulta del sensor; no es calibración de color. El bloqueo de enfoque con exposición manual conservó `exposureMode=3`, y se diferencia de un bloqueo AF/AE automático. El zoom mostrado procede del valor aplicado por AVFoundation.
 
-En build 23 se comprobaron por SSH el punto de enfoque, final del autofocus, bloqueo AF/AE y liberación, zoom, EV, WB, enfoque manual, ISO y obturación en la principal. La espera de enfoque de build23 evita anunciar éxito antes del inicio del barrido. Las cuatro cámaras tomaron JPEG. Ultra gran angular y frontal declararon enfoque fijo y RAW no disponible. La aplicación de estados y el movimiento de la lente no sustituyen una revisión óptica de nitidez.
+Las pilas fusionaron 3/3, 5/5, 7/7, 9/9 fotogramas en esta sesión y terminaron sin timeout. Estas cifras no se extrapolan a otras escenas. [XCTest](https://github.com/Gokuencinar/Ultimate-CAM/actions/runs/39997982041) comprueba que el visor ocupa el ancho y alto de pantalla y recibe toque/pulsación larga, además de selección del temporizador y ajustes/perfil Luz baja. El visor recorta para llenar la pantalla; las fotos conservan formato y resolución originales.
 
-En la auditoría de build23 las pilas de 3/5/7/9 terminaron sin timeout y fusionaron 3/3, 5/5, 7/7 y 9/9 fotogramas. Los resultados tuvieron entre 1915 y 1920 píxeles de ancho y entre 2555 y 2560 de alto. Estas cifras pertenecen a esa escena y compilación.
-
-Pasaron las pruebas sintéticas de ruido, traslación, referencia nítida, rechazo de movimiento y resolución completa. La comparación visual con Cámara de Apple o GCam, orientación en Fotos y uso sostenido de memoria/temperatura siguen pendientes. No es un HDR+ ni un Night Sight completo.
+Pasaron las pruebas sintéticas del procesador. Quedan pendientes la revisión visual de nitidez, encuadre, orientación y Fotos, la interacción física con el botón de liberación y temporizador, la comparación de calidad con Cámara de Apple/GCam y medidas sostenidas de memoria/temperatura. No es una implementación completa de HDR+ ni Night Sight.
 
 Repositorio: [Gokuencinar/Ultimate-CAM](https://github.com/Gokuencinar/Ultimate-CAM).
 
@@ -31,6 +29,7 @@ Los perfiles Natural, Detalle y Luz baja ajustan los controles de procesado exis
 ## Lo que implementa el código
 
 - Vista previa y selección de cámaras físicas: ultra gran angular, principal, teleobjetivo y frontal, según disponibilidad.
+- Flash OFF/AUTO/ON en Foto JPEG, condicionado al soporte y disponibilidad de la lente. Desactivado para RAW y pilas.
 - Foto individual JPEG. Cada petición usa prioridad `.speed` para no exigir una fusión adicional al sistema y respetar ISO y obturación bloqueados; la fusión múltiple se hace en la app.
 - Compensación de exposición entre −2 y +2 EV, limitada a lo que admita cada cámara.
 - Balance de blancos automático o manual entre 2500 y 8000 K y matiz verde/magenta de -100 a +100, con límites de ganancias del dispositivo. No es una calibración de color.
@@ -126,3 +125,8 @@ Las publicaciones describen técnicas y no convierten el código de este prototi
 ### Auditoría de 0.3
 
 El canal local de diagnóstico conserva el requisito de primer plano y solicitud JSON + SIGUSR1. Además de captura, admite órdenes acotadas `focus`, `lens`, `control`, `inspect` y `save`. La última realiza un guardado explícito del resultado actual, con `format` igual a `all` o `jpeg` y `reference` opcional. Estas pruebas escriben en Fotos y solo deben usarse dentro de una sesión de pruebas autorizada. No hay órdenes de borrado ni ejecución arbitraria. La confirmación del callback de PhotoKit se distingue de una revisión visual del álbum.
+
+
+En build26, la solicitud local de captura admite `"flash":"off"`, `"auto"` u `"on"`, solo en Foto JPEG. Una solicitud RAW o Pila con flash se rechaza antes de enviarla al sensor. El control de balance de blancos admite `"tint":"-35"` (rango -100 a +100) junto a `"value":"5000"`; el registro permite consultar las ganancias aplicadas. Estos controles conservan la validación de primer plano.
+
+El flash se configura en cada [solicitud fotográfica](https://developer.apple.com/documentation/avfoundation/avcapturephotosettings/flashmode), comprobando los [modos soportados por la salida](https://developer.apple.com/documentation/avfoundation/avcapturephotooutput/supportedflashmodes-1n6nm). Se registra el indicador resuelto de la captura; este no es una medición de iluminación ni de calidad de imagen.
