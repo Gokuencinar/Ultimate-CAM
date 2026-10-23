@@ -620,7 +620,16 @@ final class CameraModel: NSObject, ObservableObject, AVCapturePhotoCaptureDelega
             self.nightRawFrames = []
             self.rawData = nil
             self.frames = []
+            self.captureStage = "processing"
             self.message("Procesando…")
+            if options.nightStatic {
+                self.queue.asyncAfter(deadline: .now() + 90) {
+                    guard self.inFlight, self.transaction == token, self.captureStage == "processing" else { return }
+                    self.captureRecoveryRequired = true
+                    self.publish { self.ready = false }
+                    self.finishFailure(CameraFailure.message("El procesado nocturno no terminó en 90 segundos. Cierra y abre Ultimate CAM; no se repetirá la captura."))
+                }
+            }
             self.processing.async {
                 let processed = Result { try autoreleasepool {
                     do {
@@ -643,6 +652,7 @@ final class CameraModel: NSObject, ObservableObject, AVCapturePhotoCaptureDelega
                             "mergedFrames": result.mergedFrames, "rawBytes": result.raw?.count ?? 0,
                             "details": result.details, "fusionSource": result.source,
                             "night": options.nightStatic, "rawFrames": rawBurst?.count ?? 0])
+                        self.captureStage = "idle"
                         self.result = result
                         self.savedKinds = []
                         self.exportedResult = nil
@@ -685,6 +695,7 @@ final class CameraModel: NSObject, ObservableObject, AVCapturePhotoCaptureDelega
         CaptureTrace.record("capture.failure", ["description": error.localizedDescription])
         transaction = UUID()
         captureID = nil
+        captureStage = "idle"
         restoreDevice()
         frames = []
         nightRawFrames = []

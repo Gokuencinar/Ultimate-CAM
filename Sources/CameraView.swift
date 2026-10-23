@@ -298,7 +298,10 @@ struct CameraView: View {
             Section("Captura") {
                 Toggle("RAW + JPEG", isOn: $rawEnabled).disabled(!camera.supportsRAW || stack)
                 if !camera.supportsRAW { Text("RAW no disponible en la cámara actual.").font(.footnote).foregroundStyle(.secondary) }
-                if stack { Text("La pila usa JPEG. RAW se captura en modo Foto.").font(.footnote).foregroundStyle(.secondary) }
+                if options.nightStatic {
+                    Text(camera.supportsRAW ? "Noche selecciona RAW automáticamente. Se conserva el DNG de referencia y se exporta el JPEG fusionado." : "Esta lente usa la alternativa JPEG nocturna; no dispone de RAW.")
+                        .font(.footnote).foregroundStyle(.secondary)
+                } else if stack { Text("La pila usa JPEG. RAW se captura en modo Foto.").font(.footnote).foregroundStyle(.secondary) }
                 Picker("Flash", selection: $flash) {
                     ForEach(CameraFlash.allCases) { item in Text(item.label).tag(item) }
                 }.disabled(!camera.supportsFlash || stack || rawEnabled)
