@@ -110,6 +110,11 @@ final class BurstProcessor {
                 let request = VNTranslationalImageRegistrationRequest(targetedCIImage: registrationImage(image))
                 let handler = VNImageRequestHandler(ciImage: registrationReference)
                 do { try handler.perform([request]) } catch { return }
+                #if os(macOS)
+                if ProcessInfo.processInfo.environment["ULTIMATECAM_PROCESSOR_TRACE"] == "1" {
+                    print("registration extent=\(reference.extent) scale=\(registrationScale) result=\(String(describing: request.results?.first))")
+                }
+                #endif
                 guard let observation = request.results?.first,
                       observation.confidence >= 0.5 else { return }
                 let transform = CGAffineTransform(translationX: observation.alignmentTransform.tx / registrationScale,

@@ -52,7 +52,7 @@ jobs:
         run: |
           set -euo pipefail
           xcrun --sdk macosx swiftc -O Sources/NightCapturePlan.swift Sources/ProcessingOptions.swift Sources/BurstProcessor.swift Tests/ProcessorChecks.swift -o build/processor-checks
-          build/processor-checks 2>&1 | tee build/processor-checks.log
+          ULTIMATECAM_PROCESSOR_TRACE=1 build/processor-checks 2>&1 | tee build/processor-checks.log
       - name: Package rootless DEB
         run: bash scripts/package_deb.sh
       - name: Build read-only device diagnostic

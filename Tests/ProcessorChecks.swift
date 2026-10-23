@@ -132,6 +132,7 @@ struct ProcessorChecks {
         largeOptions.maximumDimension = 4096
         let largeFusion = try processor.process([largeData, shiftedData], options: largeOptions)
         let largePixels = try bitmap(largeFusion.jpeg), largeReference = try bitmap(largeData)
+        log("Large translation: \(largeFusion.details)")
         try require(largeFusion.mergedFrames == 2 && largePixels.width > 2000 && largePixels.height > 2000,
             "Reduced registration lost full-resolution fusion")
         var largeError = Double.infinity
