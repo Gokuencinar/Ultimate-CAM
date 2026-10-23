@@ -50,6 +50,7 @@ struct CameraView: View {
     @State private var timerSeconds = 0
     @State private var countdown = 0
     @State private var countdownTask: Task<Void, Never>?
+    @State private var countdownID = UUID()
     @State private var manualFocus = false
     @State private var focusPosition: Double = 0.5
     @State private var zoom: Double = 1
@@ -357,20 +358,28 @@ struct CameraView: View {
         return seconds < 1 ? "1/\(Int((1 / seconds).rounded())) s" : String(format: "%.2f s", seconds)
     }
     private func applyExposure() { camera.setManualExposure(iso: manualExposure ? iso : nil, seconds: pow(2, shutterStops)) }
-    private func cancelCountdown() { countdownTask?.cancel(); countdownTask = nil; countdown = 0 }
+    private func cancelCountdown() {
+        countdownID = UUID()
+        countdownTask?.cancel(); countdownTask = nil; countdown = 0
+    }
     private func takePhoto() {
         let captureStack = stack, count = stackCount, raw = rawEnabled, processing = options
         if timerSeconds == 0 { camera.capture(stack: captureStack, count: count, raw: raw, options: processing); return }
         let delay = timerSeconds
+        let id = UUID()
+        countdownID = id
         countdownTask = Task { @MainActor in
             do {
                 for value in stride(from: delay, through: 1, by: -1) {
+                    guard countdownID == id else { return }
                     countdown = value
                     try await Task.sleep(nanoseconds: 1_000_000_000)
                 }
+                guard countdownID == id else { return }
                 countdown = 0
+                countdownTask = nil
                 camera.capture(stack: captureStack, count: count, raw: raw, options: processing)
-            } catch { countdown = 0 }
+            } catch { if countdownID == id { countdown = 0; countdownTask = nil } }
         }
     }
 

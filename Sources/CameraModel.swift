@@ -334,7 +334,13 @@ final class CameraModel: NSObject, ObservableObject, AVCapturePhotoCaptureDelega
     }
 
     private func finishFocus(_ token: UUID, device: AVCaptureDevice, lock: Bool, remaining: Int) {
-        guard token == focusToken, active, input?.device === device, !inFlight else { return }
+        guard token == focusToken, active, input?.device === device else { return }
+        if inFlight {
+            if remaining > 0 {
+                queue.asyncAfter(deadline: .now() + 0.2) { self.finishFocus(token, device: device, lock: lock, remaining: remaining - 1) }
+            } else { publish { self.focusStatus = "Toca el visor para enfocar" } }
+            return
+        }
         if device.isAdjustingFocus || device.isAdjustingExposure {
             if remaining > 0 {
                 queue.asyncAfter(deadline: .now() + 0.15) { self.finishFocus(token, device: device, lock: lock, remaining: remaining - 1) }
@@ -399,6 +405,11 @@ final class CameraModel: NSObject, ObservableObject, AVCapturePhotoCaptureDelega
         queue.async {
             guard self.active, self.session.isRunning, !self.interrupted, !self.inFlight, !self.captureRecoveryRequired,
                   let device = self.input?.device else { return }
+            guard !raw || (!stack && !self.output.availableRawPhotoPixelFormatTypes.isEmpty) else {
+                self.message(stack ? "RAW se captura en modo Foto, no en Pila." : "Esta cámara no admite RAW. Selecciona JPEG u otra lente.")
+                CaptureTrace.record("capture.rejected", ["reason": "RAW unavailable in this configuration"])
+                return
+            }
             self.inFlight = true
             self.transaction = UUID()
             self.frames = []
