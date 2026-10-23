@@ -3,13 +3,16 @@ import Foundation
 /// Bounded local diagnostics. Records exposure/ISO/timestamps only; no pixels, location or credentials.
 enum CaptureTrace {
     private static let queue = DispatchQueue(label: "com.gokuencinar.ultimatecam.trace")
+    private static var sequence: UInt64 = 0
     static let file = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0]
         .appendingPathComponent("UltimateCAM-capture.jsonl")
 
     static func record(_ event: String, _ fields: [String: Any] = [:]) {
         RuntimeDiagnostics.record(event, path: file.path)
         queue.async {
+            sequence += 1
             var entry = fields
+            entry["sequence"] = sequence
             entry["event"] = event
             entry["time"] = ISO8601DateFormatter().string(from: Date())
             entry["pid"] = ProcessInfo.processInfo.processIdentifier

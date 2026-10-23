@@ -96,10 +96,15 @@ final class BurstProcessor {
         var common = reference.extent
         // Register reduced images; retain full resolution for all fusion/render operations.
         let registrationScale = min(1, 1024 / max(reference.extent.width, reference.extent.height))
-        func registrationImage(_ image: CIImage) -> CIImage {
-            image.transformed(by: CGAffineTransform(scaleX: registrationScale, y: registrationScale))
+        func registrationImage(_ image: CIImage) throws -> CGImage {
+            let reduced = image.transformed(by: CGAffineTransform(scaleX: registrationScale, y: registrationScale))
+            guard let rendered = context.createCGImage(reduced, from: reduced.extent,
+                format: .RGBA8, colorSpace: CGColorSpace(name: CGColorSpace.sRGB)!) else {
+                throw CameraFailure.message("No se pudo preparar la imagen de alineación.")
+            }
+            return rendered
         }
-        let registrationReference = registrationImage(reference)
+        let registrationReference = try registrationImage(reference)
         var accepted = 1
         for (index, frame) in inputFrames.enumerated() where index != referenceIndex {
             try autoreleasepool {
@@ -107,9 +112,14 @@ final class BurstProcessor {
                 guard abs(image.extent.width - reference.extent.width) < 1,
                       abs(image.extent.height - reference.extent.height) < 1 else { return }
                 // Vision maps the targeted (floating) image into the handler's reference image.
-                let request = VNTranslationalImageRegistrationRequest(targetedCIImage: registrationImage(image))
-                let handler = VNImageRequestHandler(ciImage: registrationReference)
-                do { try handler.perform([request]) } catch { return }
+                let request = VNTranslationalImageRegistrationRequest(targetedCGImage: try registrationImage(image))
+                let handler = VNImageRequestHandler(cgImage: registrationReference)
+                do { try handler.perform([request]) } catch {
+                    #if os(macOS)
+                    print("registration failure: \(error)")
+                    #endif
+                    return
+                }
                 #if os(macOS)
                 if ProcessInfo.processInfo.environment["ULTIMATECAM_PROCESSOR_TRACE"] == "1" {
                     print("registration extent=\(reference.extent) scale=\(registrationScale) result=\(String(describing: request.results?.first))")
