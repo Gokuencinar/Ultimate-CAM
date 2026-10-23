@@ -19,7 +19,7 @@ enum CameraFailure: LocalizedError {
     }
 }
 
-/// JPEG burst processing with a noise-aware reference selection, translational
+/// RAW / JPEG burst processing with a noise-aware reference selection, translational
 /// alignment and conservative rejection of changed areas. No Google code.
 final class BurstProcessor {
     private let context = CIContext(options: [
@@ -94,6 +94,12 @@ final class BurstProcessor {
         let reference = try decode(inputFrames[referenceIndex])
         var accumulator = reference
         var common = reference.extent
+        // Register reduced images; retain full resolution for all fusion/render operations.
+        let registrationScale = min(1, 1024 / max(reference.extent.width, reference.extent.height))
+        func registrationImage(_ image: CIImage) -> CIImage {
+            image.transformed(by: CGAffineTransform(scaleX: registrationScale, y: registrationScale))
+        }
+        let registrationReference = registrationImage(reference)
         var accepted = 1
         for (index, frame) in inputFrames.enumerated() where index != referenceIndex {
             try autoreleasepool {
@@ -101,12 +107,13 @@ final class BurstProcessor {
                 guard abs(image.extent.width - reference.extent.width) < 1,
                       abs(image.extent.height - reference.extent.height) < 1 else { return }
                 // Vision maps the targeted (floating) image into the handler's reference image.
-                let request = VNTranslationalImageRegistrationRequest(targetedCIImage: image)
-                let handler = VNImageRequestHandler(ciImage: reference)
+                let request = VNTranslationalImageRegistrationRequest(targetedCIImage: registrationImage(image))
+                let handler = VNImageRequestHandler(ciImage: registrationReference)
                 do { try handler.perform([request]) } catch { return }
                 guard let observation = request.results?.first,
                       observation.confidence >= 0.5 else { return }
-                let transform = observation.alignmentTransform
+                let transform = CGAffineTransform(translationX: observation.alignmentTransform.tx / registrationScale,
+                    y: observation.alignmentTransform.ty / registrationScale)
                 guard abs(transform.tx) < reference.extent.width * 0.04,
                       abs(transform.ty) < reference.extent.height * 0.04 else { return }
                 var aligned = image.transformed(by: transform)
@@ -187,6 +194,32 @@ final class BurstProcessor {
         return CaptureResult(jpeg: data as Data, reference: referenceData,
             details: prefix + details, mergedFrames: accepted,
             raw: rawFrames?[referenceIndex], source: isRAW ? "developed-RAW" : "JPEG")
+    }
+
+    /// Explicit SSH export only. Compare Apple's DNG defaults with our linear decode;
+    /// these diagnostic previews are never substituted for a captured result.
+    func exportRAWDiagnostics(_ data: Data, to directory: URL) throws {
+        guard let filter = CIRAWFilter(imageData: data, identifierHint: "com.adobe.raw-image") else {
+            throw CameraFailure.message("No se pudo inspeccionar el DNG.")
+        }
+        let info: [String: Any] = ["temperature": filter.neutralTemperature, "tint": filter.neutralTint,
+            "baselineExposure": filter.baselineExposure, "boost": filter.boostAmount,
+            "colorNR": filter.colorNoiseReductionAmount, "lumaNR": filter.luminanceNoiseReductionAmount]
+        try JSONSerialization.data(withJSONObject: info, options: [.sortedKeys]).write(to: directory.appendingPathComponent("raw-settings.json"))
+        func write(_ image: CIImage?, _ name: String) throws {
+            guard let image else { throw CameraFailure.message("Revelado de diagnóstico vacío.") }
+            let factor = min(1, 1600 / max(image.extent.width, image.extent.height))
+            let preview = image.transformed(by: CGAffineTransform(scaleX: factor, y: factor))
+            try context.writeJPEGRepresentation(of: preview, to: directory.appendingPathComponent(name),
+                colorSpace: CGColorSpace(name: CGColorSpace.sRGB)!, options: [:])
+        }
+        try write(filter.outputImage, "raw-default.jpg")
+        filter.boostAmount = 0; filter.baselineExposure = 0; filter.exposure = 0
+        if filter.isLocalToneMapSupported { filter.localToneMapAmount = 0 }
+        if filter.isLuminanceNoiseReductionSupported { filter.luminanceNoiseReductionAmount = 0 }
+        if filter.isSharpnessSupported { filter.sharpnessAmount = 0 }
+        try write(filter.outputImage, "raw-linear.jpg")
+        if let linear = filter.outputImage { try write(nightTone(linear), "raw-linear-toned.jpg") }
     }
 
     /// Luminance shoulder after fusion; gain is bounded and measured in linear RGB.

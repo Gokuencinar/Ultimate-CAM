@@ -72,6 +72,7 @@ final class CameraModel: NSObject, ObservableObject, AVCapturePhotoCaptureDelega
     private var inFlight = false
     private var frames = [Data]()
     private var desiredCount = 1
+    private var savedFrameDurations: (min: CMTime, max: CMTime)?
     private var savedExposure: AVCaptureDevice.ExposureMode?
     private var savedWhiteBalance: AVCaptureDevice.WhiteBalanceMode?
     private var savedFocus: AVCaptureDevice.FocusMode?
@@ -349,7 +350,7 @@ final class CameraModel: NSObject, ObservableObject, AVCapturePhotoCaptureDelega
                 self.publish { self.isFocusLocked = false; self.focusStatus = device.isFocusPointOfInterestSupported ? "Enfocando…" : "Enfoque fijo · ajustando la luz" }
                 CaptureTrace.record("focus.request", ["x": point.x, "y": point.y, "lock": lock,
                     "supported": device.isFocusPointOfInterestSupported, "lens": self.selectedLens.rawValue])
-                self.queue.asyncAfter(deadline: .now() + 0.2) { self.finishFocus(token, device: device, lock: lock, remaining: 20) }
+                self.queue.asyncAfter(deadline: .now() + 0.2) { self.finishFocus(token, device: device, lock: lock, remaining: device.exposureDuration.seconds > 1.0 / 30 ? 80 : 20) }
             } catch { self.message(error.localizedDescription) }
         }
     }
@@ -501,11 +502,13 @@ final class CameraModel: NSObject, ObservableObject, AVCapturePhotoCaptureDelega
                         device.focusMode = .locked
                     }
                     if let plan {
+                        self.savedFrameDurations = (device.activeVideoMinFrameDuration, device.activeVideoMaxFrameDuration)
                         self.desiredCount = plan.count
                         let token = self.transaction
                         CaptureTrace.record("night.plan", ["seconds": plan.seconds, "iso": plan.iso,
                             "count": plan.count, "source": self.rawRequested ? "RAW" : "JPEG",
-                            "totalExposureSeconds": plan.seconds * Double(plan.count)])
+                            "totalExposureSeconds": plan.seconds * Double(plan.count),
+                            "minFrameSeconds": device.activeVideoMinFrameDuration.seconds, "maxFrameSeconds": device.activeVideoMaxFrameDuration.seconds])
                         self.message("Noche estática: \(plan.count) fotos. Apoya el iPhone hasta terminar.")
                         self.captureStage = "night-setup"
                         device.setExposureModeCustom(duration: CMTime(seconds: plan.seconds, preferredTimescale: 1_000_000),
@@ -663,6 +666,7 @@ final class CameraModel: NSObject, ObservableObject, AVCapturePhotoCaptureDelega
                 }
             }
             self.processing.async {
+                let processingStarted = ProcessInfo.processInfo.systemUptime
                 let processed = Result { try autoreleasepool {
                     do {
                         var result = try BurstProcessor().process(captured, options: options, rawFrames: rawBurst)
@@ -683,7 +687,8 @@ final class CameraModel: NSObject, ObservableObject, AVCapturePhotoCaptureDelega
                         CaptureTrace.record("capture.success", ["bytes": result.jpeg.count,
                             "mergedFrames": result.mergedFrames, "rawBytes": result.raw?.count ?? 0,
                             "details": result.details, "fusionSource": result.source,
-                            "night": options.nightStatic, "rawFrames": rawBurst?.count ?? 0])
+                            "night": options.nightStatic, "rawFrames": rawBurst?.count ?? 0,
+                            "processingSeconds": ProcessInfo.processInfo.systemUptime - processingStarted])
                         self.captureStage = "idle"
                         self.result = result
                         self.savedKinds = []
@@ -710,11 +715,23 @@ final class CameraModel: NSObject, ObservableObject, AVCapturePhotoCaptureDelega
 
     private func restoreDevice() {
         guard let device = input?.device,
-              savedExposure != nil || savedWhiteBalance != nil || savedFocus != nil else { return }
+              savedExposure != nil || savedWhiteBalance != nil || savedFocus != nil || savedFrameDurations != nil else { return }
         do {
             try device.lockForConfiguration()
             defer { device.unlockForConfiguration() }
             if let mode = savedExposure { device.exposureMode = mode }
+            if let saved = savedFrameDurations {
+                if CMTimeCompare(saved.min, device.activeVideoMaxFrameDuration) > 0 {
+                    device.activeVideoMaxFrameDuration = saved.max
+                    device.activeVideoMinFrameDuration = saved.min
+                } else {
+                    device.activeVideoMinFrameDuration = saved.min
+                    device.activeVideoMaxFrameDuration = saved.max
+                }
+                CaptureTrace.record("night.device.restored", ["minFrameSeconds": device.activeVideoMinFrameDuration.seconds,
+                    "maxFrameSeconds": device.activeVideoMaxFrameDuration.seconds, "exposureMode": device.exposureMode.rawValue])
+                savedFrameDurations = nil
+            }
             if let mode = savedWhiteBalance { device.whiteBalanceMode = mode }
             if let mode = savedFocus { device.focusMode = mode }
             savedExposure = nil
@@ -808,20 +825,30 @@ final class CameraModel: NSObject, ObservableObject, AVCapturePhotoCaptureDelega
             guard !self.inFlight, let result = self.result else {
                 CaptureTrace.record("export.failure", ["reason": "no idle result"]); return
             }
+            self.inFlight = true
+            let existing = self.exportedResult
+            self.processing.async {
             do {
-                let directory = self.exportedResult ?? CaptureTrace.file.deletingLastPathComponent()
+                let directory = existing ?? CaptureTrace.file.deletingLastPathComponent()
                     .appendingPathComponent("UltimateCAM-Inspection", isDirectory: true)
                     .appendingPathComponent(UUID().uuidString, isDirectory: true)
-                if self.exportedResult == nil {
+                if existing == nil {
                     try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
                     try result.jpeg.write(to: directory.appendingPathComponent("result.jpg"), options: .atomic)
                     try result.reference.write(to: directory.appendingPathComponent("reference.jpg"), options: .atomic)
                     if let raw = result.raw { try raw.write(to: directory.appendingPathComponent("reference.dng"), options: .atomic) }
-                    self.exportedResult = directory
+                    if let raw = result.raw {
+                        try BurstProcessor().exportRAWDiagnostics(raw, to: directory)
+                    }
                 }
+                self.queue.async { self.exportedResult = directory; self.inFlight = false }
                 CaptureTrace.record("export.success", ["directory": directory.path, "source": result.source,
                     "raw": result.raw != nil, "mergedFrames": result.mergedFrames])
-            } catch { CaptureTrace.record("export.failure", ["reason": error.localizedDescription]) }
+            } catch {
+                self.queue.async { self.inFlight = false }
+                CaptureTrace.record("export.failure", ["reason": error.localizedDescription])
+            }
+            }
         }
     }
 
@@ -867,6 +894,7 @@ final class CameraModel: NSObject, ObservableObject, AVCapturePhotoCaptureDelega
                     "focusPointX": device.focusPointOfInterest.x, "focusPointY": device.focusPointOfInterest.y,
                     "adjustingFocus": device.isAdjustingFocus, "iso": device.iso,
                     "seconds": device.exposureDuration.seconds, "exposureMode": device.exposureMode.rawValue,
+                    "minFrameSeconds": device.activeVideoMinFrameDuration.seconds, "maxFrameSeconds": device.activeVideoMaxFrameDuration.seconds,
                     "bias": device.exposureTargetBias, "zoom": device.videoZoomFactor,
                     "whiteBalanceMode": device.whiteBalanceMode.rawValue,
                     "redGain": device.deviceWhiteBalanceGains.redGain, "greenGain": device.deviceWhiteBalanceGains.greenGain,

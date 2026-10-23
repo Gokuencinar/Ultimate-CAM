@@ -124,6 +124,22 @@ struct ProcessorChecks {
 
         let cleanData = try png(seed: 1)
         let cleanImage = CIImage(data: cleanData)!
+        let large = cleanImage.transformed(by: CGAffineTransform(scaleX: 8, y: 8))
+        let shiftedLarge = large.transformed(by: CGAffineTransform(translationX: 24, y: -16)).cropped(to: large.extent)
+        let largeData = context.pngRepresentation(of: large, format: .RGBA8, colorSpace: space)!
+        let shiftedData = context.pngRepresentation(of: shiftedLarge, format: .RGBA8, colorSpace: space)!
+        var largeOptions = fixedReference
+        largeOptions.maximumDimension = 4096
+        let largeFusion = try processor.process([largeData, shiftedData], options: largeOptions)
+        let largePixels = try bitmap(largeFusion.jpeg), largeReference = try bitmap(largeData)
+        try require(largeFusion.mergedFrames == 2 && largePixels.width > 2000 && largePixels.height > 2000,
+            "Reduced registration lost full-resolution fusion")
+        var largeError = Double.infinity
+        for y in 14...18 { for x in 0...2 {
+            largeError = min(largeError, rmse(largePixels, against: largeReference, offsetX: x, offsetY: y))
+        } }
+        try require(largeError < 8, "Reduced registration did not rescale translation correctly")
+        log("Reduced registration/full resolution RMSE=\(largeError)")
         let blurredImage = cleanImage.clampedToExtent().applyingFilter("CIGaussianBlur", parameters: [kCIInputRadiusKey: 3])
             .cropped(to: cleanImage.extent)
         let blurredData = context.pngRepresentation(of: blurredImage, format: .RGBA8, colorSpace: space)!

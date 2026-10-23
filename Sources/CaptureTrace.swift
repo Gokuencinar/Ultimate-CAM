@@ -1,6 +1,6 @@
 import Foundation
 
-/// Bounded local diagnostics. Never records pixels, photo metadata or credentials.
+/// Bounded local diagnostics. Records exposure/ISO/timestamps only; no pixels, location or credentials.
 enum CaptureTrace {
     private static let queue = DispatchQueue(label: "com.gokuencinar.ultimatecam.trace")
     static let file = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0]
@@ -19,7 +19,12 @@ enum CaptureTrace {
             do {
                 try FileManager.default.createDirectory(at: file.deletingLastPathComponent(), withIntermediateDirectories: true)
                 let size = (try? FileManager.default.attributesOfItem(atPath: file.path)[.size] as? NSNumber)?.intValue ?? 0
-                if size > 131072 || !FileManager.default.fileExists(atPath: file.path) {
+                if size > 131072 {
+                    let previous = file.appendingPathExtension("previous")
+                    if FileManager.default.fileExists(atPath: previous.path) { try FileManager.default.removeItem(at: previous) }
+                    try FileManager.default.moveItem(at: file, to: previous)
+                }
+                if !FileManager.default.fileExists(atPath: file.path) {
                     try data.write(to: file, options: .atomic)
                 } else {
                     let handle = try FileHandle(forWritingTo: file)
