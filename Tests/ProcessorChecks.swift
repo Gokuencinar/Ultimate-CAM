@@ -87,12 +87,16 @@ struct ProcessorChecks {
 
     static func run() throws {
         let plan = try NightCapturePlan.make(iso: 1600, seconds: 1.0 / 30, isoRange: 25...3200, durationRange: 0.00001...0.333)
-        try require(plan.seconds > 0.3 && plan.iso < 200 && plan.count == 9, "Static night did not trade ISO for exposure")
+        try require(plan.seconds == 0.25 && plan.iso < 250 && plan.count == 16, "Static night did not trade ISO for exposure")
         try require(abs(plan.iso * plan.seconds - 1600.0 / 30) < 0.001, "Night plan changed metered brightness")
         let bright = try NightCapturePlan.make(iso: 25, seconds: 0.001, isoRange: 25...3200, durationRange: 0.00001...0.333)
         try require(abs(bright.seconds - 0.001) < 0.000001, "Night plan overexposes a minimum-ISO scene")
         let long = try NightCapturePlan.make(iso: 3200, seconds: 0.06, isoRange: 25...3200, durationRange: 0.00001...1)
         try require(long.count == 8 && long.seconds == 1 && long.seconds * Double(long.count) <= 8, "Static exposure exceeds collection budget")
+        let rounded = try NightCapturePlan.make(iso: 803, seconds: 1.0 / 30, isoRange: 32...3072,
+            durationRange: 0.00001...1)
+        try require(rounded.seconds == 0.5 && rounded.count == 16 && abs(rounded.iso * rounded.seconds - 803.0 / 30) < 0.001,
+            "Night long-shutter quantization changed metered exposure or integration budget")
         let shortfall = try NightCapturePlan.make(iso: 3200, seconds: 0.06, isoRange: 25...3200,
             durationRange: 0.00001...1, targetOffset: -5)
         try require(shortfall.compensationEV == 2 && abs(shortfall.iso * shortfall.seconds - 768) < 0.001,

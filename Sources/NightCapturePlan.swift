@@ -27,9 +27,14 @@ struct NightCapturePlan {
         let limit = min(1, durationRange.upperBound)
         // At minimum ISO, extending an already bright exposure would clip it.
         let desired = min(limit, meteredProduct / isoRange.lowerBound)
-        let duration = min(durationRange.upperBound, max(durationRange.lowerBound, max(seconds, desired)))
+        // Avoid arbitrary long durations that this iPhone reports rounded in
+        // DNG EXIF (for example requested 0.834 s becomes declared 1 s).
+        let shutters: [Double] = [1, 0.5, 0.25, 0.125, 1.0/15, 1.0/30, 1.0/60,
+            1.0/125, 1.0/250, 1.0/500, 1.0/1000, 1.0/2000, 1.0/4000, 1.0/8000]
+        let rounded = shutters.first(where: { $0 <= desired && $0 >= durationRange.lowerBound }) ?? desired
+        let duration = min(durationRange.upperBound, max(durationRange.lowerBound, max(seconds, rounded)))
         let sensitivity = min(isoRange.upperBound, max(isoRange.lowerBound, meteredProduct / duration))
-        let frames = min(9, max(3, duration <= 8.0 / 9 ? 9 : Int(floor(8 / duration))))
+        let frames = min(16, max(3, Int(floor(8 / duration))))
         return NightCapturePlan(seconds: duration, iso: sensitivity, count: frames, compensationEV: compensation)
     }
 }
