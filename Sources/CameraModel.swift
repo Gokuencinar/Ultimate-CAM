@@ -85,6 +85,8 @@ final class CameraModel: NSObject, ObservableObject, AVCapturePhotoCaptureDelega
     private var requestedFlash = CameraFlash.off
     private var rawRequested = false
     private var rawData: Data?
+    private var nightRawFrames = [Data]()
+    private var exportedResult: URL?
     private var captureRecoveryRequired = false
     private var focusToken = UUID()
     private var savedKinds = Set<String>()
@@ -446,12 +448,14 @@ final class CameraModel: NSObject, ObservableObject, AVCapturePhotoCaptureDelega
         queue.async {
             guard self.active, self.session.isRunning, !self.interrupted, !self.inFlight, !self.captureRecoveryRequired,
                   let device = self.input?.device else { return }
-            guard !raw || (!stack && !self.output.availableRawPhotoPixelFormatTypes.isEmpty) else {
-                self.message(stack ? "RAW se captura en modo Foto, no en Pila." : "Esta cámara no admite RAW. Selecciona JPEG u otra lente.")
+            let night = options.nightStatic
+            let burst = stack || night
+            guard !raw || (!burst && !self.output.availableRawPhotoPixelFormatTypes.isEmpty) else {
+                self.message(burst ? "En Noche, RAW se selecciona automáticamente; en Pila se usa JPEG." : "Esta cámara no admite RAW.")
                 CaptureTrace.record("capture.rejected", ["reason": "RAW unavailable in this configuration"])
                 return
             }
-            guard flash == .off || (!stack && !raw && device.hasFlash && device.isFlashAvailable &&
+            guard flash == .off || (!burst && !raw && device.hasFlash && device.isFlashAvailable &&
                   self.output.supportedFlashModes.contains(flash.mode)) else {
                 self.message("El flash no está disponible. Usa Foto JPEG y una cámara con flash preparado.")
                 CaptureTrace.record("capture.rejected", ["reason": "flash unavailable in this configuration"])
@@ -461,13 +465,14 @@ final class CameraModel: NSObject, ObservableObject, AVCapturePhotoCaptureDelega
             self.inFlight = true
             self.transaction = UUID()
             self.frames = []
-            self.desiredCount = stack ? min(9, max(3, count)) : 1
+            self.nightRawFrames = []
+            self.desiredCount = burst ? min(9, max(3, count)) : 1
             self.processingOptions = options
-            self.rawRequested = raw && !stack && !self.output.availableRawPhotoPixelFormatTypes.isEmpty
+            self.rawRequested = (raw || night) && !self.output.availableRawPhotoPixelFormatTypes.isEmpty
             self.rawData = nil
             self.publish { self.busy = true }
             do {
-                if stack {
+                if burst {
                     guard !device.isAdjustingExposure, !device.isAdjustingWhiteBalance,
                           !device.isAdjustingFocus else {
                         throw CameraFailure.message("Espera a que terminen el enfoque y la exposición y vuelve a capturar.")
@@ -475,18 +480,45 @@ final class CameraModel: NSObject, ObservableObject, AVCapturePhotoCaptureDelega
                     guard device.isExposureModeSupported(.locked), device.isWhiteBalanceModeSupported(.locked) else {
                         throw CameraFailure.message("Esta cámara no admite los bloqueos necesarios para la pila.")
                     }
-                    try device.lockForConfiguration()
-                    if device.exposureMode != .custom {
-                        self.savedExposure = device.exposureMode
-                        device.exposureMode = .locked
+                    if night && (device.exposureMode == .custom || !device.isExposureModeSupported(.custom)) {
+                        throw CameraFailure.message("Noche estática necesita exposición automática y soporte de exposición manual de la lente.")
                     }
+                    let plan = night ? try NightCapturePlan.make(iso: Double(device.iso), seconds: device.exposureDuration.seconds,
+                        isoRange: Double(device.activeFormat.minISO)...Double(device.activeFormat.maxISO),
+                        durationRange: device.activeFormat.minExposureDuration.seconds...device.activeFormat.maxExposureDuration.seconds) : nil
+                    try device.lockForConfiguration()
+                    defer { device.unlockForConfiguration() }
+                    if device.exposureMode != .custom { self.savedExposure = device.exposureMode }
                     self.savedWhiteBalance = device.whiteBalanceMode
                     device.whiteBalanceMode = .locked
                     if device.isFocusModeSupported(.locked) {
                         self.savedFocus = device.focusMode
                         device.focusMode = .locked
                     }
-                    device.unlockForConfiguration()
+                    if let plan {
+                        self.desiredCount = plan.count
+                        let token = self.transaction
+                        CaptureTrace.record("night.plan", ["seconds": plan.seconds, "iso": plan.iso,
+                            "count": plan.count, "source": self.rawRequested ? "RAW" : "JPEG",
+                            "totalExposureSeconds": plan.seconds * Double(plan.count)])
+                        self.message("Noche estática: \(plan.count) fotos. Apoya el iPhone hasta terminar.")
+                        device.setExposureModeCustom(duration: CMTime(seconds: plan.seconds, preferredTimescale: 1_000_000),
+                            iso: Float(plan.iso)) { _ in
+                            self.queue.async {
+                                guard self.inFlight, self.transaction == token else { return }
+                                CaptureTrace.record("night.exposure.applied", ["seconds": device.exposureDuration.seconds, "iso": device.iso])
+                                self.captureNext()
+                            }
+                        }
+                        self.queue.asyncAfter(deadline: .now() + 5) {
+                            guard self.inFlight, self.transaction == token, self.captureID == nil, self.frames.isEmpty else { return }
+                            self.captureRecoveryRequired = true
+                            self.publish { self.ready = false }
+                            self.finishFailure(CameraFailure.message("No se confirmó la exposición nocturna. Cierra y abre Ultimate CAM; no se ha repetido la captura."))
+                        }
+                        return
+                    }
+                    if device.exposureMode != .custom { device.exposureMode = .locked }
                 }
                 self.captureNext()
             } catch { self.finishFailure(error) }
@@ -574,19 +606,34 @@ final class CameraModel: NSObject, ObservableObject, AVCapturePhotoCaptureDelega
                 self.finishFailure(CameraFailure.message("No se recibió el DNG solicitado."))
                 return
             }
+            if self.processingOptions.nightStatic, let raw = self.rawData {
+                self.nightRawFrames.append(raw)
+                self.rawData = nil
+            }
             if self.frames.count < self.desiredCount { self.captureNext(); return }
             self.restoreDevice()
             let captured = self.frames
             let token = self.transaction
             let options = self.processingOptions
             let raw = self.rawData
+            let rawBurst: [Data]? = self.nightRawFrames.isEmpty ? nil : self.nightRawFrames
+            self.nightRawFrames = []
+            self.rawData = nil
             self.frames = []
             self.message("Procesando…")
             self.processing.async {
                 let processed = Result { try autoreleasepool {
-                    var result = try BurstProcessor().process(captured, options: options)
-                    result.raw = raw
-                    return result
+                    do {
+                        var result = try BurstProcessor().process(captured, options: options, rawFrames: rawBurst)
+                        if !options.nightStatic { result.raw = raw }
+                        return result
+                    } catch {
+                        guard options.nightStatic, let first = captured.first else { throw error }
+                        CaptureTrace.record("night.processing.fallback", ["error": error.localizedDescription])
+                        return CaptureResult(jpeg: first, reference: first,
+                            details: "Noche sin fusión: se conserva la referencia. " + error.localizedDescription,
+                            mergedFrames: 1, raw: rawBurst?.first, source: "reference-fallback")
+                    }
                 } }
                 self.queue.async {
                     guard self.transaction == token, self.inFlight else { return }
@@ -594,9 +641,11 @@ final class CameraModel: NSObject, ObservableObject, AVCapturePhotoCaptureDelega
                     case .success(let result):
                         CaptureTrace.record("capture.success", ["bytes": result.jpeg.count,
                             "mergedFrames": result.mergedFrames, "rawBytes": result.raw?.count ?? 0,
-                            "details": result.details])
+                            "details": result.details, "fusionSource": result.source,
+                            "night": options.nightStatic, "rawFrames": rawBurst?.count ?? 0])
                         self.result = result
                         self.savedKinds = []
+                        self.exportedResult = nil
                         self.publish {
                             self.preview = UIImage(data: result.jpeg)
                             self.referencePreview = UIImage(data: result.reference)
@@ -638,6 +687,7 @@ final class CameraModel: NSObject, ObservableObject, AVCapturePhotoCaptureDelega
         captureID = nil
         restoreDevice()
         frames = []
+        nightRawFrames = []
         rawData = nil
         inFlight = false
         publish { self.busy = false; self.status = error.localizedDescription }
@@ -710,12 +760,35 @@ final class CameraModel: NSObject, ObservableObject, AVCapturePhotoCaptureDelega
         }
     }
 
+    private func exportResult() {
+        queue.async {
+            guard !self.inFlight, let result = self.result else {
+                CaptureTrace.record("export.failure", ["reason": "no idle result"]); return
+            }
+            do {
+                let directory = self.exportedResult ?? CaptureTrace.file.deletingLastPathComponent()
+                    .appendingPathComponent("UltimateCAM-Inspection", isDirectory: true)
+                    .appendingPathComponent(UUID().uuidString, isDirectory: true)
+                if self.exportedResult == nil {
+                    try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+                    try result.jpeg.write(to: directory.appendingPathComponent("result.jpg"), options: .atomic)
+                    try result.reference.write(to: directory.appendingPathComponent("reference.jpg"), options: .atomic)
+                    if let raw = result.raw { try raw.write(to: directory.appendingPathComponent("reference.dng"), options: .atomic) }
+                    self.exportedResult = directory
+                }
+                CaptureTrace.record("export.success", ["directory": directory.path, "source": result.source,
+                    "raw": result.raw != nil, "mergedFrames": result.mergedFrames])
+            } catch { CaptureTrace.record("export.failure", ["reason": error.localizedDescription]) }
+        }
+    }
+
     private func diagnosticCommand(_ object: [String: String]) {
         func number(_ key: String, _ range: ClosedRange<Double>) -> Double? {
             guard let text = object[key], let value = Double(text), value.isFinite, range.contains(value) else { return nil }
             return value
         }
         switch object["action"] {
+        case "export": exportResult()
         case "save":
             guard ["all", "jpeg"].contains(object["format"] ?? "all") else { return }
             save(jpegOnly: object["format"] == "jpeg", includeReference: object["reference"] == "true")

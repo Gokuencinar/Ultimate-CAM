@@ -8,6 +8,7 @@ struct CaptureResult {
     let details: String
     let mergedFrames: Int
     var raw: Data? = nil
+    var source = "JPEG"
 }
 
 enum CameraFailure: LocalizedError {
@@ -26,16 +27,43 @@ final class BurstProcessor {
         .outputColorSpace: CGColorSpace(name: CGColorSpace.sRGB)!
     ])
 
-    func process(_ frames: [Data], options: ProcessingOptions = ProcessingOptions()) throws -> CaptureResult {
+    func process(_ frames: [Data], options: ProcessingOptions = ProcessingOptions(), rawFrames: [Data]? = nil) throws -> CaptureResult {
         guard let first = frames.first else { throw CameraFailure.message("No hay imágenes.") }
-        let adjustments = options.noiseReduction > 0 || options.sharpening > 0 || options.liftShadows > 0
-        if frames.count == 1 && !adjustments {
+        if let rawFrames, rawFrames.count != frames.count {
+            throw CameraFailure.message("La pila RAW está incompleta.")
+        }
+        let inputFrames = rawFrames ?? frames
+        let isRAW = rawFrames != nil
+        let adjustments = options.nightStatic || options.noiseReduction > 0 || options.sharpening > 0 || options.liftShadows > 0
+        if frames.count == 1 && !adjustments && !isRAW {
             return CaptureResult(jpeg: first, reference: first, details: "Foto individual, procesada por el sistema.", mergedFrames: 1)
         }
         // Limit the working image size to bound memory on the iPhone 11 Pro.
         func decode(_ data: Data) throws -> CIImage {
-            guard let image = CIImage(data: data, options: [.applyOrientationProperty: true]) else {
-                throw CameraFailure.message("No se pudo leer una foto.")
+            let image: CIImage
+            if isRAW {
+                guard let filter = CIRAWFilter(imageData: data, identifierHint: "com.adobe.raw-image") else {
+                    throw CameraFailure.message("No se pudo abrir el DNG para la fusión nocturna.")
+                }
+                filter.boostAmount = 0
+                filter.baselineExposure = 0
+                filter.exposure = 0
+                if filter.isLocalToneMapSupported { filter.localToneMapAmount = 0 }
+                if filter.isLuminanceNoiseReductionSupported { filter.luminanceNoiseReductionAmount = 0 }
+                if filter.isSharpnessSupported { filter.sharpnessAmount = 0 }
+                if let source = CGImageSourceCreateWithData(data as CFData, nil),
+                   let properties = CGImageSourceCopyPropertiesAtIndex(source, 0, nil) as? [CFString: Any],
+                   let orientation = properties[kCGImagePropertyOrientation] as? UInt32,
+                   let value = CGImagePropertyOrientation(rawValue: orientation) { filter.orientation = value }
+                guard let decoded = filter.outputImage else {
+                    throw CameraFailure.message("El revelado RAW no ha devuelto imagen.")
+                }
+                image = decoded
+            } else {
+                guard let decoded = CIImage(data: data, options: [.applyOrientationProperty: true]) else {
+                    throw CameraFailure.message("No se pudo leer una foto.")
+                }
+                image = decoded
             }
             // The selectable limit belongs to a multi-frame stack. Editing a
             // single photo must not silently downsample the full-resolution JPEG.
@@ -49,17 +77,25 @@ final class BurstProcessor {
         var referenceIndex = 0
         if options.chooseSharpestReference && frames.count > 1 {
             var best = -Double.infinity
-            for (index, frame) in frames.enumerated() {
-                let score = try autoreleasepool { sharpness(try decode(frame)) }
+            for (index, frame) in inputFrames.enumerated() {
+                let score = try autoreleasepool { () throws -> Double in
+                    if isRAW {
+                        guard let preview = CIImage(data: frames[index], options: [.applyOrientationProperty: true]) else {
+                            throw CameraFailure.message("No se pudo leer la referencia de cámara.")
+                        }
+                        return sharpness(preview)
+                    }
+                    return sharpness(try decode(frame))
+                }
                 if score > best { best = score; referenceIndex = index }
             }
         }
         let referenceData = frames[referenceIndex]
-        let reference = try decode(referenceData)
+        let reference = try decode(inputFrames[referenceIndex])
         var accumulator = reference
         var common = reference.extent
         var accepted = 1
-        for (index, frame) in frames.enumerated() where index != referenceIndex {
+        for (index, frame) in inputFrames.enumerated() where index != referenceIndex {
             try autoreleasepool {
                 let image = try decode(frame)
                 guard abs(image.extent.width - reference.extent.width) < 1,
@@ -113,6 +149,7 @@ final class BurstProcessor {
             return CaptureResult(jpeg: referenceData, reference: referenceData,
                                  details: "No se pudo alinear la pila. Se conserva la referencia sin fusionar.", mergedFrames: 1)
         }
+        if options.nightStatic { accumulator = try nightTone(accumulator.cropped(to: common)) }
         if options.noiseReduction > 0 {
             accumulator = accumulator.applyingFilter("CINoiseReduction", parameters: [
                 "inputNoiseLevel": min(0.08, options.noiseReduction), "inputSharpness": 0.4
@@ -146,9 +183,52 @@ final class BurstProcessor {
         } else {
             details = "Fusionadas \(accepted)/\(frames.count) fotos. Referencia \(referenceIndex + 1). \(cg.width) × \(cg.height) px. Rechazo de movimiento: \(options.rejectMotion ? "sí" : "no")."
         }
+        let prefix = options.nightStatic ? "Noche estática · \(isRAW ? "DNG revelados" : "JPEG") · " : ""
         return CaptureResult(jpeg: data as Data, reference: referenceData,
-            details: details, mergedFrames: accepted)
+            details: prefix + details, mergedFrames: accepted,
+            raw: rawFrames?[referenceIndex], source: isRAW ? "developed-RAW" : "JPEG")
     }
+
+    /// Luminance shoulder after fusion; gain is bounded and measured in linear RGB.
+    private func nightTone(_ image: CIImage) throws -> CIImage {
+        let luma = image.applyingFilter("CIColorMatrix", parameters: [
+            "inputRVector": CIVector(x: 0.2126, y: 0.7152, z: 0.0722, w: 0),
+            "inputGVector": CIVector(x: 0.2126, y: 0.7152, z: 0.0722, w: 0),
+            "inputBVector": CIVector(x: 0.2126, y: 0.7152, z: 0.0722, w: 0)
+        ])
+        let histogram = luma.applyingFilter("CIAreaHistogram", parameters: [
+            kCIInputExtentKey: CIVector(cgRect: image.extent), "inputCount": 128,
+            kCIInputScaleKey: 1
+        ])
+        var bins = [Float](repeating: 0, count: 128 * 4)
+        bins.withUnsafeMutableBytes { bytes in
+            context.render(histogram, toBitmap: bytes.baseAddress!, rowBytes: 128 * 16,
+                bounds: CGRect(x: 0, y: 0, width: 128, height: 1), format: .RGBAf, colorSpace: nil)
+        }
+        let total = stride(from: 0, to: bins.count, by: 4).reduce(Float(0)) { $0 + max(0, bins[$1]) }
+        var cumulative: Float = 0
+        var percentile = 0.5
+        if total > 0 {
+            for index in 0..<128 {
+                cumulative += max(0, bins[index * 4])
+                if cumulative >= total * 0.6 { percentile = (Double(index) + 0.5) / 128; break }
+            }
+        }
+        let gain = min(8, max(1, 0.12 / max(0.004, percentile)))
+        guard let kernel = Self.nightKernel,
+              let result = kernel.apply(extent: image.extent, arguments: [image, gain]) else {
+            throw CameraFailure.message("No se pudo aplicar el mapeo tonal nocturno.")
+        }
+        return result
+    }
+
+    private static let nightKernel = CIColorKernel(source: """
+        kernel vec4 nightTone(__sample p, float gain) {
+            vec3 c = max(p.rgb, vec3(0.0)) * gain;
+            float luminance = dot(c, vec3(0.2126, 0.7152, 0.0722));
+            return vec4(c / (1.0 + luminance), p.a);
+        }
+        """)
 
     private func sharpness(_ image: CIImage) -> Double {
         let factor = min(1, 512 / max(image.extent.width, image.extent.height))

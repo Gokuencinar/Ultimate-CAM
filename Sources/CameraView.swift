@@ -45,7 +45,7 @@ struct CameraView: View {
     @State private var shutterStops = log2(1.0 / 60)
     @State private var options = ProcessingOptions()
     private var preset: String {
-        if options.noiseReduction == 0.025 && options.sharpening == 0.15 && options.liftShadows == 0.18 { return "Luz baja" }
+        if options.nightStatic { return "Noche estática" }
         if options.noiseReduction == 0 && options.sharpening == 0.25 && options.liftShadows == 0 { return "Detalle" }
         return options.noiseReduction == 0 && options.sharpening == 0 && options.liftShadows == 0 ? "Natural" : "Personalizado"
     }
@@ -112,7 +112,8 @@ struct CameraView: View {
         HStack {
             VStack(alignment: .leading, spacing: 3) {
                 Text("ULTIMATE CAM").font(.system(size: 17, weight: .bold, design: .rounded)).tracking(1.2)
-                Text(stack ? "Pila de \(stackCount) · \(preset)" : "\(rawEnabled ? "RAW + JPEG" : "JPEG") · \(preset)")
+                Text(options.nightStatic ? "Noche estática · \(camera.supportsRAW ? "RAW" : "JPEG")" :
+                    (stack ? "Pila de \(stackCount) · \(preset)" : "\(rawEnabled ? "RAW + JPEG" : "JPEG") · \(preset)"))
                     .font(.system(size: 12, weight: .medium)).foregroundStyle(.white.opacity(0.65))
             }
             Spacer()
@@ -142,7 +143,8 @@ struct CameraView: View {
 
     private var quickControls: some View {
         HStack(spacing: 8) {
-            quickButton(rawEnabled ? "RAW+" : "JPEG", symbol: "square.stack.3d.up", selected: rawEnabled) { rawEnabled.toggle() }
+            quickButton(options.nightStatic ? (camera.supportsRAW ? "RAW" : "JPEG") : (rawEnabled ? "RAW+" : "JPEG"),
+                        symbol: "square.stack.3d.up", selected: rawEnabled || (options.nightStatic && camera.supportsRAW)) { rawEnabled.toggle() }
                 .disabled(stack || !camera.supportsRAW)
             Spacer()
             Menu {
@@ -237,7 +239,7 @@ struct CameraView: View {
                         if camera.busy { ProgressView().tint(.black).scaleEffect(1.2) }
                         else if countdown > 0 { Image(systemName: "xmark").font(.title2.bold()).foregroundStyle(.black) }
                     }.frame(width: 76, height: 76)
-                }.accessibilityLabel(countdown > 0 ? "Cancelar temporizador" : (stack ? "Capturar pila de \(stackCount) fotos" : "Tomar foto"))
+                }.accessibilityLabel(countdown > 0 ? "Cancelar temporizador" : (options.nightStatic ? "Capturar noche estática" : (stack ? "Capturar pila de \(stackCount) fotos" : "Tomar foto")))
                     .accessibilityIdentifier("camera.shutter").disabled(camera.busy || (!camera.ready && countdown == 0))
                 Spacer()
                 Button { camera.switchLens(lens == .front ? lastBackLens : .front) } label: {
@@ -247,9 +249,10 @@ struct CameraView: View {
                     .disabled(!controlsEnabled || !camera.ready || !camera.lenses.contains(.front))
             }
             HStack(spacing: 5) {
-                modeButton("FOTO", selected: !stack) { stack = false }
-                modeButton("PILA", selected: stack) { stack = true }
-                if stack {
+                modeButton("FOTO", selected: !stack) { options.nightStatic = false; stack = false }
+                modeButton("PILA", selected: stack && !options.nightStatic) { options.nightStatic = false; stack = true }
+                modeButton("NOCHE", selected: options.nightStatic) { applyPreset("Noche estática") }
+                if stack && !options.nightStatic {
                     Menu { ForEach([3,5,7,9], id: \.self) { count in Button("\(count) fotos") { stackCount = count } } } label: {
                         Text("\(stackCount) ▾").font(.system(size: 13, weight: .bold)).frame(width: 48, height: 34)
                     }.accessibilityLabel("Número de fotos de la pila")
@@ -319,12 +322,16 @@ struct CameraView: View {
     private var manualSettings: some View {
         Group {
             Section("Exposición") {
+                if options.nightStatic {
+                    Text("Noche estática calcula ISO y exposición. El enfoque y el balance de blancos se pueden ajustar antes de capturar.")
+                        .font(.footnote).foregroundStyle(.secondary)
+                }
                 Toggle("ISO y obturación manuales", isOn: Binding(get: { manualExposure }, set: { enabled in
                     manualExposure = enabled
                     iso = min(camera.isoRange.upperBound, max(camera.isoRange.lowerBound, iso))
                     shutterStops = min(log2(camera.shutterRange.upperBound), max(log2(camera.shutterRange.lowerBound), shutterStops))
                     applyExposure()
-                })).disabled(!camera.supportsManualExposure)
+                })).disabled(!camera.supportsManualExposure || options.nightStatic)
                 if manualExposure {
                     valueLabel("ISO", "\(Int(iso))")
                     Slider(value: $iso, in: camera.isoRange, step: 1).onChange(of: iso) { _, _ in applyExposure() }
@@ -373,12 +380,12 @@ struct CameraView: View {
         Group {
             Section("Puntos de partida") {
                 HStack {
-                    ForEach(["Natural", "Detalle", "Luz baja"], id: \.self) { name in
+                    ForEach(["Natural", "Detalle", "Noche estática"], id: \.self) { name in
                         Button(name) { applyPreset(name) }.buttonStyle(.bordered)
                             .tint(preset == name ? .yellow : .gray)
                     }
                 }
-                Text("Luz baja selecciona una pila de 7 con ajustes moderados. Es un perfil experimental; no reproduce Night Sight.")
+                Text("Noche estática necesita el iPhone apoyado y una escena inmóvil. Ajusta la exposición y fusiona DNG revelados cuando hay RAW; otras lentes usan JPEG. Conserva la referencia. Es experimental y no equivale a Night Sight ni al modo Noche de Apple.")
                     .font(.footnote).foregroundStyle(.secondary)
             }
             Section("Ajustes del JPEG") {
@@ -402,10 +409,16 @@ struct CameraView: View {
         rawEnabled = false; tint = 0; flash = .off
     }
     private func applyPreset(_ name: String) {
-        options.noiseReduction = name == "Luz baja" ? 0.025 : 0
-        options.sharpening = name == "Detalle" ? 0.25 : (name == "Luz baja" ? 0.15 : 0)
-        options.liftShadows = name == "Luz baja" ? 0.18 : 0
-        if name == "Luz baja" { stack = true; rawEnabled = false; stackCount = 7 }
+        options.nightStatic = name == "Noche estática"
+        options.noiseReduction = options.nightStatic ? 0.012 : 0
+        options.sharpening = name == "Detalle" ? 0.25 : (options.nightStatic ? 0.1 : 0)
+        options.liftShadows = 0
+        if options.nightStatic {
+            stack = true; rawEnabled = false; flash = .off; stackCount = 9
+            options.maximumDimension = 4096
+            manualExposure = false
+            camera.setManualExposure(iso: nil)
+        }
     }
     private var shutterLabel: String {
         let seconds = pow(2, shutterStops)
@@ -451,7 +464,7 @@ struct CameraView: View {
                     Text(camera.resultDetails).font(.subheadline).frame(maxWidth: .infinity, alignment: .leading)
                     if camera.hasRAWResult {
                         Label("RAW original + JPEG", systemImage: "square.stack.3d.up").font(.subheadline.bold()).foregroundStyle(.yellow)
-                        Text("Fotos recibirá el DNG con su JPEG de cámara. Si has aplicado ajustes, el JPEG editado se guarda aparte.")
+                        Text("Fotos recibirá el DNG de referencia con su JPEG de cámara. El JPEG fusionado o editado se guarda aparte; el DNG no está fusionado.")
                             .font(.footnote).foregroundStyle(.secondary)
                     } else if camera.hasSeparateReference {
                         Toggle("Guardar también la referencia", isOn: $includeReference)

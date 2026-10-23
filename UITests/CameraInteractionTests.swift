@@ -24,10 +24,10 @@ final class CameraInteractionTests: XCTestCase {
         settings.tap()
         XCTAssertTrue(app.navigationBars["Ajustes"].waitForExistence(timeout: 3))
         app.buttons["Procesado"].tap()
-        XCTAssertTrue(app.buttons["Luz baja"].waitForExistence(timeout: 3))
-        app.buttons["Luz baja"].tap()
+        XCTAssertTrue(app.buttons["Noche estática"].waitForExistence(timeout: 3))
+        app.buttons["Noche estática"].tap()
         app.buttons["Listo"].tap()
-        XCTAssertTrue(app.staticTexts["Pila de 7 · Luz baja"].waitForExistence(timeout: 3))
+        XCTAssertTrue(app.staticTexts["Noche estática · JPEG"].waitForExistence(timeout: 3))
         XCTAssertTrue(app.buttons["camera.shutter"].exists)
         let image = XCTAttachment(screenshot: app.screenshot())
         image.lifetime = .keepAlways

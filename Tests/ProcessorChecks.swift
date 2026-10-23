@@ -86,6 +86,20 @@ struct ProcessorChecks {
     }
 
     static func run() throws {
+        let plan = try NightCapturePlan.make(iso: 1600, seconds: 1.0 / 30, isoRange: 25...3200, durationRange: 0.00001...0.333)
+        try require(plan.seconds > 0.3 && plan.iso < 200 && plan.count == 9, "Static night did not trade ISO for exposure")
+        try require(abs(plan.iso * plan.seconds - 1600.0 / 30) < 0.001, "Night plan changed metered brightness")
+        let bright = try NightCapturePlan.make(iso: 25, seconds: 0.001, isoRange: 25...3200, durationRange: 0.00001...0.333)
+        try require(abs(bright.seconds - 0.001) < 0.000001, "Night plan overexposes a minimum-ISO scene")
+        let long = try NightCapturePlan.make(iso: 3200, seconds: 0.06, isoRange: 25...3200, durationRange: 0.00001...1)
+        try require(long.count == 8 && long.seconds == 0.5 && long.seconds * Double(long.count) <= 4, "Static exposure exceeds collection budget")
+        do {
+            _ = try NightCapturePlan.make(iso: .nan, seconds: 0.01, isoRange: 25...3200, durationRange: 0.00001...1)
+            throw CameraFailure.message("Invalid metering accepted")
+        } catch CameraFailure.message(let message) {
+            try require(message != "Invalid metering accepted", message)
+        }
+        log("NIGHT CAPTURE PLAN CHECKS PASSED · no hardware")
         let processor = BurstProcessor()
         let reference = try bitmap(png(seed: 1))
         let noisy = try [png(seed: 10, noise: 24), png(seed: 20, noise: 24), png(seed: 30, noise: 24)]
@@ -142,6 +156,24 @@ struct ProcessorChecks {
                     (properties[kCGImagePropertyPixelHeight] as? Int) == 800,
                     "Single-photo adjustments incorrectly applied the burst resolution limit")
         log("Single-photo full resolution preserved")
+        var night = ProcessingOptions()
+        night.nightStatic = true
+        night.chooseSharpestReference = false
+        let darkImage = cleanImage.applyingFilter("CIExposureAdjust", parameters: [kCIInputEVKey: -4])
+        let darkData = context.pngRepresentation(of: darkImage, format: .RGBA8, colorSpace: space)!
+        let brightened = try bitmap(processor.process([darkData], options: night).jpeg)
+        let darkBitmap = try bitmap(darkData)
+        let before = darkBitmap.pixels.enumerated().filter { $0.offset % 4 != 3 }.map { Double($0.element) }.reduce(0,+)
+        let after = brightened.pixels.enumerated().filter { $0.offset % 4 != 3 }.map { Double($0.element) }.reduce(0,+)
+        try require(after > before * 1.3 && after.isFinite, "Night tone mapping did not brighten the dark fixture")
+        try require(brightened.width == size && brightened.height == size, "Night tone mapping changed dimensions")
+        do {
+            _ = try processor.process([cleanData], options: night, rawFrames: [])
+            throw CameraFailure.message("Mismatched RAW/JPEG accepted")
+        } catch CameraFailure.message(let message) {
+            try require(message != "Mismatched RAW/JPEG accepted", message)
+        }
+        log("NIGHT TONE CHECKS PASSED · PNG fixture only, not DNG or optical quality")
         log("PROCESSOR CHECKS PASSED · synthetic fixtures only")
     }
 }

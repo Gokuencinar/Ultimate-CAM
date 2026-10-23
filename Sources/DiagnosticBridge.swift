@@ -8,16 +8,18 @@ struct DiagnosticCaptureRequest {
     let raw: Bool
     let flash: CameraFlash
     let adjustments: Bool
+    let night: Bool
 
     init?(_ object: [String: String]) {
         guard Set(object.keys).isSubset(of: ["action", "mode", "count", "raw", "adjustments", "flash"]),
               object["action"] == "capture",
-              ["normal", "stack"].contains(object["mode"] ?? "normal"),
+              ["normal", "stack", "night"].contains(object["mode"] ?? "normal"),
               ["true", "false"].contains(object["raw"] ?? "false"),
               ["true", "false"].contains(object["adjustments"] ?? "false"),
               let flash = CameraFlash(rawValue: object["flash"] ?? "off"),
               let count = Int(object["count"] ?? "3"), [3, 5, 7, 9].contains(count) else { return nil }
-        stack = object["mode"] == "stack"
+        night = object["mode"] == "night"
+        stack = object["mode"] == "stack" || night
         self.count = count
         raw = object["raw"] == "true"
         adjustments = object["adjustments"] == "true"
@@ -27,6 +29,12 @@ struct DiagnosticCaptureRequest {
 
     var options: ProcessingOptions {
         var result = ProcessingOptions()
+        if night {
+            result.nightStatic = true
+            result.maximumDimension = 4096
+            result.noiseReduction = 0.012
+            result.sharpening = 0.1
+        }
         if adjustments {
             result.noiseReduction = 0.02
             result.sharpening = 0.2
@@ -49,7 +57,7 @@ final class DiagnosticBridge {
             guard let data = try? Data(contentsOf: path),
                   let object = try? JSONSerialization.jsonObject(with: data) as? [String: String],
                   let action = object["action"],
-                  ["capture", "focus", "lens", "control", "save", "inspect"].contains(action) else {
+                  ["capture", "focus", "lens", "control", "save", "inspect", "export"].contains(action) else {
                 CaptureTrace.record("diagnostic.ignored", ["reason": "no local request"])
                 return
             }
@@ -63,7 +71,7 @@ final class DiagnosticBridge {
                     CaptureTrace.record("diagnostic.ignored", ["reason": "invalid capture request"])
                     return
                 }
-                CaptureTrace.record("diagnostic.capture", ["mode": request.stack ? "stack" : "normal",
+                CaptureTrace.record("diagnostic.capture", ["mode": request.night ? "night" : (request.stack ? "stack" : "normal"),
                     "count": request.stack ? request.count : 1, "raw": request.raw,
                     "adjustments": request.adjustments])
                 capture(request)
