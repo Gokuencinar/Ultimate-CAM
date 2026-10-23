@@ -1,5 +1,6 @@
 import AVFoundation
 import Combine
+import ImageIO
 import Photos
 import UIKit
 
@@ -86,6 +87,8 @@ final class CameraModel: NSObject, ObservableObject, AVCapturePhotoCaptureDelega
     private var rawRequested = false
     private var rawData: Data?
     private var nightRawFrames = [Data]()
+    private var nightFrameSeconds: Double = 0
+    private var lastNightTimestamp: Double?
     private var exportedResult: URL?
     private var captureRecoveryRequired = false
     private var focusToken = UUID()
@@ -466,6 +469,8 @@ final class CameraModel: NSObject, ObservableObject, AVCapturePhotoCaptureDelega
             self.transaction = UUID()
             self.frames = []
             self.nightRawFrames = []
+            self.nightFrameSeconds = 0
+            self.lastNightTimestamp = nil
             self.desiredCount = burst ? min(9, max(3, count)) : 1
             self.processingOptions = options
             self.rawRequested = (raw || night) && !self.output.availableRawPhotoPixelFormatTypes.isEmpty
@@ -502,16 +507,18 @@ final class CameraModel: NSObject, ObservableObject, AVCapturePhotoCaptureDelega
                             "count": plan.count, "source": self.rawRequested ? "RAW" : "JPEG",
                             "totalExposureSeconds": plan.seconds * Double(plan.count)])
                         self.message("Noche estática: \(plan.count) fotos. Apoya el iPhone hasta terminar.")
+                        self.captureStage = "night-setup"
                         device.setExposureModeCustom(duration: CMTime(seconds: plan.seconds, preferredTimescale: 1_000_000),
                             iso: Float(plan.iso)) { _ in
                             self.queue.async {
                                 guard self.inFlight, self.transaction == token else { return }
+                                self.nightFrameSeconds = device.exposureDuration.seconds
                                 CaptureTrace.record("night.exposure.applied", ["seconds": device.exposureDuration.seconds, "iso": device.iso])
                                 self.captureNext()
                             }
                         }
                         self.queue.asyncAfter(deadline: .now() + 5) {
-                            guard self.inFlight, self.transaction == token, self.captureID == nil, self.frames.isEmpty else { return }
+                            guard self.inFlight, self.transaction == token, self.captureStage == "night-setup" else { return }
                             self.captureRecoveryRequired = true
                             self.publish { self.ready = false }
                             self.finishFailure(CameraFailure.message("No se confirmó la exposición nocturna. Cierra y abre Ultimate CAM; no se ha repetido la captura."))
@@ -572,7 +579,12 @@ final class CameraModel: NSObject, ObservableObject, AVCapturePhotoCaptureDelega
     }
 
     func photoOutput(_ output: AVCapturePhotoOutput, didFinishProcessingPhoto photo: AVCapturePhoto, error: Error?) {
+        let exif = photo.metadata[kCGImagePropertyExifDictionary as String] as? [String: Any] ?? [:]
+        let sensorExposure = (exif[kCGImagePropertyExifExposureTime as String] as? NSNumber)?.doubleValue ?? -1
+        let sensorISO = (exif[kCGImagePropertyExifISOSpeedRatings as String] as? [NSNumber])?.first?.doubleValue ?? -1
+        let timestamp = photo.timestamp.seconds.isFinite ? photo.timestamp.seconds : -1
         CaptureTrace.record("delegate.processing.enter", ["id": photo.resolvedSettings.uniqueID,
+            "sensorTimestamp": timestamp, "exposureSeconds": sensorExposure, "iso": sensorISO,
             "raw": photo.isRawPhoto, "flashEnabled": photo.resolvedSettings.isFlashEnabled,
             "error": error?.localizedDescription ?? "none"])
         // didFinishCapture follows processing; enqueue both on the same serial queue.
@@ -585,8 +597,18 @@ final class CameraModel: NSObject, ObservableObject, AVCapturePhotoCaptureDelega
             self.captureStage = "processed"
             if let error { self.finishFailure(error) }
             else if let data {
-                if isRaw { self.rawData = data }
-                else { self.frames.append(data) }
+                if isRaw {
+                    if self.processingOptions.nightStatic {
+                        if let last = self.lastNightTimestamp, timestamp >= 0 && timestamp <= last {
+                            self.finishFailure(CameraFailure.message("El sensor devolvió un fotograma RAW repetido. No se ha fusionado ni repetido la captura.")); return
+                        }
+                        if sensorExposure > 0, abs(sensorExposure - self.nightFrameSeconds) > max(0.003, self.nightFrameSeconds * 0.05) {
+                            self.finishFailure(CameraFailure.message("La foto no respetó la exposición nocturna solicitada. No se ha fusionado ni repetido la captura.")); return
+                        }
+                        if timestamp >= 0 { self.lastNightTimestamp = timestamp }
+                    }
+                    self.rawData = data
+                } else { self.frames.append(data) }
             }
             else { self.finishFailure(CameraFailure.message("La cámara no ha devuelto datos de imagen.")) }
         }
@@ -610,7 +632,17 @@ final class CameraModel: NSObject, ObservableObject, AVCapturePhotoCaptureDelega
                 self.nightRawFrames.append(raw)
                 self.rawData = nil
             }
-            if self.frames.count < self.desiredCount { self.captureNext(); return }
+            if self.frames.count < self.desiredCount {
+                if self.processingOptions.nightStatic {
+                    let token = self.transaction
+                    self.captureStage = "night-wait"
+                    self.queue.asyncAfter(deadline: .now() + max(0.03, self.nightFrameSeconds)) {
+                        guard self.inFlight, self.transaction == token, self.captureStage == "night-wait" else { return }
+                        self.captureNext()
+                    }
+                } else { self.captureNext() }
+                return
+            }
             self.restoreDevice()
             let captured = self.frames
             let token = self.transaction
