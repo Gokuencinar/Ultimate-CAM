@@ -201,6 +201,20 @@ struct ProcessorChecks {
         let after = brightened.pixels.enumerated().filter { $0.offset % 4 != 3 }.map { Double($0.element) }.reduce(0,+)
         try require(after > before * 1.3 && after.isFinite, "Night tone mapping did not brighten the dark fixture")
         try require(brightened.width == size && brightened.height == size, "Night tone mapping changed dimensions")
+        let shadowField = CIImage(color: CIColor(red: 0.02, green: 0.02, blue: 0.02))
+            .cropped(to: CGRect(x: 0, y: 0, width: size, height: size))
+        let screen = CIImage(color: CIColor(red: 0.8, green: 0.8, blue: 0.8))
+            .cropped(to: CGRect(x: 96, y: 96, width: 64, height: 64))
+            .composited(over: shadowField)
+        let screenData = context.pngRepresentation(of: screen, format: .RGBA8, colorSpace: space)!
+        let screenBefore = try bitmap(screenData)
+        let screenAfter = try bitmap(processor.process([screenData], options: night).jpeg)
+        let center = ((size / 2) * size + size / 2) * 4
+        try require(abs(Int(screenAfter.pixels[center]) - Int(screenBefore.pixels[center])) <= 6,
+            "Night shadow lift washed out an already exposed highlight")
+        try require(Double(screenAfter.pixels[0]) > Double(screenBefore.pixels[0]) * 1.3,
+            "Highlight protection also prevented shadow recovery")
+        log("Night highlight retention and simultaneous shadow lift passed")
         do {
             _ = try processor.process([cleanData], options: night, rawFrames: [])
             throw CameraFailure.message("Mismatched RAW/JPEG accepted")

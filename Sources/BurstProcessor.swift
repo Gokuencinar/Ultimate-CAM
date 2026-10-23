@@ -285,7 +285,7 @@ final class BurstProcessor {
         if let linear = filter.outputImage { try write(nightTone(linear, maximumGain: 32), "raw-denoised-toned.jpg") }
     }
 
-    /// Luminance shoulder after fusion; gain is bounded and measured in linear RGB.
+    /// Monotone shadow lift after fusion. Preserve exposed lights and bound shadow gain.
     private func nightTone(_ image: CIImage, maximumGain: Double = 8) throws -> CIImage {
         let luma = image.applyingFilter("CIColorMatrix", parameters: [
             "inputRVector": CIVector(x: 0.2126, y: 0.7152, z: 0.0722, w: 0),
@@ -320,9 +320,17 @@ final class BurstProcessor {
 
     private static let nightKernel = CIColorKernel(source: """
         kernel vec4 nightTone(__sample p, float gain) {
-            vec3 c = max(p.rgb, vec3(0.0)) * gain;
-            float luminance = dot(c, vec3(0.2126, 0.7152, 0.0722));
-            return vec4(c / (1.0 + luminance), p.a);
+            vec3 c = max(p.rgb, vec3(0.0));
+            float peak = max(c.r, max(c.g, c.b));
+            float mapped = peak;
+            if (peak > 0.000001 && peak < 0.25) {
+                float gamma = 1.0 / (1.0 + 0.4 * log2(max(gain, 1.0)));
+                mapped = min(peak * gain, 0.25 * pow(peak / 0.25, gamma));
+            } else if (peak > 0.85) {
+                mapped = 0.85 + 0.15 * (1.0 - exp(-(peak - 0.85) / 0.15));
+            }
+            float ratio = peak > 0.000001 ? mapped / peak : 1.0;
+            return vec4(c * ratio, p.a);
         }
         """)
 
