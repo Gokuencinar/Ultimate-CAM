@@ -132,13 +132,15 @@ struct ProcessorChecks {
         let shiftedData = context.pngRepresentation(of: shiftedLarge, format: .RGBA8, colorSpace: space)!
         var largeOptions = fixedReference
         largeOptions.maximumDimension = 4096
+        largeOptions.rejectMotion = false
         let largeFusion = try processor.process([largeData, shiftedData], options: largeOptions)
         let largePixels = try bitmap(largeFusion.jpeg), largeReference = try bitmap(largeData)
         log("Large translation: \(largeFusion.details)")
         try require(largeFusion.mergedFrames == 2 && largePixels.width > 2000 && largePixels.height > 2000,
             "Reduced registration lost full-resolution fusion")
         var largeError = Double.infinity
-        for y in 14...18 { for x in 0...2 {
+        // CGImage row order and the crop can put the retained origin at either edge.
+        for y in 0...18 { for x in 0...2 {
             largeError = min(largeError, rmse(largePixels, against: largeReference, offsetX: x, offsetY: y))
         } }
         log("Large registration RMSE=\(largeError)")
