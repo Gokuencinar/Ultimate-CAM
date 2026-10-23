@@ -45,6 +45,9 @@ final class BurstProcessor {
                 guard let filter = CIRAWFilter(imageData: data, identifierHint: "com.adobe.raw-image") else {
                     throw CameraFailure.message("No se pudo abrir el DNG para la fusión nocturna.")
                 }
+                // Gamut mapping is nonlinear and clips noisy negative components
+                // before temporal averaging, producing colored shadow bias here.
+                filter.isGamutMappingEnabled = false
                 filter.boostAmount = 0
                 filter.baselineExposure = 0
                 filter.exposure = 0
@@ -207,7 +210,7 @@ final class BurstProcessor {
             return CaptureResult(jpeg: referenceData, reference: referenceData,
                                  details: "No se pudo alinear la pila. Se conserva la referencia sin fusionar.", mergedFrames: 1)
         }
-        if options.nightStatic { accumulator = try nightTone(accumulator.cropped(to: common)) }
+        if options.nightStatic { accumulator = try nightTone(accumulator.cropped(to: common), maximumGain: isRAW ? 32 : 8) }
         if options.noiseReduction > 0 {
             accumulator = accumulator.applyingFilter("CINoiseReduction", parameters: [
                 "inputNoiseLevel": min(0.08, options.noiseReduction), "inputSharpness": 0.4
@@ -272,13 +275,13 @@ final class BurstProcessor {
         try write(filter.outputImage, "raw-linear.jpg")
         if let linear = filter.outputImage { try write(nightTone(linear), "raw-linear-toned.jpg") }
         filter.isGamutMappingEnabled = false
-        if let linear = filter.outputImage { try write(nightTone(linear), "raw-no-gamut-toned.jpg") }
+        if let linear = filter.outputImage { try write(nightTone(linear, maximumGain: 32), "raw-no-gamut-toned.jpg") }
         if filter.isLuminanceNoiseReductionSupported { filter.luminanceNoiseReductionAmount = 0.72 }
-        if let linear = filter.outputImage { try write(nightTone(linear), "raw-denoised-toned.jpg") }
+        if let linear = filter.outputImage { try write(nightTone(linear, maximumGain: 32), "raw-denoised-toned.jpg") }
     }
 
     /// Luminance shoulder after fusion; gain is bounded and measured in linear RGB.
-    private func nightTone(_ image: CIImage) throws -> CIImage {
+    private func nightTone(_ image: CIImage, maximumGain: Double = 8) throws -> CIImage {
         let luma = image.applyingFilter("CIColorMatrix", parameters: [
             "inputRVector": CIVector(x: 0.2126, y: 0.7152, z: 0.0722, w: 0),
             "inputGVector": CIVector(x: 0.2126, y: 0.7152, z: 0.0722, w: 0),
@@ -302,7 +305,7 @@ final class BurstProcessor {
                 if cumulative >= total * 0.6 { percentile = (Double(index) + 0.5) / 128; break }
             }
         }
-        let gain = min(8, max(1, 0.12 / max(0.004, percentile)))
+        let gain = min(maximumGain, max(1, 0.12 / max(0.004, percentile)))
         guard let kernel = Self.nightKernel,
               let result = kernel.apply(extent: image.extent, arguments: [image, gain]) else {
             throw CameraFailure.message("No se pudo aplicar el mapeo tonal nocturno.")
