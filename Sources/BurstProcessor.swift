@@ -207,7 +207,7 @@ final class BurstProcessor {
             "colorNR": filter.colorNoiseReductionAmount, "lumaNR": filter.luminanceNoiseReductionAmount]
         try JSONSerialization.data(withJSONObject: info, options: [.sortedKeys]).write(to: directory.appendingPathComponent("raw-settings.json"))
         func write(_ image: CIImage?, _ name: String) throws {
-            guard let image else { throw CameraFailure.message("Revelado de diagnóstico vacío.") }
+            guard let image else { throw CameraFailure.message("Revelado de diagnÃ³stico vacÃ­o.") }
             let factor = min(1, 1600 / max(image.extent.width, image.extent.height))
             let preview = image.transformed(by: CGAffineTransform(scaleX: factor, y: factor))
             try context.writeJPEGRepresentation(of: preview, to: directory.appendingPathComponent(name),
