@@ -13,15 +13,15 @@ xcrun simctl status_bar "$device" override --time '9:41' --batteryState charged 
 xcrun simctl install "$device" build/Simulator/Build/Products/Debug-iphonesimulator/UltimateCAM.app
 xcrun simctl privacy "$device" grant camera com.gokuencinar.ultimatecam
 xcrun simctl launch "$device" com.gokuencinar.ultimatecam
-sleep 3
+sleep 5
 xcrun simctl io "$device" screenshot build/ui/Ultimate-CAM-photo.png
 xcrun simctl terminate "$device" com.gokuencinar.ultimatecam
 xcrun simctl launch "$device" com.gokuencinar.ultimatecam -show-controls -stack-mode
-sleep 2
+sleep 5
 xcrun simctl io "$device" screenshot build/ui/Ultimate-CAM-controls.png
 xcrun simctl terminate "$device" com.gokuencinar.ultimatecam
 xcrun simctl launch "$device" com.gokuencinar.ultimatecam -show-controls -processing-controls
-sleep 2
+sleep 5
 xcrun simctl io "$device" screenshot build/ui/Ultimate-CAM-processing.png
 xcrun simctl terminate "$device" com.gokuencinar.ultimatecam
 xcodebuild -project UltimateCAM.xcodeproj -scheme UltimateCAM-UI \
@@ -30,6 +30,7 @@ xcodebuild -project UltimateCAM.xcodeproj -scheme UltimateCAM-UI \
   -resultBundlePath build/ui/Interaction.xcresult \
   CODE_SIGNING_ALLOWED=NO test > build/ui/interaction-tests.log 2>&1
 container=$(xcrun simctl get_app_container "$device" com.gokuencinar.ultimatecam data)
+xcrun xcresulttool export attachments --path build/ui/Interaction.xcresult --output-path build/ui/attachments
 cp "$container/Library/Caches/UltimateCAM-capture.jsonl" build/ui/UI-interaction-trace.jsonl
 python3 - <<'PY'
 import json, pathlib
