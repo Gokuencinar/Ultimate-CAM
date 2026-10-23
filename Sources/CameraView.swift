@@ -32,6 +32,7 @@ struct CameraView: View {
     @State private var bias: Double = 0
     @State private var manualWB = false
     @State private var temperature: Double = 5000
+    @State private var tint: Double = 0
     @State private var grid = true
     @State private var showResult = false
     @State private var showReference = false
@@ -53,7 +54,7 @@ struct CameraView: View {
     @State private var countdownID = UUID()
     @State private var manualFocus = false
     @State private var focusPosition: Double = 0.5
-    @State private var zoom: Double = 1
+    private var zoom: Double { camera.zoomFactor }
     private var lens: CameraLens { camera.selectedLens }
     private var controlsEnabled: Bool { !camera.busy && countdown == 0 }
 
@@ -99,7 +100,6 @@ struct CameraView: View {
             resetUIControls()
             if next != .front { lastBackLens = next }
         }
-        .onChange(of: zoom) { _, value in camera.setZoom(value) }
         .onChange(of: bias) { _, value in camera.setBias(Float(value)) }
         .onChange(of: stack) { _, value in if value { rawEnabled = false } }
         .sheet(isPresented: $showControls) { settings }
@@ -117,7 +117,7 @@ struct CameraView: View {
             Button { showControls = true } label: {
                 Image(systemName: "slider.horizontal.3").font(.system(size: 19, weight: .semibold))
                     .frame(width: 46, height: 46).background(Color(white: 0.14), in: RoundedRectangle(cornerRadius: 16))
-            }.accessibilityLabel("Ajustes de cámara").accessibilityIdentifier("camera.settings")
+            }.accessibilityLabel("Ajustes de cámara").accessibilityIdentifier("camera.settings").disabled(!controlsEnabled)
         }
     }
 
@@ -126,7 +126,7 @@ struct CameraView: View {
             CameraPreview(session: camera.session, zoom: zoom, focus: { point, locked in
                 manualFocus = false
                 camera.focus(at: point, lock: locked)
-            }, changeZoom: { value in zoom = min(camera.maximumZoom, max(1, value)) })
+            }, changeZoom: { value in camera.setZoom(value) })
                 .allowsHitTesting(controlsEnabled)
             if grid { ViewfinderGrid() }
             if countdown > 0 {
@@ -156,12 +156,23 @@ struct CameraView: View {
                 .font(.system(size: 11, weight: .semibold))
                 .padding(.horizontal, 10).padding(.vertical, 7)
                 .background(.black.opacity(0.7), in: Capsule())
+                .allowsHitTesting(false)
+            if camera.isFocusLocked {
+                Button {
+                    manualFocus = false
+                    camera.focus(at: CGPoint(x: 0.5, y: 0.5))
+                } label: {
+                    Image(systemName: "lock.open.fill").frame(width: 44, height: 44)
+                        .background(.black.opacity(0.7), in: Circle())
+                }.accessibilityLabel("Liberar bloqueo de cámara")
+                    .disabled(!controlsEnabled)
+            }
             Spacer(minLength: 0)
             if zoom > 1.01 {
                 Text("\(zoom, specifier: "%.1f")×").font(.caption.monospacedDigit().bold())
-                    .padding(8).background(.black.opacity(0.7), in: Capsule())
+                    .padding(8).background(.black.opacity(0.7), in: Capsule()).allowsHitTesting(false)
             }
-        }.allowsHitTesting(false)
+        }
     }
 
     private func quickButton(_ text: String, symbol: String, selected: Bool, action: @escaping () -> Void) -> some View {
@@ -213,7 +224,7 @@ struct CameraView: View {
                         else if countdown > 0 { Image(systemName: "xmark").font(.title2.bold()).foregroundStyle(.black) }
                     }.frame(width: 76, height: 76)
                 }.accessibilityLabel(countdown > 0 ? "Cancelar temporizador" : (stack ? "Capturar pila de \(stackCount) fotos" : "Tomar foto"))
-                    .accessibilityIdentifier("camera.shutter").disabled(camera.busy || !camera.ready)
+                    .accessibilityIdentifier("camera.shutter").disabled(camera.busy || (!camera.ready && countdown == 0))
                 Spacer()
                 Button { camera.switchLens(lens == .front ? lastBackLens : .front) } label: {
                     Image(systemName: "arrow.triangle.2.circlepath.camera").font(.system(size: 23))
@@ -320,14 +331,20 @@ struct CameraView: View {
             }
             Section("Color y zoom") {
                 Toggle("Balance de blancos manual", isOn: Binding(get: { manualWB }, set: { enabled in
-                    manualWB = enabled; camera.setWhiteBalance(enabled ? Float(temperature) : nil)
+                    manualWB = enabled; camera.setWhiteBalance(enabled ? Float(temperature) : nil, tint: Float(tint))
                 })).disabled(!camera.supportsManualWB)
                 if manualWB {
                     valueLabel("Temperatura", "\(Int(temperature)) K")
-                    Slider(value: $temperature, in: 2500...8000, step: 100).onChange(of: temperature) { _, value in camera.setWhiteBalance(Float(value)) }
+                    Slider(value: $temperature, in: 2500...8000, step: 100).onChange(of: temperature) { _, value in camera.setWhiteBalance(Float(value), tint: Float(tint)) }
+                    valueLabel("Matiz verde / magenta", String(format: "%+.0f", tint))
+                    Slider(value: $tint, in: -100...100, step: 1).onChange(of: tint) { _, value in
+                        camera.setWhiteBalance(Float(temperature), tint: Float(value))
+                    }
+                    Button("Matiz neutro") { tint = 0 }
                 }
                 valueLabel("Zoom digital", String(format: "%.1f×", zoom))
-                Slider(value: $zoom, in: 1...max(1.001, camera.maximumZoom)).disabled(camera.maximumZoom <= 1)
+                Slider(value: Binding(get: { zoom }, set: { camera.setZoom($0) }),
+                       in: 1...max(1.001, camera.maximumZoom)).disabled(camera.maximumZoom <= 1)
             }
             Section { Button("Restablecer controles automáticos") { resetUIControls(); camera.switchLens(lens) } }
         }
@@ -363,7 +380,7 @@ struct CameraView: View {
     }
     private func resetUIControls() {
         bias = 0; manualWB = false; manualExposure = false; manualFocus = false
-        rawEnabled = false; zoom = 1
+        rawEnabled = false; tint = 0
     }
     private func applyPreset(_ name: String) {
         options.noiseReduction = name == "Luz baja" ? 0.025 : 0

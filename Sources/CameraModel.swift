@@ -46,6 +46,7 @@ final class CameraModel: NSObject, ObservableObject, AVCapturePhotoCaptureDelega
     @Published private(set) var hasSeparateReference = false
     @Published private(set) var savedResult = false
     @Published private(set) var savedJPEGOnly = false
+    @Published private(set) var zoomFactor: Double = 1
     @Published private(set) var maximumZoom: Double = 1
     @Published private(set) var isoRange: ClosedRange<Double> = 25...3200
     @Published private(set) var shutterRange: ClosedRange<Double> = (1.0 / 8000)...0.33
@@ -219,7 +220,7 @@ final class CameraModel: NSObject, ObservableObject, AVCapturePhotoCaptureDelega
         device.unlockForConfiguration()
         let manualAvailable = device.isExposureModeSupported(.custom)
         let focusAvailable = device.isLockingFocusWithCustomLensPositionSupported
-        let zoom = max(1, min(8, Double(device.activeFormat.videoMaxZoomFactor)))
+        let zoom = max(1, min(8, Double(device.maxAvailableVideoZoomFactor)))
         output.maxPhotoQualityPrioritization = .quality
         if let dimensions = device.activeFormat.supportedMaxPhotoDimensions.max(by: {
             Int64($0.width) * Int64($0.height) < Int64($1.width) * Int64($1.height)
@@ -243,6 +244,7 @@ final class CameraModel: NSObject, ObservableObject, AVCapturePhotoCaptureDelega
             self.supportsManualFocus = focusAvailable
             self.supportsManualWB = device.isLockingWhiteBalanceWithCustomDeviceGainsSupported
             self.maximumZoom = zoom
+            self.zoomFactor = Double(device.videoZoomFactor)
             self.isFocusLocked = false
             self.focusStatus = device.isFocusPointOfInterestSupported ? "Toca para enfocar · mantén para bloquear" : "Lente de enfoque fijo · toca para medir la luz"
         }
@@ -366,42 +368,59 @@ final class CameraModel: NSObject, ObservableObject, AVCapturePhotoCaptureDelega
                 if device.exposureMode != .custom && device.isExposureModeSupported(.locked) { device.exposureMode = .locked }
                 device.unlockForConfiguration()
             }
+            let focusLocked = lock && device.isFocusPointOfInterestSupported && device.focusMode == .locked
+            let exposureLocked = lock && device.exposureMode == .locked
+            let locked = focusLocked || exposureLocked
+            let label: String
+            if focusLocked && exposureLocked { label = "AF / AE bloqueados · toca para liberar" }
+            else if focusLocked { label = "Enfoque bloqueado · exposición manual" }
+            else if exposureLocked { label = "Exposición bloqueada · lente fija" }
+            else { label = device.isFocusPointOfInterestSupported ? "Enfoque ajustado" : "Enfoque fijo · luz ajustada" }
             publish {
-                self.isFocusLocked = lock
-                self.focusStatus = lock ? "AF / AE bloqueados · toca para liberar" :
-                    (device.isFocusPointOfInterestSupported ? "Enfoque ajustado" : "Enfoque fijo · luz ajustada")
+                self.isFocusLocked = locked
+                self.focusStatus = label
             }
-            CaptureTrace.record("focus.settled", ["locked": lock, "position": device.lensPosition,
+            CaptureTrace.record("focus.settled", ["locked": locked, "focusLocked": focusLocked,
+                "exposureLocked": exposureLocked, "position": device.lensPosition,
                 "focusMode": device.focusMode.rawValue, "exposureMode": device.exposureMode.rawValue])
         } catch { message(error.localizedDescription) }
     }
 
     func setZoom(_ zoom: Double) {
         queue.async {
-            guard !self.inFlight, let device = self.input?.device else { return }
+            guard zoom.isFinite, !self.inFlight, let device = self.input?.device else { return }
             do {
                 try device.lockForConfiguration()
                 defer { device.unlockForConfiguration() }
-                device.videoZoomFactor = min(device.maxAvailableVideoZoomFactor, max(device.minAvailableVideoZoomFactor, CGFloat(zoom)))
+                device.videoZoomFactor = min(min(8, device.maxAvailableVideoZoomFactor), max(max(1, device.minAvailableVideoZoomFactor), CGFloat(zoom)))
+                let applied = Double(device.videoZoomFactor)
+                self.publish { self.zoomFactor = applied }
                 CaptureTrace.record("control.zoom", ["requested": zoom, "applied": device.videoZoomFactor])
             } catch { self.message(error.localizedDescription) }
         }
     }
 
-    func setWhiteBalance(_ kelvin: Float?) {
+    func setWhiteBalance(_ kelvin: Float?, tint: Float = 0) {
         queue.async {
             guard !self.inFlight, let device = self.input?.device else { return }
             do {
                 try device.lockForConfiguration()
                 defer { device.unlockForConfiguration() }
                 if let kelvin, device.isLockingWhiteBalanceWithCustomDeviceGainsSupported {
-                    let values = AVCaptureDevice.WhiteBalanceTemperatureAndTintValues(temperature: kelvin, tint: 0)
+                    guard kelvin.isFinite, tint.isFinite else { return }
+                    let values = AVCaptureDevice.WhiteBalanceTemperatureAndTintValues(
+                        temperature: min(8000, max(2500, kelvin)), tint: min(100, max(-100, tint)))
                     var gains = device.deviceWhiteBalanceGains(for: values)
                     gains.redGain = min(device.maxWhiteBalanceGain, max(1, gains.redGain))
                     gains.greenGain = min(device.maxWhiteBalanceGain, max(1, gains.greenGain))
                     gains.blueGain = min(device.maxWhiteBalanceGain, max(1, gains.blueGain))
-                    device.setWhiteBalanceModeLocked(with: gains, completionHandler: nil)
-                    CaptureTrace.record("control.whiteBalance", ["manual": true, "temperature": kelvin])
+                    device.setWhiteBalanceModeLocked(with: gains) { _ in
+                        CaptureTrace.record("control.whiteBalance", ["manual": true,
+                            "temperature": values.temperature, "tint": values.tint,
+                            "redGain": device.deviceWhiteBalanceGains.redGain,
+                            "greenGain": device.deviceWhiteBalanceGains.greenGain,
+                            "blueGain": device.deviceWhiteBalanceGains.blueGain])
+                    }
                 } else if kelvin == nil && device.isWhiteBalanceModeSupported(.continuousAutoWhiteBalance) {
                     device.whiteBalanceMode = .continuousAutoWhiteBalance
                     CaptureTrace.record("control.whiteBalance", ["manual": false])
