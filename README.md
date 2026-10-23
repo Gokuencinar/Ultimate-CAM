@@ -6,15 +6,17 @@ El objetivo es combinar captura nocturna por acumulación, como concepto de Lumi
 
 ## Estado real
 
-La versión `0.3.0+build.23.git.6e1fb2d` está compilada e instalada por SSH en un iPhone 11 Pro con iOS 18.7.1. `dpkg --verify com.gokuencinar.ultimatecam` termina sin diferencias. [Build y pruebas](https://github.com/Gokuencinar/Ultimate-CAM/actions/runs/39961056959): arm64, firma, paquete rootless y pruebas sintéticas correctos.
+La versión disponible `0.3.0+build.25.git.9216aa1` está [compilada y empaquetada](https://github.com/Gokuencinar/Ultimate-CAM/actions/runs/39964428732), con pruebas sintéticas correctas. La última instalada por SSH es `0.3.0+build.24.git.9a03264`, con `dpkg --verify` sin diferencias. A petición del usuario se omiten nuevas pruebas en el iPhone, que no está disponible: build25 queda pendiente de instalación y validación física.
+
+El visor ocupa toda la pantalla, con controles flotantes sobre degradados para conservar legibilidad. La vista previa recorta para llenar el formato de pantalla; las fotos conservan su formato y resolución originales. [XCTest de build25](https://github.com/Gokuencinar/Ultimate-CAM/actions/runs/39964432016) comprueba el ancho y alto del visor frente a la pantalla, toques, pulsación larga, temporizador OFF/3s/10s/OFF y ajustes/perfil Luz baja.
+
+Build25 sincroniza el zoom visible con el valor aplicado y el límite disponible de la lente. Añade matiz verde/magenta al balance de blancos, botón de liberación del bloqueo y mensajes según enfoque/exposición realmente bloqueados. El temporizador permite cancelar si la cámara deja de estar lista y desactiva Ajustes durante la cuenta atrás. Estas modificaciones compilan; zoom, color, bloqueo y temporizador real siguen pendientes de prueba en el dispositivo.
 
 La auditoría física reprodujo el fallo RAW en build 21: `PHPhotosErrorDomain 3300`. Build 23 importa el JPEG de cámara como recurso principal y el DNG como alternativo desde archivo, retenido hasta el callback. PhotoKit confirmó dos guardados RAW, uno con JPEG ajustado separado. También se comprobó el bloqueo de duplicados. Guardar solo JPEG y guardar pila más referencia funcionaron en build 21, en la misma ruta JPEG conservada por 23. Las pruebas crearon 6 elementos nuevos en Fotos y no borraron ninguno. Falta revisar visualmente su presentación en Fotos.
 
-En build 23 se comprobaron por SSH el punto de enfoque, final del autofocus, bloqueo AF/AE y liberación, zoom, EV, WB, enfoque manual, ISO y obturación en la principal. La espera de enfoque ahora evita anunciar éxito antes del inicio del barrido. Las cuatro cámaras tomaron JPEG. Ultra gran angular y frontal declararon enfoque fijo y RAW no disponible. La aplicación de estados y el movimiento de la lente no sustituyen una revisión óptica de nitidez.
+En build 23 se comprobaron por SSH el punto de enfoque, final del autofocus, bloqueo AF/AE y liberación, zoom, EV, WB, enfoque manual, ISO y obturación en la principal. La espera de enfoque de build23 evita anunciar éxito antes del inicio del barrido. Las cuatro cámaras tomaron JPEG. Ultra gran angular y frontal declararon enfoque fijo y RAW no disponible. La aplicación de estados y el movimiento de la lente no sustituyen una revisión óptica de nitidez.
 
-Las pilas de 3/5/7/9 terminaron sin timeout. Resultados de esta sesión: Fusionadas 3/3 fotos. Referencia 2. 1915 × 2560 px. Rechazo de movimiento: sí.; Fusionadas 5/5 fotos. Referencia 4. 1915 × 2560 px. Rechazo de movimiento: sí.; Fusionadas 7/7 fotos. Referencia 4. 1920 × 2560 px. Rechazo de movimiento: sí.; Fusionadas 9/9 fotos. Referencia 2. 1915 × 2555 px. Rechazo de movimiento: sí. No se atribuyen estas cifras a otras escenas.
-
-[XCTest de interfaz](https://github.com/Gokuencinar/Ultimate-CAM/actions/runs/39957526080) pasó con toque y pulsación larga sobre el UIView real, selección OFF/3s/10s/OFF del temporizador, ajustes y perfil Luz baja. Las fuentes del visor y la interfaz son las mismas; el modelo de cámara y la importación RAW recibieron después las correcciones verificadas en el teléfono. La ejecución/cancelación del temporizador sigue pendiente de prueba funcional.
+En la auditoría de build23 las pilas de 3/5/7/9 terminaron sin timeout y fusionaron 3/3, 5/5, 7/7 y 9/9 fotogramas. Los resultados tuvieron entre 1915 y 1920 píxeles de ancho y entre 2555 y 2560 de alto. Estas cifras pertenecen a esa escena y compilación.
 
 Pasaron las pruebas sintéticas de ruido, traslación, referencia nítida, rechazo de movimiento y resolución completa. La comparación visual con Cámara de Apple o GCam, orientación en Fotos y uso sostenido de memoria/temperatura siguen pendientes. No es un HDR+ ni un Night Sight completo.
 
@@ -22,7 +24,7 @@ Repositorio: [Gokuencinar/Ultimate-CAM](https://github.com/Gokuencinar/Ultimate-
 
 ## Interfaz
 
-Interfaz propia con visor 4:3 separado de los controles, botones grandes sobre fondo oscuro, retícula AF/AE, bloqueo por pulsación larga, formato/temporizador/cuadrícula rápidos y exposición visible. El zoom admite pellizco. Los ajustes se dividen en Captura, Manual y Procesado; la revisión mantiene Guardar siempre accesible y ofrece JPEG como alternativa al RAW. Conserva la referencia visual inicial de 26CAM sin incorporar su código o binarios.
+Interfaz propia con visor a pantalla completa, controles superpuestos y botones grandes sobre degradados oscuros, retícula AF/AE, bloqueo por pulsación larga, formato/temporizador/cuadrícula rápidos y exposición visible. El zoom admite pellizco. Los ajustes se dividen en Captura, Manual y Procesado; la revisión mantiene Guardar siempre accesible y ofrece JPEG como alternativa al RAW. Conserva la referencia visual inicial de 26CAM sin incorporar su código o binarios.
 
 Los perfiles Natural, Detalle y Luz baja ajustan los controles de procesado existentes. Luz baja selecciona una pila de siete y ajustes moderados; no reproduce el algoritmo de Google. Los atajos Cerca/Lejos cambian posiciones normalizadas de la lente, sin prometer distancias calibradas. Los controles se limitan a las capacidades de cada cámara.
 
@@ -31,7 +33,7 @@ Los perfiles Natural, Detalle y Luz baja ajustan los controles de procesado exis
 - Vista previa y selección de cámaras físicas: ultra gran angular, principal, teleobjetivo y frontal, según disponibilidad.
 - Foto individual JPEG. Cada petición usa prioridad `.speed` para no exigir una fusión adicional al sistema y respetar ISO y obturación bloqueados; la fusión múltiple se hace en la app.
 - Compensación de exposición entre −2 y +2 EV, limitada a lo que admita cada cámara.
-- Balance de blancos automático o manual entre 2500 y 8000 K, con límites de ganancias del dispositivo.
+- Balance de blancos automático o manual entre 2500 y 8000 K y matiz verde/magenta de -100 a +100, con límites de ganancias del dispositivo. No es una calibración de color.
 - Pila de 3, 5, 7 o 9 fotos con exposición y balance de blancos bloqueados. Bloquea también el enfoque cuando se admite. Conserva el modo de exposición manual si ya estaba activo.
 - Alineación por traslación con Vision y promedio en RGB lineal mediante Core Image. Rechaza alineaciones fallidas o con desplazamientos grandes. Opcionalmente elige la referencia por nitidez y la conserva en las zonas con diferencias grandes para reducir dobles contornos.
 - Límite de resolución de pila seleccionable: 2048, 2560 o hasta 4096 píxeles en el lado largo. La resolución final depende de las capturas y del recorte; ampliar el límite no inventa detalle.
