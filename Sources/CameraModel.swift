@@ -474,7 +474,7 @@ final class CameraModel: NSObject, ObservableObject, AVCapturePhotoCaptureDelega
             self.lastNightTimestamp = nil
             self.desiredCount = burst ? min(9, max(3, count)) : 1
             self.processingOptions = options
-            self.rawRequested = (raw || night) && !self.output.availableRawPhotoPixelFormatTypes.isEmpty
+            self.rawRequested = (raw || (night && options.nightRAW)) && !self.output.availableRawPhotoPixelFormatTypes.isEmpty
             self.rawData = nil
             self.publish { self.busy = true }
             do {

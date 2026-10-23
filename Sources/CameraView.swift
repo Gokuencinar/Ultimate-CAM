@@ -112,7 +112,7 @@ struct CameraView: View {
         HStack {
             VStack(alignment: .leading, spacing: 3) {
                 Text("ULTIMATE CAM").font(.system(size: 17, weight: .bold, design: .rounded)).tracking(1.2)
-                Text(options.nightStatic ? "Noche estática · \(camera.supportsRAW ? "RAW" : "JPEG")" :
+                Text(options.nightStatic ? "Noche estática · \((options.nightRAW && camera.supportsRAW) ? "RAW experimental" : "JPEG")" :
                     (stack ? "Pila de \(stackCount) · \(preset)" : "\(rawEnabled ? "RAW + JPEG" : "JPEG") · \(preset)"))
                     .font(.system(size: 12, weight: .medium)).foregroundStyle(.white.opacity(0.65))
             }
@@ -143,8 +143,8 @@ struct CameraView: View {
 
     private var quickControls: some View {
         HStack(spacing: 8) {
-            quickButton(options.nightStatic ? (camera.supportsRAW ? "RAW" : "JPEG") : (rawEnabled ? "RAW+" : "JPEG"),
-                        symbol: "square.stack.3d.up", selected: rawEnabled || (options.nightStatic && camera.supportsRAW)) { rawEnabled.toggle() }
+            quickButton(options.nightStatic ? ((options.nightRAW && camera.supportsRAW) ? "RAW*" : "JPEG") : (rawEnabled ? "RAW+" : "JPEG"),
+                        symbol: "square.stack.3d.up", selected: rawEnabled || (options.nightStatic && options.nightRAW && camera.supportsRAW)) { rawEnabled.toggle() }
                 .disabled(stack || !camera.supportsRAW)
             Spacer()
             Menu {
@@ -299,7 +299,7 @@ struct CameraView: View {
                 Toggle("RAW + JPEG", isOn: $rawEnabled).disabled(!camera.supportsRAW || stack)
                 if !camera.supportsRAW { Text("RAW no disponible en la cámara actual.").font(.footnote).foregroundStyle(.secondary) }
                 if options.nightStatic {
-                    Text(camera.supportsRAW ? "Noche selecciona RAW automáticamente. Se conserva el DNG de referencia y se exporta el JPEG fusionado." : "Esta lente usa la alternativa JPEG nocturna; no dispone de RAW.")
+                    Text(camera.supportsRAW ? "Noche usa JPEG de cámara por defecto. La fusión DNG experimental se activa en Procesado y conserva el DNG de referencia." : "Esta lente usa la alternativa JPEG nocturna; no dispone de RAW.")
                         .font(.footnote).foregroundStyle(.secondary)
                 } else if stack { Text("La pila usa JPEG. RAW se captura en modo Foto.").font(.footnote).foregroundStyle(.secondary) }
                 Picker("Flash", selection: $flash) {
@@ -388,8 +388,16 @@ struct CameraView: View {
                             .tint(preset == name ? .yellow : .gray)
                     }
                 }
-                Text("Noche estática necesita el iPhone apoyado y una escena inmóvil. Ajusta la exposición y fusiona DNG revelados cuando hay RAW; otras lentes usan JPEG. Conserva la referencia. Es experimental y no equivale a Night Sight ni al modo Noche de Apple.")
+                Text("Noche estática necesita el iPhone apoyado y una escena inmóvil. Ajusta la exposición y fusiona JPEG de cámara. La opción DNG experimental puede introducir dominantes de color en sombras. Conserva la referencia. Es experimental y no equivale a Night Sight ni al modo Noche de Apple.")
                     .font(.footnote).foregroundStyle(.secondary)
+            }
+            if options.nightStatic && camera.supportsRAW {
+                Section("RAW nocturno experimental") {
+                    Toggle("Fusionar DNG", isOn: $options.nightRAW)
+                        .accessibilityIdentifier("night-raw-toggle")
+                    Text("Más lento y con color aún sin calibrar en sombras profundas. Desactivado conserva el color del JPEG de cámara. El DNG guardado es una referencia original, no un RAW fusionado.")
+                        .font(.footnote).foregroundStyle(.secondary)
+                }
             }
             Section("Ajustes del JPEG") {
                 valueLabel("Reducción de ruido", String(format: "%.0f %%", options.noiseReduction / 0.08 * 100))
@@ -413,6 +421,7 @@ struct CameraView: View {
     }
     private func applyPreset(_ name: String) {
         options.nightStatic = name == "Noche estática"
+        options.nightRAW = false
         options.noiseReduction = options.nightStatic ? 0.012 : 0
         options.sharpening = name == "Detalle" ? 0.25 : (options.nightStatic ? 0.1 : 0)
         options.liftShadows = 0

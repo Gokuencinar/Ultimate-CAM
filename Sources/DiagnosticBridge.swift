@@ -9,21 +9,25 @@ struct DiagnosticCaptureRequest {
     let flash: CameraFlash
     let adjustments: Bool
     let night: Bool
+    let nightRAW: Bool
 
     init?(_ object: [String: String]) {
-        guard Set(object.keys).isSubset(of: ["action", "mode", "count", "raw", "adjustments", "flash"]),
+        guard Set(object.keys).isSubset(of: ["action", "mode", "count", "raw", "adjustments", "flash", "nightRaw"]),
               object["action"] == "capture",
               ["normal", "stack", "night"].contains(object["mode"] ?? "normal"),
               ["true", "false"].contains(object["raw"] ?? "false"),
+              ["true", "false"].contains(object["nightRaw"] ?? "false"),
               ["true", "false"].contains(object["adjustments"] ?? "false"),
               let flash = CameraFlash(rawValue: object["flash"] ?? "off"),
               let count = Int(object["count"] ?? "3"), [3, 5, 7, 9].contains(count) else { return nil }
         night = object["mode"] == "night"
+        nightRAW = object["nightRaw"] == "true"
         stack = object["mode"] == "stack" || night
         self.count = count
         raw = object["raw"] == "true"
         adjustments = object["adjustments"] == "true"
         self.flash = flash
+        guard !nightRAW || night else { return nil }
         guard !(stack && raw), flash == .off || (!stack && !raw) else { return nil }
     }
 
@@ -31,6 +35,7 @@ struct DiagnosticCaptureRequest {
         var result = ProcessingOptions()
         if night {
             result.nightStatic = true
+            result.nightRAW = nightRAW
             result.maximumDimension = 4096
             result.noiseReduction = 0.012
             result.sharpening = 0.1

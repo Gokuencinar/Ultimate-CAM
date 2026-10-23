@@ -4,7 +4,17 @@ Primer prototipo de cámara propia para el iPhone 11 Pro con iOS 18.7.1. Nombre 
 
 El objetivo es combinar captura nocturna por acumulación, como concepto de Lumi, con técnicas de fotografía computacional descritas por Google. Este proyecto contiene una primera pila de imágenes; no contiene Lumi, GCam ni sus modelos o bibliotecas.
 
-## Estado real
+## Noche estática experimental (0.4)
+
+El selector **NOCHE** y el perfil **Noche estática** sustituyen al antiguo perfil Luz baja. El modo mide la exposición automática y distribuye el presupuesto entre 3 y 9 capturas consecutivas: hasta 0,5 segundos por exposición y unos 4 segundos de integración solicitada. El tiempo total incluye entrega del sensor, revelado y fusión y puede ser bastante mayor. Se necesita una escena inmóvil y el teléfono apoyado; no mide movimiento ni prolonga la exposición más allá de lo permitido por el formato.
+
+Por defecto fusiona JPEG de cámara para conservar el color del procesado de iOS. En las lentes con Bayer RAW se puede activar **Fusionar DNG** en Procesado: revela DNG mediante CIRAWFilter y los fusiona en RGB lineal, usando los JPEG para elegir la referencia. Esta ruta es experimental, más lenta y tiene dominantes de color pendientes de calibrar en sombras profundas. Guarda el DNG original de la referencia, no un RAW fusionado. El mapeo tonal se aplica después de la acumulación, con ganancia limitada y compresión suave de luces. Hay rechazo conservador de movimiento y alineación por traslación, sin alineación local ni rotación.
+
+La primera prueba física de build30 completó 8 exposiciones RAW de 0,5 s nominales a ISO400, fusionó 8/8 y generó un JPEG de 3008 × 3952. Tardó 28,45 s según el cliente de diagnóstico. La inspección visual detectó dominante magenta y ruido de color; también quedó alterada la cadencia del visor al volver a automático. Es evidencia de captura/fusión, no de calidad equivalente a Night Sight ni al modo Noche de Apple. Build37 confirmó la restauración de los límites de fotograma y de la exposición a 1/15 s; enfoque posterior, Foto y Pila 3 terminaron correctamente. La fusión DNG todavía tardó 27,73 s en total (21,02 s de procesado), con dominante de color. Se mantiene como opción experimental y no como ruta predeterminada.
+
+Noche exige exposición automática y flash desactivado. Conserva los bloqueos y modos anteriores para restaurarlos tras captura o error. Si el revelado falla, conserva la referencia y avisa que no hay fusión. No repite capturas automáticamente. La configuración nocturna y el procesamiento tienen límites de espera independientes.
+
+## Auditoría anterior: 0.3 / build26
 
 La versión `0.3.0+build.26.git.1b4f237` está [compilada](https://github.com/Gokuencinar/Ultimate-CAM/actions/runs/39996357339) e instalada por SSH en el iPhone 11 Pro con iOS 18.7.1. Se verificaron SHA-256, manifiesto y `dpkg --verify`, sin diferencias ni respring.
 
@@ -24,7 +34,7 @@ Repositorio: [Gokuencinar/Ultimate-CAM](https://github.com/Gokuencinar/Ultimate-
 
 Interfaz propia con visor a pantalla completa, controles superpuestos y botones grandes sobre degradados oscuros, retícula AF/AE, bloqueo por pulsación larga, formato/temporizador/cuadrícula rápidos y exposición visible. El zoom admite pellizco. Los ajustes se dividen en Captura, Manual y Procesado; la revisión mantiene Guardar siempre accesible y ofrece JPEG como alternativa al RAW. Conserva la referencia visual inicial de 26CAM sin incorporar su código o binarios.
 
-Los perfiles Natural, Detalle y Luz baja ajustan los controles de procesado existentes. Luz baja selecciona una pila de siete y ajustes moderados; no reproduce el algoritmo de Google. Los atajos Cerca/Lejos cambian posiciones normalizadas de la lente, sin prometer distancias calibradas. Los controles se limitan a las capacidades de cada cámara.
+Los perfiles Natural y Detalle ajustan los controles de procesado existentes. Noche estática activa el modo nocturno descrito arriba; el antiguo perfil Luz baja, basado en siete JPEG y sombras, se ha retirado. Los atajos Cerca/Lejos cambian posiciones normalizadas de la lente, sin prometer distancias calibradas. Los controles se limitan a las capacidades de cada cámara.
 
 ## Lo que implementa el código
 
@@ -46,7 +56,7 @@ Los perfiles Natural, Detalle y Luz baja ajustan los controles de procesado exis
 
 ## Límites de esta primera versión
 
-La pila usa JPEG ya procesados por iOS, no RAW. Son capturas consecutivas, no una ráfaga de alta velocidad. Promediar imágenes no reproduce el procesamiento de Google. Solo se alinea por traslación: no rotación, paralaje ni flujo óptico. El rechazo por diferencias puede confundir ruido, iluminación y movimiento; todavía pueden aparecer artefactos. Se recomienda una escena inmóvil y trípode.
+PILA y NOCHE usan JPEG de cámara por defecto; NOCHE permite activar la ruta DNG experimental cuando la cámara la expone. Son capturas consecutivas, no una ráfaga de alta velocidad. Promediar imágenes no reproduce el procesamiento de Google. Solo se alinea por traslación: no rotación, paralaje ni flujo óptico. El rechazo por diferencias puede confundir ruido, iluminación y movimiento; todavía pueden aparecer artefactos. Se recomienda una escena inmóvil y trípode.
 
 No excede las exposiciones admitidas por la lente ni añade luz que el sensor no haya registrado. No incluye horquillado HDR, modelos neuronales de Google, superresolución, astrofotografía, retrato o Live Photos. La entrega de RAW+JPEG y su guardado por PhotoKit se comprobaron en la cámara principal; RAW en teleobjetivo y revisión visual del DNG siguen pendientes. Ultra gran angular y frontal no exponen RAW en este dispositivo. El resultado fusionado no copia los metadatos EXIF de exposición de la referencia porque describirían solo una parte de la pila.
 
@@ -88,7 +98,7 @@ La ruta es `/var/jb/Applications/UltimateCAM.app`. Para quitarla usa el gestor d
 
 ## Diagnóstico por SSH
 
-La app guarda un registro rotativo de hasta unos 128 KiB en su directorio de caché, `UltimateCAM-capture.jsonl`. Registra estado de sesión, identificadores de solicitud, callbacks, errores y número de bytes recibidos; no incluye imágenes ni EXIF. El guardado registra únicamente el resultado de PhotoKit, errores e identificadores de los elementos recién creados. Es local y no se transmite por red.
+La app guarda un registro rotativo de unos 128 KiB, más una copia anterior acotada, en su directorio de caché, `UltimateCAM-capture.jsonl`. Registra estado de sesión, identificadores de solicitud, callbacks, errores y número de bytes recibidos; no incluye imágenes ni ubicación. Noche registra únicamente exposición, ISO y marcas de tiempo de captura para comprobar la cadencia. El guardado registra únicamente el resultado de PhotoKit, errores e identificadores de los elementos recién creados. Es local y no se transmite por red.
 
 El artefacto independiente `Ultimate-CAM-diagnostics-N` contiene `UltimateCAM-device-state`, una utilidad de solo lectura que consulta estados de notificación y busca únicamente el proceso UltimateCAM. También lee versión, PID, último evento, ruta del registro y error de escritura publicados por la app mediante estados locales. No acepta órdenes por ese canal ni envía notificaciones a SpringBoard ni modifica el bloqueo. Los nombres de estado son señales de diagnóstico del sistema, no una garantía de compatibilidad futura.
 
@@ -109,7 +119,7 @@ Para una prueba de captura sin tocar los controles de la app, esta debe estar ab
 
 Primero comprobar el build y las pruebas sintéticas de la versión exacta que se vaya a instalar. Después validar permisos, captura, cambio de lentes y calidad en el iPhone.
 
-Con esa base medida: pasar de exportar RAW a una fusión RAW real, añadir alineación local y un modelo de ruido por sensor. Después, horquillado y mapeo tonal para un modo HDR propio. La astrofotografía y la superresolución deben ser módulos posteriores, con pruebas separadas. No llamar Night Sight o HDR+ a los controles de sombras o al promedio JPEG.
+Con esa base medida: mejorar el revelado y color de la fusión RAW, añadir alineación local y un modelo de ruido por sensor. Después, horquillado y mapeo tonal para un modo HDR propio. La astrofotografía y la superresolución deben ser módulos posteriores, con pruebas separadas. No llamar Night Sight o HDR+ a los controles de sombras o al promedio JPEG.
 
 ## Referencias
 

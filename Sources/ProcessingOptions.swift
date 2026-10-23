@@ -2,6 +2,7 @@ import Foundation
 
 struct ProcessingOptions {
     var nightStatic = false
+    var nightRAW = false
     var chooseSharpestReference = true
     var rejectMotion = true
     var maximumDimension: Double = 2560

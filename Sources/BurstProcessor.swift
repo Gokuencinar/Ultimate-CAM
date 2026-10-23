@@ -71,8 +71,18 @@ final class BurstProcessor {
                 : CGFloat(min(4096, max(1024, options.maximumDimension)))
             let factor = min(1, limit / max(image.extent.width, image.extent.height))
             let scaled = image.transformed(by: CGAffineTransform(scaleX: factor, y: factor))
-            return scaled.transformed(by: CGAffineTransform(translationX: -scaled.extent.minX,
+            let normalized = scaled.transformed(by: CGAffineTransform(translationX: -scaled.extent.minX,
                                                            y: -scaled.extent.minY))
+            if isRAW {
+                // Decode each DNG once. Registration, rejection and averaging
+                // reuse this linear buffer instead of evaluating a RAW graph repeatedly.
+                guard let rendered = context.createCGImage(normalized, from: normalized.extent, format: .RGBAh,
+                    colorSpace: CGColorSpace(name: CGColorSpace.extendedLinearSRGB)!) else {
+                    throw CameraFailure.message("No se pudo materializar el revelado RAW.")
+                }
+                return CIImage(cgImage: rendered)
+            }
+            return normalized
         }
         var referenceIndex = 0
         if options.chooseSharpestReference && frames.count > 1 {
@@ -144,7 +154,8 @@ final class BurstProcessor {
                            let anchor = context.createCGImage(reference, from: patch, format: .RGBA8,
                             colorSpace: CGColorSpace(name: CGColorSpace.sRGB)!) {
                             let refinement = VNTranslationalImageRegistrationRequest(targetedCGImage: target)
-                            try VNImageRequestHandler(cgImage: anchor).perform([refinement])
+                            do { try VNImageRequestHandler(cgImage: anchor).perform([refinement]) }
+                            catch { return }
                             if let residual = refinement.results?.first, residual.confidence >= 0.5,
                                abs(residual.alignmentTransform.tx) <= max(4, 2 / registrationScale),
                                abs(residual.alignmentTransform.ty) <= max(4, 2 / registrationScale) {
@@ -260,6 +271,10 @@ final class BurstProcessor {
         if filter.isSharpnessSupported { filter.sharpnessAmount = 0 }
         try write(filter.outputImage, "raw-linear.jpg")
         if let linear = filter.outputImage { try write(nightTone(linear), "raw-linear-toned.jpg") }
+        filter.isGamutMappingEnabled = false
+        if let linear = filter.outputImage { try write(nightTone(linear), "raw-no-gamut-toned.jpg") }
+        if filter.isLuminanceNoiseReductionSupported { filter.luminanceNoiseReductionAmount = 0.72 }
+        if let linear = filter.outputImage { try write(nightTone(linear), "raw-denoised-toned.jpg") }
     }
 
     /// Luminance shoulder after fusion; gain is bounded and measured in linear RGB.
