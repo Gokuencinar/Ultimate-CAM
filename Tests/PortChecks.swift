@@ -245,6 +245,21 @@ import Darwin
         var editedHDR=hdrOutput;editedHDR.postExposure = -0.5
         let singleHDR=try BurstProcessor().process([hdrFile.data],options:editedHDR)
         try check(AdaptiveHDR.hasGainMap(singleHDR.jpeg),"Single-photo edits discarded HDR")
+        let hdrSource=CGImageSourceCreateWithData(hdrFile.data as CFData,nil)!
+        let rotatedHDRData=NSMutableData()
+        let rotatedHDRDestination=CGImageDestinationCreateWithData(rotatedHDRData,"public.jpeg" as CFString,1,nil)!
+        CGImageDestinationAddImage(rotatedHDRDestination,CGImageSourceCreateImageAtIndex(hdrSource,0,nil)!,
+                                  [kCGImagePropertyOrientation:6] as CFDictionary)
+        let auxiliaryType=CGImageSourceCopyAuxiliaryDataInfoAtIndex(hdrSource,0,kCGImageAuxiliaryDataTypeISOGainMap) != nil ?
+            kCGImageAuxiliaryDataTypeISOGainMap : kCGImageAuxiliaryDataTypeHDRGainMap
+        CGImageDestinationAddAuxiliaryDataInfo(rotatedHDRDestination,auxiliaryType,
+            CGImageSourceCopyAuxiliaryDataInfoAtIndex(hdrSource,0,auxiliaryType)!)
+        try check(CGImageDestinationFinalize(rotatedHDRDestination),"Cannot encode rotated HDR fixture")
+        var rotatedOptions=editedHDR;rotatedOptions.aspect = .original
+        let rotatedHDREdit=try ImportedPhotoProcessor.process(rotatedHDRData as Data,options:rotatedOptions)
+        let orientedPreview=PreviewDecoder.image(rotatedHDREdit.jpeg)!
+        try check(orientedPreview.width==128 && orientedPreview.height==227 && AdaptiveHDR.hasGainMap(rotatedHDREdit.jpeg),
+                  "HDR import lost gain map or applied EXIF rotation twice")
         try rejects({ _ = try AdaptiveHDR.companion(base:sdrBase,originalSDR:sdrBase,
             originalHDR:hdrOriginal.cropped(to:bounds),extent:hdrBounds) },"Mismatched HDR geometry")
         try check(try JSONDecoder().decode(ProcessingOptions.self,from:JSONEncoder().encode(hdrOutput)).preserveHDR,
