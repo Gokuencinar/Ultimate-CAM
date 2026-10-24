@@ -45,8 +45,10 @@ final class CameraInteractionTests: XCTestCase {
             app.swipeUp()
         }
         XCTAssertTrue(hdrOutput.isHittable)
-        hdrOutput.tap()
-        XCTAssertEqual(hdrOutput.value as? String,"1")
+        // SwiftUI exposes the whole label row as a switch. Its center is text;
+        // tap the visible trailing thumb rather than the row's midpoint.
+        hdrOutput.coordinate(withNormalizedOffset:CGVector(dx:0.9,dy:0.5)).tap()
+        XCTAssertTrue(NSPredicate(format:"value == %@","1").evaluate(with:hdrOutput))
         let outputScreen = XCTAttachment(screenshot:app.screenshot())
         outputScreen.name="Adaptive HDR output and PNG LUT import";outputScreen.lifetime = .keepAlways;add(outputScreen)
         let profiles = app.buttons["settings.tab.Perfiles"]
