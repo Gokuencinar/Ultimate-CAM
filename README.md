@@ -1,12 +1,14 @@
 # Ultimate CAM
 
+La [etapa 0.9](docs/HDR-Y-LUT-0.9.md) añade JPEG adaptativo con mapa HDR para horquillado y edición de fuentes HDR, conservación de JPEG sin ajustes y LUT PNG en mosaico AGC, Hald estándar o tira. La conversión de LUT se hace fuera del hilo de interfaz. Build68 (`fd607923eb4b9c9dbace7c37cc803d747e8167f7`) pasó [compilación y fixtures](https://github.com/Gokuencinar/Ultimate-CAM/actions/runs/40130600584), incluidos mapas HDR decodificados, orientación vertical y remuestreo LUT. Está instalada mediante jb-p1lot, con hash del ejecutable y `dpkg --verify` correctos, sin abrir la app ni solicitar fotos. SHA-256 del DEB: `1c25927d01d4cb0bb94fa04cbe5cd16dfb9b26cc143721e043251b974182a244`. La presentación HDR, los proveedores de archivos y la calidad física siguen pendientes.
+
 La etapa [0.8 añade el complemento de Noche nativa](docs/NOCHE-NATIVA-0.8.md): en el iPhone 11 Pro con build 22H31 se confirmó la selección real de Noche máximo y la restauración al ajuste anterior, sin tomar fotos. La app build61 y el complemento build2 están instalados. La calidad fotográfica y el recorrido completo entre ambas apps siguen pendientes; el detalle anterior de versiones se conserva como historial.
 
 Cámara experimental independiente para el iPhone 11 Pro con iOS 18.7.1, distribuida como paquete `.deb` rootless. Nombre elegido por el usuario.
 
 El objetivo es combinar captura nocturna por acumulación, como concepto de Lumi, con técnicas de fotografía computacional descritas por Google. Este proyecto contiene una primera pila de imágenes; no contiene Lumi, GCam ni sus modelos o bibliotecas.
 
-## Versión 0.7 / build58: calidad iOS y fusión nocturna ponderada
+## Versión 0.7 / build58: historial de calidad iOS y fusión nocturna ponderada
 
 La [etapa 0.7](docs/NOCHE-Y-PORT-0.7.md) añade prioridad de **Calidad iOS** para fotos individuales automáticas, fusión nocturna con pesos por píxel y controles de presupuesto/obturación. Permite importar una foto elegida en Fotos, incluida una tomada con el modo Noche de Cámara de Apple, y aplicar las recetas JPEG sin una nueva captura. Un JPEG sin ajustes se conserva sin recodificar; HEIF convertido o edición producen JPEG SDR. No se integra el motor privado del modo Noche ni se garantiza que `.quality` seleccione un algoritmo concreto.
 
