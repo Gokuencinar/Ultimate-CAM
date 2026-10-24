@@ -24,13 +24,17 @@ final class WeightedTemporalMerger {
         }
         guard let nextWeights = Self.weightKernel?.apply(extent: extent, arguments: [weights,
             coarse(reference), coarse(image), threshold, rejectMotion ? 1.0 : 0.0]),
-              let nextMean = Self.meanKernel?.apply(extent: extent, arguments: [mean, image, weights, nextWeights]),
-              let weightBuffer = context.createCGImage(nextWeights, from: extent, format: .RGBAh, colorSpace: space),
-              let meanBuffer = context.createCGImage(nextMean, from: extent, format: .RGBAh, colorSpace: space) else {
+              let weightBuffer = context.createCGImage(nextWeights, from: extent, format: .RGBAh, colorSpace: space) else {
             throw CameraFailure.message("No se pudo materializar la fusión temporal ponderada.")
         }
         let offset = CGAffineTransform(translationX: extent.minX, y: extent.minY)
-        weights = CIImage(cgImage: weightBuffer).transformed(by: offset)
+        let materializedWeights = CIImage(cgImage: weightBuffer).transformed(by: offset)
+        // Reuse the evaluated weights instead of re-running both Gaussian masks.
+        guard let nextMean = Self.meanKernel?.apply(extent: extent, arguments: [mean, image, weights, materializedWeights]),
+              let meanBuffer = context.createCGImage(nextMean, from: extent, format: .RGBAh, colorSpace: space) else {
+            throw CameraFailure.message("No se pudo materializar la media temporal.")
+        }
+        weights = materializedWeights
         mean = CIImage(cgImage: meanBuffer).transformed(by: offset)
         return mean
     }

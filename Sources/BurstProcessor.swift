@@ -220,10 +220,13 @@ final class BurstProcessor {
                         kCIInputTargetImageKey: aligned.cropped(to: overlap), kCIInputTimeKey: 1 / CGFloat(accepted + 1)
                     ]).cropped(to: overlap)
                 }
-                guard let rendered = context.createCGImage(mean, from: overlap, format: .RGBAh,
-                    colorSpace: CGColorSpace(name: CGColorSpace.extendedLinearSRGB)!) else { return }
-                accumulator = CIImage(cgImage: rendered).transformed(by:
-                    CGAffineTransform(translationX: overlap.minX, y: overlap.minY))
+                if temporal != nil { accumulator = mean } // Already materialized by the weighted merger.
+                else {
+                    guard let rendered = context.createCGImage(mean, from: overlap, format: .RGBAh,
+                        colorSpace: CGColorSpace(name: CGColorSpace.extendedLinearSRGB)!) else { return }
+                    accumulator = CIImage(cgImage: rendered).transformed(by:
+                        CGAffineTransform(translationX: overlap.minX, y: overlap.minY))
+                }
                 common = overlap
                 accepted += 1
             }

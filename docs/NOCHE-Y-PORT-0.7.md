@@ -32,6 +32,10 @@ La opción se aplica a Noche JPEG o DNG revelado y se puede desactivar. La cifra
 
 Noche permite elegir hasta 2/4/8/16 segundos de integración solicitada y un límite por foto entre 1/30 y 1 segundo, con un máximo de 16 fotogramas y los límites de la lente. La medición puede producir una duración total menor; entrega y procesado aumentan el tiempo transcurrido. Acortar la exposición puede dejar la imagen oscura si el ISO llega a su máximo. No se ha añadido detección de movimiento de sujetos.
 
+## Qué aplicación contiene el APK
+
+La [ficha del desarrollador en Google Play](https://play.google.com/store/apps/details?id=com.agc.gcam), consultada el 24-10-2026, describe `com.agc.gcam` como una app independiente inspirada en el procesamiento HDR+ de Google Camera y declara que no está afiliada a Google. Esto coincide con el identificador del manifiesto local, pero no valida la firma del APK entregado ni demuestra que contenga el motor oficial de Google. La biblioteca local `libgcam_agc_native.so` ocupa 59 592 bytes y expone JNI de desempaquetado RAW y consulta de campos/métodos; sus nombres no acreditan una implementación HDR+ oficial. La ausencia de modelos AWB/HDRnet entre los archivos inventariados tampoco demuestra que nunca exista otra ruta, pero impide dar esos modelos por disponibles en esta entrega.
+
 ## Condiciones para acreditar el port completo
 
 La [explicación de Night Sight de Google](https://research.google/blog/night-sight-seeing-in-the-dark-on-pixel-phones/) describe medición de movimiento, selección de exposiciones, fusión robusta y balance de blancos aprendido. Compartir nombres o número de imágenes no demuestra esas cualidades.

@@ -155,10 +155,12 @@ struct CameraView: View {
             loadingPhoto = true
             defer { loadingPhoto = false; selectedPhoto = nil }
             do {
-                guard let data = try await item.loadTransferable(type: Data.self) else {
+                guard let file = try await item.loadTransferable(type: PhotoImportTransfer.self) else {
                     throw CameraFailure.message("Fotos no devolvió la imagen seleccionada.")
                 }
+                defer { try? FileManager.default.removeItem(at: file.url) }
                 try Task.checkCancellation()
+                let data = try Data(contentsOf: file.url, options: .mappedIfSafe)
                 camera.importPhoto(data, options: options)
             } catch is CancellationError { }
             catch { camera.reportImportError(error.localizedDescription) }
