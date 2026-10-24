@@ -1,17 +1,34 @@
 import AVFoundation
 import SwiftUI
 import UIKit
+import UniformTypeIdentifiers
 
 private enum ControlPanel: String, CaseIterable, Identifiable {
-    case capture = "Captura", manual = "Manual", processing = "Procesado"
+    case capture = "Captura", manual = "Manual", processing = "Procesado", color = "Color", profiles = "Perfiles"
+    var id: String { rawValue }
+}
+
+private enum CompositionGuide: String, CaseIterable, Identifiable {
+    case thirds = "Tercios", golden = "Áurea", center = "Centro", diagonal = "Diagonales"
     var id: String { rawValue }
 }
 
 private struct ViewfinderGrid: View {
+    var guide: CompositionGuide
     var body: some View {
         GeometryReader { geometry in
             Path { path in
-                for fraction in [CGFloat(1) / 3, CGFloat(2) / 3] {
+                let fractions: [CGFloat] = guide == .golden ? [0.382, 0.618] : [1.0/3, 2.0/3]
+                if guide == .center {
+                    path.move(to: CGPoint(x: geometry.size.width / 2 - 18, y: geometry.size.height / 2))
+                    path.addLine(to: CGPoint(x: geometry.size.width / 2 + 18, y: geometry.size.height / 2))
+                    path.move(to: CGPoint(x: geometry.size.width / 2, y: geometry.size.height / 2 - 18))
+                    path.addLine(to: CGPoint(x: geometry.size.width / 2, y: geometry.size.height / 2 + 18))
+                } else if guide == .diagonal {
+                    path.move(to: .zero); path.addLine(to: CGPoint(x: geometry.size.width, y: geometry.size.height))
+                    path.move(to: CGPoint(x: geometry.size.width, y: 0)); path.addLine(to: CGPoint(x: 0, y: geometry.size.height))
+                }
+                for fraction in (guide == .thirds || guide == .golden ? fractions : []) {
                     path.move(to: CGPoint(x: geometry.size.width * fraction, y: 0))
                     path.addLine(to: CGPoint(x: geometry.size.width * fraction, y: geometry.size.height))
                     path.move(to: CGPoint(x: 0, y: geometry.size.height * fraction))
@@ -24,6 +41,14 @@ private struct ViewfinderGrid: View {
 
 struct CameraView: View {
     @StateObject private var camera = CameraModel()
+    @StateObject private var profiles = ProcessingProfiles()
+    @State private var guide = CompositionGuide.thirds
+    @State private var profileName = ""
+    @State private var importFile = false
+    @State private var importingLUT = false
+    @State private var exportFile = false
+    @State private var exportData = ProfileFile(data: Data())
+    @State private var fileMessage: String?
     @Environment(\.scenePhase) private var scenePhase
     @State private var lastBackLens = CameraLens.wide
     @State private var stack = ProcessInfo.processInfo.arguments.contains("-stack-mode")
@@ -46,6 +71,7 @@ struct CameraView: View {
     @State private var options = ProcessingOptions()
     private var preset: String {
         if options.nightStatic { return "Noche estática" }
+        if options.advancedRendering { return "Personalizado" }
         if options.noiseReduction == 0 && options.sharpening == 0.25 && options.liftShadows == 0 { return "Detalle" }
         return options.noiseReduction == 0 && options.sharpening == 0 && options.liftShadows == 0 ? "Natural" : "Personalizado"
     }
@@ -87,7 +113,7 @@ struct CameraView: View {
             }
         }
         .background(Color.black).foregroundStyle(.white).preferredColorScheme(.dark)
-        .onAppear { UIApplication.shared.isIdleTimerDisabled = true; camera.start() }
+        .onAppear { UIApplication.shared.isIdleTimerDisabled = true; camera.start(); loadProfile(profiles.options(for: lens.rawValue) ?? ProcessingOptions()) }
         .onDisappear { UIApplication.shared.isIdleTimerDisabled = false; cancelCountdown() }
         .onChange(of: scenePhase) { _, phase in
             if phase == .active { UIApplication.shared.isIdleTimerDisabled = true; camera.start() }
@@ -99,8 +125,10 @@ struct CameraView: View {
         }
         .onChange(of: camera.selectedLens) { _, next in
             resetUIControls()
+            loadProfile(profiles.options(for: next.rawValue) ?? ProcessingOptions())
             if next != .front { lastBackLens = next }
         }
+        .onChange(of: options) { _, value in profiles.remember(value, lens: lens.rawValue) }
         .onChange(of: bias) { _, value in camera.setBias(Float(value)) }
         .onChange(of: stack) { _, value in if value { rawEnabled = false; flash = .off } }
         .onChange(of: rawEnabled) { _, value in if value { flash = .off } }
@@ -131,7 +159,7 @@ struct CameraView: View {
                 camera.focus(at: point, lock: locked)
             }, changeZoom: { value in camera.setZoom(value) })
                 .allowsHitTesting(controlsEnabled)
-            if grid { ViewfinderGrid() }
+            if grid { ViewfinderGrid(guide: guide) }
             if countdown > 0 {
                 Text("\(countdown)").font(.system(size: 80, weight: .light, design: .rounded))
                     .shadow(color: .black, radius: 10).allowsHitTesting(false)
@@ -277,20 +305,46 @@ struct CameraView: View {
     private var settings: some View {
         NavigationStack {
             VStack(spacing: 0) {
-                Picker("Panel", selection: $panel) { ForEach(ControlPanel.allCases) { Text($0.rawValue).tag($0) } }
-                    .pickerStyle(.segmented).padding()
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(spacing: 8) {
+                        ForEach(ControlPanel.allCases) { item in
+                            Button(item.rawValue) { panel = item }
+                                .buttonStyle(.bordered).tint(panel == item ? .yellow : .gray)
+                                .accessibilityIdentifier("settings.tab." + item.rawValue)
+                        }
+                    }.padding(.horizontal).padding(.vertical, 12)
+                }.accessibilityIdentifier("settings.tabs")
                 Form {
                     switch panel {
                     case .capture: captureSettings
                     case .manual: manualSettings
                     case .processing: processingSettings
+                    case .color: colorSettings
+                    case .profiles: profileSettings
                     }
                 }.disabled(camera.busy || countdown > 0)
             }
             .navigationTitle("Ajustes").navigationBarTitleDisplayMode(.inline)
             .toolbar { ToolbarItem(placement: .confirmationAction) { Button("Listo") { showControls = false } } }
             .tint(.yellow)
-        }.presentationDetents([.medium, .large]).presentationDragIndicator(.visible)
+        }.presentationDetents([.large]).presentationDragIndicator(.visible)
+            .fileImporter(isPresented: $importFile, allowedContentTypes: importingLUT ? [.data] : [.json]) { result in
+                do {
+                    let url = try result.get(), access = url.startAccessingSecurityScopedResource()
+                    defer { if access { url.stopAccessingSecurityScopedResource() } }
+                    let size = try url.resourceValues(forKeys: [.fileSizeKey]).fileSize ?? 0
+                    guard size <= 16 * 1024 * 1024 else { throw CameraFailure.message("El archivo supera 16 MB.") }
+                    let data = try Data(contentsOf: url)
+                    if importingLUT {
+                        let lut = try CubeLUT.parse(data, name: url.deletingPathExtension().lastPathComponent)
+                        options.lutID = try ColorLUTStore.save(lut)
+                        fileMessage = "LUT importada: " + lut.title
+                    } else { loadProfile(try profiles.importDocument(data)); fileMessage = "Perfil importado." }
+                } catch { fileMessage = error.localizedDescription }
+            }
+            .fileExporter(isPresented: $exportFile, document: exportData, contentType: .json, defaultFilename: "UltimateCAM-profile") { result in
+                switch result { case .success: fileMessage = "Perfil exportado."; case .failure(let error): fileMessage = error.localizedDescription }
+            }
     }
 
     private var captureSettings: some View {
@@ -309,6 +363,7 @@ struct CameraView: View {
                     .font(.footnote).foregroundStyle(.secondary)
                 Picker("Temporizador", selection: $timerSeconds) { Text("Desactivado").tag(0); Text("3 segundos").tag(3); Text("10 segundos").tag(10) }
                 Toggle("Cuadrícula", isOn: $grid)
+                if grid { Picker("Guía", selection: $guide) { ForEach(CompositionGuide.allCases) { Text($0.rawValue).tag($0) } }
             }
             Section("Pila de imágenes") {
                 Picker("Fotogramas", selection: $stackCount) { ForEach([3,5,7,9], id: \.self) { Text("\($0) fotos").tag($0) } }
@@ -317,6 +372,12 @@ struct CameraView: View {
                 }
                 Toggle("Referencia más nítida", isOn: $options.chooseSharpestReference)
                 Toggle("Rechazo de movimiento", isOn: $options.rejectMotion)
+                Toggle("Alineación local experimental", isOn: $options.localAlignment)
+                Toggle("Rechazo adaptativo experimental", isOn: $options.adaptiveMotionRejection).disabled(!options.rejectMotion)
+                if options.adaptiveMotionRejection && options.rejectMotion {
+                    optionSlider("Tolerancia al movimiento", value: $options.motionSigma, range: 1.5...6)
+                }
+                Text("La alineación local consume más tiempo. El rechazo adaptativo estima diferencias RGB; necesita una escena mayoritariamente inmóvil.").font(.footnote).foregroundStyle(.secondary)
                 Text("Mantén el teléfono estable. La app descarta imágenes que no consigue alinear.").font(.footnote).foregroundStyle(.secondary)
             }
         }
@@ -399,6 +460,12 @@ struct CameraView: View {
                         .font(.footnote).foregroundStyle(.secondary)
                 }
             }
+            Section("Detalle y textura") {
+                optionSlider("Ruido de color", value: $options.chromaDenoise, range: 0...1)
+                optionSlider("Contraste local", value: $options.localContrast, range: 0...1.5)
+                optionSlider("Detalle fino", value: $options.fineDetail, range: 0...1)
+                optionSlider("Radio de nitidez", value: $options.sharpenRadius, range: 0.5...4)
+            }
             Section("Ajustes del JPEG") {
                 valueLabel("Reducción de ruido", String(format: "%.0f %%", options.noiseReduction / 0.08 * 100))
                 Slider(value: $options.noiseReduction, in: 0...0.08)
@@ -412,6 +479,86 @@ struct CameraView: View {
         }
     }
 
+    private var colorSettings: some View {
+        Group {
+            Section("Luz y color del resultado") {
+                optionSlider("Exposición del JPEG (EV)", value: $options.postExposure, range: -2...2)
+                optionSlider("Compresión de luces", value: $options.highlightCompression, range: 0...1)
+                optionSlider("Contraste", value: $options.contrast, range: 0.5...1.5)
+                optionSlider("Saturación", value: $options.saturation, range: 0...2)
+                optionSlider("Intensidad de color", value: $options.vibrance, range: -1...1)
+                optionSlider("Gamma", value: $options.gamma, range: 0.5...2)
+                optionSlider("Viñeta", value: $options.vignette, range: 0...1)
+            }
+            Section("LUT 3D") {
+                Button("Importar LUT .cube") { importingLUT = true; importFile = true }
+                if options.lutID != nil {
+                    Text("LUT personalizada activa").foregroundStyle(.yellow)
+                    optionSlider("Intensidad LUT", value: $options.lutIntensity, range: 0...1)
+                    Button("Quitar LUT") { options.lutID = nil }
+                }
+                Text("Tablas .cube 3D de 2 a 64 puntos. Afectan al resultado JPEG, no al visor ni al DNG.").font(.footnote).foregroundStyle(.secondary)
+            }
+            Section("Salida JPEG") {
+                Picker("Espacio de color", selection: $options.outputColor) { ForEach(OutputColor.allCases) { Text($0.label).tag($0) } }
+                Picker("Proporción", selection: $options.aspect) { ForEach(PhotoAspect.allCases) { Text($0.label).tag($0) } }
+                Toggle("Elegir calidad JPEG", isOn: Binding(get: { options.jpegQuality != nil }, set: { options.jpegQuality = $0 ? 0.95 : nil }))
+                if options.jpegQuality != nil {
+                    Slider(value: Binding(get: { options.jpegQuality ?? 0.95 }, set: { options.jpegQuality = $0 }), in: 0.5...1)
+                    Text("Calidad: \(Int((options.jpegQuality ?? 0.95) * 100)) %")
+                }
+                Text("Display P3 conserva un perfil de color amplio; la salida es SDR. El recorte afecta al archivo; el visor sigue llenando la pantalla.").font(.footnote).foregroundStyle(.secondary)
+            }
+            if let fileMessage { Section { Text(fileMessage).font(.footnote) } }
+        }
+    }
+
+    private var profileSettings: some View {
+        Group {
+            Section("Perfil de procesado") {
+                Text("Los ajustes de procesado se recuerdan para cada lente. No se guardan ISO, enfoque ni balance manual.").font(.footnote).foregroundStyle(.secondary)
+                TextField("Nombre del perfil", text: $profileName).accessibilityIdentifier("profile.name")
+                Button("Guardar perfil actual") {
+                    do { try profiles.save(name: profileName, options: options); fileMessage = "Perfil guardado." }
+                    catch { fileMessage = error.localizedDescription }
+                }.disabled(profileName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                Button("Importar perfil JSON") { importingLUT = false; importFile = true }
+                Button("Exportar perfil actual") {
+                    do { exportData = ProfileFile(data: try profiles.exportDocument(name: profileName.isEmpty ? "Mi perfil" : profileName, options: options)); exportFile = true }
+                    catch { fileMessage = error.localizedDescription }
+                }
+            }
+            Section("Mis perfiles") {
+                if profiles.profiles.isEmpty { Text("Todavía no hay perfiles guardados.").foregroundStyle(.secondary) }
+                ForEach(profiles.profiles) { profile in
+                    HStack {
+                        Button { loadProfile(profile.options); fileMessage = "Aplicado: " + profile.name } label: { Label(profile.name, systemImage: "slider.horizontal.3") }
+                        Spacer()
+                        Button(role: .destructive) { profiles.remove(profile.id) } label: { Image(systemName: "trash") }.buttonStyle(.borderless).accessibilityLabel("Eliminar " + profile.name)
+                    }
+                }
+            }
+            if let fileMessage { Section { Text(fileMessage).font(.footnote) } }
+            if let error = profiles.error { Section { Text(error).foregroundStyle(.orange).font(.footnote) } }
+        }
+    }
+
+    private func loadProfile(_ value: ProcessingOptions) {
+        do {
+            _ = try value.validated()
+            if let id = value.lutID { _ = try ColorLUTStore.load(id) }
+            options = value
+            if value.nightStatic { stack = true; rawEnabled = false; flash = .off; manualExposure = false; camera.setManualExposure(iso: nil) }
+        } catch { fileMessage = "No se aplicó el perfil: " + error.localizedDescription }
+    }
+
+    private func optionSlider(_ title: String, value: Binding<Double>, range: ClosedRange<Double>) -> some View {
+        VStack(alignment: .leading) {
+            valueLabel(title, String(format: "%.2f", value.wrappedValue))
+            Slider(value: value, in: range).accessibilityLabel(title)
+        }
+    }
+
     private func valueLabel(_ title: String, _ value: String) -> some View {
         HStack { Text(title); Spacer(); Text(value).monospacedDigit().foregroundStyle(.yellow) }
     }
@@ -420,6 +567,7 @@ struct CameraView: View {
         rawEnabled = false; tint = 0; flash = .off
     }
     private func applyPreset(_ name: String) {
+        options = ProcessingOptions()
         options.nightStatic = name == "Noche estática"
         options.nightRAW = false
         options.noiseReduction = options.nightStatic ? 0.012 : 0
@@ -474,6 +622,7 @@ struct CameraView: View {
                         Image(uiImage: image).resizable().scaledToFit().clipShape(RoundedRectangle(cornerRadius: 15))
                     }
                     Text(camera.resultDetails).font(.subheadline).frame(maxWidth: .infinity, alignment: .leading)
+                    if !showReference, let statistics = camera.resultStatistics { ResultHistogram(statistics: statistics) }
                     if camera.hasRAWResult {
                         Label("RAW original + JPEG", systemImage: "square.stack.3d.up").font(.subheadline.bold()).foregroundStyle(.yellow)
                         Text("Fotos recibirá el DNG de referencia con su JPEG de cámara. El JPEG fusionado o editado se guarda aparte; el DNG no está fusionado.")

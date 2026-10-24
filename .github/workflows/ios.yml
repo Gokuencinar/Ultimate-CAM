@@ -51,7 +51,10 @@ jobs:
       - name: Check image alignment and noise averaging
         run: |
           set -euo pipefail
-          xcrun --sdk macosx swiftc -O Sources/NightCapturePlan.swift Sources/ProcessingOptions.swift Sources/BurstProcessor.swift Tests/ProcessorChecks.swift -o build/processor-checks
+          SOURCES=(Sources/NightCapturePlan.swift Sources/ProcessingOptions.swift Sources/CubeLUT.swift Sources/ProcessingProfiles.swift Sources/AdvancedProcessor.swift Sources/LocalAlignment.swift Sources/NoiseAwareMerger.swift Sources/ImageStatistics.swift Sources/BurstProcessor.swift)
+          xcrun --sdk macosx swiftc -O "${SOURCES[@]}" Tests/PortChecks.swift -o build/port-checks
+          build/port-checks 2>&1 | tee build/port-checks.log
+          xcrun --sdk macosx swiftc -O "${SOURCES[@]}" Tests/ProcessorChecks.swift -o build/processor-checks
           ULTIMATECAM_PROCESSOR_TRACE=1 build/processor-checks 2>&1 | tee build/processor-checks.log
       - name: Package rootless DEB
         run: bash scripts/package_deb.sh
@@ -100,5 +103,6 @@ jobs:
           path: |
             build/xcodebuild.log
             build/processor-checks.log
+            build/port-checks.log
           if-no-files-found: warn
           retention-days: 14

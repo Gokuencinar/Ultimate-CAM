@@ -45,6 +45,7 @@ final class CameraModel: NSObject, ObservableObject, AVCapturePhotoCaptureDelega
     @Published private(set) var preview: UIImage?
     @Published private(set) var referencePreview: UIImage?
     @Published private(set) var resultDetails = ""
+    @Published private(set) var resultStatistics: ImageStatistics?
     @Published private(set) var supportsFlash = false
     @Published private(set) var supportsRAW = false
     @Published private(set) var supportsManualExposure = false
@@ -685,13 +686,14 @@ final class CameraModel: NSObject, ObservableObject, AVCapturePhotoCaptureDelega
                     do {
                         var result = try BurstProcessor().process(captured, options: options, rawFrames: rawBurst)
                         if !options.nightStatic { result.raw = raw }
+                        result.statistics = ImageStatistics.measure(result.jpeg)
                         return result
                     } catch {
-                        guard options.nightStatic, let first = captured.first else { throw error }
+                        guard let first = captured.first else { throw error }
                         CaptureTrace.record("night.processing.fallback", ["error": error.localizedDescription])
                         return CaptureResult(jpeg: first, reference: first,
-                            details: "Noche sin fusión: se conserva la referencia. " + error.localizedDescription,
-                            mergedFrames: 1, raw: rawBurst?.first, source: "reference-fallback")
+                            details: "Procesado no aplicado: se conserva la referencia. " + error.localizedDescription,
+                            mergedFrames: 1, raw: rawBurst?.first ?? raw, source: "reference-fallback", statistics: ImageStatistics.measure(first))
                     }
                 } }
                 self.queue.async {
@@ -711,6 +713,7 @@ final class CameraModel: NSObject, ObservableObject, AVCapturePhotoCaptureDelega
                             self.preview = UIImage(data: result.jpeg)
                             self.referencePreview = UIImage(data: result.reference)
                             self.resultDetails = result.details
+                            self.resultStatistics = result.statistics
                             self.hasRAWResult = result.raw != nil
                             self.hasSeparateReference = result.jpeg != result.reference
                             self.savedResult = false

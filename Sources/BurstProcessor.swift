@@ -9,6 +9,7 @@ struct CaptureResult {
     let mergedFrames: Int
     var raw: Data? = nil
     var source = "JPEG"
+    var statistics: ImageStatistics? = nil
 }
 
 enum CameraFailure: LocalizedError {
@@ -28,13 +29,14 @@ final class BurstProcessor {
     ])
 
     func process(_ frames: [Data], options: ProcessingOptions = ProcessingOptions(), rawFrames: [Data]? = nil) throws -> CaptureResult {
+        let options = try options.validated()
         guard let first = frames.first else { throw CameraFailure.message("No hay imágenes.") }
         if let rawFrames, rawFrames.count != frames.count {
             throw CameraFailure.message("La pila RAW está incompleta.")
         }
         let inputFrames = rawFrames ?? frames
         let isRAW = rawFrames != nil
-        let adjustments = options.nightStatic || options.noiseReduction > 0 || options.sharpening > 0 || options.liftShadows > 0
+        let adjustments = options.nightStatic || options.noiseReduction > 0 || options.sharpening > 0 || options.liftShadows > 0 || options.advancedRendering
         if frames.count == 1 && !adjustments && !isRAW {
             return CaptureResult(jpeg: first, reference: first, details: "Foto individual, procesada por el sistema.", mergedFrames: 1)
         }
@@ -177,7 +179,13 @@ final class BurstProcessor {
                     .intersection(reference.extent)
                 guard overlap.width > reference.extent.width * 0.9,
                       overlap.height > reference.extent.height * 0.9 else { return }
-                if options.rejectMotion {
+                if options.localAlignment {
+                    aligned = try LocalAlignment.align(aligned, reference: reference, extent: overlap, context: context)
+                }
+                if options.rejectMotion && options.adaptiveMotionRejection {
+                    let threshold = NoiseAwareMerger.threshold(aligned, reference: reference, extent: overlap, context: context, sigma: options.motionSigma)
+                    aligned = try NoiseAwareMerger.blend(aligned, reference: reference, extent: overlap, threshold: threshold)
+                } else if options.rejectMotion {
                     let delta = aligned.cropped(to: overlap).applyingFilter("CIDifferenceBlendMode", parameters: [
                         kCIInputBackgroundImageKey: reference.cropped(to: overlap)
                     ])
@@ -224,19 +232,24 @@ final class BurstProcessor {
             ])
         }
         if options.sharpening > 0 {
-            accumulator = accumulator.applyingFilter("CISharpenLuminance", parameters: [
-                kCIInputSharpnessKey: min(0.8, options.sharpening)
-            ])
+            if options.sharpenRadius == 1 {
+                accumulator = accumulator.applyingFilter("CISharpenLuminance", parameters: [kCIInputSharpnessKey: options.sharpening])
+            } else {
+                accumulator = accumulator.applyingFilter("CIUnsharpMask", parameters: [kCIInputRadiusKey: options.sharpenRadius, kCIInputIntensityKey: options.sharpening])
+            }
         }
+        accumulator = try AdvancedProcessor.apply(accumulator.cropped(to: common), options: options)
+        common = AdvancedProcessor.crop(common, aspect: options.aspect)
+        let outputSpace = CGColorSpace(name: options.outputColor == .displayP3 ? CGColorSpace.displayP3 : CGColorSpace.sRGB)!
         guard let cg = context.createCGImage(accumulator, from: common,
-                    format: .RGBA8, colorSpace: CGColorSpace(name: CGColorSpace.sRGB)!) else {
+                    format: .RGBA8, colorSpace: outputSpace) else {
             throw CameraFailure.message("No se pudo renderizar la pila.")
         }
         let data = NSMutableData()
         guard let destination = CGImageDestinationCreateWithData(data, "public.jpeg" as CFString, 1, nil) else {
             throw CameraFailure.message("No se pudo crear el JPEG.")
         }
-        CGImageDestinationAddImage(destination, cg, [kCGImageDestinationLossyCompressionQuality: 0.95] as CFDictionary)
+        CGImageDestinationAddImage(destination, cg, [kCGImageDestinationLossyCompressionQuality: options.jpegQuality ?? 0.95] as CFDictionary)
         guard CGImageDestinationFinalize(destination) else { throw CameraFailure.message("Error al codificar el JPEG.") }
         let details: String
         if frames.count == 1 {
