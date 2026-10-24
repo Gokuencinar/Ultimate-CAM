@@ -4,11 +4,15 @@ Primer prototipo de cámara propia para el iPhone 11 Pro con iOS 18.7.1. Nombre 
 
 El objetivo es combinar captura nocturna por acumulación, como concepto de Lumi, con técnicas de fotografía computacional descritas por Google. Este proyecto contiene una primera pila de imágenes; no contiene Lumi, GCam ni sus modelos o bibliotecas.
 
-## Candidato 0.5: análisis de AGC y nuevas herramientas
+## Versión 0.5 / build51: instalada sin prueba funcional
 
-La versión candidata adapta controles observados en el APK AGC 1.8.6 mediante código propio de Core Image/Vision. Añade cinco paneles, recetas por lente, perfiles JSON con LUT opcional, importación `.cube`, ruido cromático, detalle fino/contraste local, exposición y color del JPEG, calidad/P3/recorte, guías e histograma del resultado. Incluye alineación local y rechazo adaptativo experimentales, desactivados por defecto, y un punto de partida “Estático avanzado”. La revisión usa miniaturas limitadas a 1600 px, y el procesado ofrece progreso y cancelación cooperativa para conservar el original.
+La versión 0.5 adapta controles observados en el APK AGC 1.8.6 mediante código propio de Core Image/Vision. Añade cinco paneles, recetas por lente, perfiles JSON con LUT opcional, importación `.cube`, ruido cromático, detalle fino/contraste local, exposición y color del JPEG, calidad/P3/recorte, guías e histograma del resultado. Incluye alineación local y rechazo adaptativo experimentales, desactivados por defecto, y un punto de partida “Estático avanzado”. La revisión usa miniaturas limitadas a 1600 px, y el procesado ofrece progreso y cancelación cooperativa para conservar el original.
 
 La [matriz de portabilidad](docs/AGC-PORTABILIDAD.md) identifica qué se adapta, qué ya existía y qué queda pendiente: no es un port completo ni el motor de Google. No se incorporan bibliotecas, shaders, modelos ni recursos del APK al producto. El APK original y los archivos descompilados permanecen como material de análisis local. Las pruebas funcionales del iPhone quedan aplazadas por petición del usuario. Se autoriza instalar 0.5 por SSH sin abrir ni probar la app; el informe de entrega separa instalación y funcionamiento. Los resultados de build43 que siguen son históricos.
+
+Build51 (`0.5.0+build.51.git.e20394d`, código `e20394d08f002ded6b1dead69a24a006d4b04811`) está [compilada y comprobada con fixtures](https://github.com/Gokuencinar/Ultimate-CAM/actions/runs/40055761390) e instalada por SSH. SHA-256 del DEB: `681b7db64d21d904c0452b97b92cab8a39440c47b0e9b8e64b316e294c38663f`. Hash del ejecutable y `dpkg --verify` correctos, sin abrir la app ni enviar capturas. El paquete añade un icono propio y conserva el identificador y contenedor anteriores.
+
+Las [pruebas de interfaz](https://github.com/Gokuencinar/Ultimate-CAM/actions/runs/40055520612), con los mismos fuentes Swift que build51 y diferencia solo en el catálogo del icono, completaron un caso compuesto con cero fallos en 48,971 s: visor, gestos, temporizador, Noche, panel Color y guardado/aplicación de perfiles. No son pruebas de óptica ni de cámara física. La revisión por SSH se limitó a archivos, registros existentes y estado del paquete; no hubo attach ni instrumentación de procesos. No se han medido mejoras de calidad, tiempo o memoria en el iPhone con 0.5.
 
 ## Noche estática experimental (0.4)
 
@@ -22,7 +26,7 @@ El revelado DNG desactiva la curva global, la sustracción creativa de sombras (
 
 Noche exige exposición automática y flash desactivado. Los tiempos largos se seleccionan entre valores fijos y se ajusta el ISO para conservar la medición. Solo si el automático está cerca del ISO máximo, una falta de exposición medida por `exposureTargetOffset` puede compensarse hasta 2 EV. No se interpreta esa señal como detección de movimiento ni como protección completa contra luces recortadas. Conserva los bloqueos y modos anteriores para restaurarlos tras captura o error. Si el revelado falla, conserva la referencia y avisa que no hay fusión. No repite capturas automáticamente. La configuración nocturna y el procesamiento tienen límites de espera independientes.
 
-## Estado instalado: build43
+## Auditoría física histórica: build43
 
 `0.4.0+build.43.git.9aca748`, commit `9aca74887a3579c476fc74ee70a85104d4487f2e`, compilado en [Actions](https://github.com/Gokuencinar/Ultimate-CAM/actions/runs/40012174142) e instalado por SSH. SHA-256: `6178d40ed72440fc2cebd3626119508f21149894d8728eaeaa84f32184f39907`. `dpkg --verify` sin diferencias; sin reinicio ni respring.
 
