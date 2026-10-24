@@ -53,6 +53,8 @@ struct CameraView: View {
     @State private var lastBackLens = CameraLens.wide
     @State private var stack = ProcessInfo.processInfo.arguments.contains("-stack-mode")
     @State private var showControls = ProcessInfo.processInfo.arguments.contains("-show-controls")
+    @State private var showQuickControls = false
+    @State private var colorPanel = ColorPanel.basic
     @State private var panel: ControlPanel = ProcessInfo.processInfo.arguments.contains("-processing-controls") ? .processing : .capture
     @State private var bias: Double = 0
     @State private var manualWB = false
@@ -93,7 +95,7 @@ struct CameraView: View {
         .overlay(alignment: .top) {
             VStack(spacing: 0) {
                 header.padding(.horizontal, 20).padding(.vertical, 10)
-                quickControls.padding(.horizontal, 12).padding(.bottom, 12)
+                if showQuickControls { quickControls.padding(.horizontal, 16).padding(.bottom, 12) }
             }
             .background {
                 LinearGradient(colors: [.black.opacity(0.8), .black.opacity(0)],
@@ -103,10 +105,10 @@ struct CameraView: View {
         }
         .overlay(alignment: .bottom) {
             VStack(spacing: 0) {
-                focusInfo.padding(.horizontal, 20).padding(.bottom, 8)
+                if camera.isFocusLocked || manualFocus { focusInfo.padding(.horizontal, 20).padding(.bottom, 8) }
                 if camera.processingInProgress {
                     Button("Detener procesado y conservar original") { camera.cancelProcessing() }
-                        .font(.footnote.bold()).buttonStyle(.bordered).tint(.yellow).padding(.bottom, 8)
+                        .font(.footnote.bold()).buttonStyle(.bordered).tint(CameraPalette.accent).padding(.bottom, 8)
                 }
                 bottomDock
             }
@@ -142,18 +144,22 @@ struct CameraView: View {
     }
 
     private var header: some View {
-        HStack {
-            VStack(alignment: .leading, spacing: 3) {
-                Text("ULTIMATE CAM").font(.system(size: 17, weight: .bold, design: .rounded)).tracking(1.2)
-                Text(options.nightStatic ? "Noche estática · \((options.nightRAW && camera.supportsRAW) ? "RAW experimental" : "JPEG")" :
-                    (stack ? "Pila de \(stackCount) · \(preset)" : "\(rawEnabled ? "RAW + JPEG" : "JPEG") · \(preset)"))
-                    .font(.system(size: 12, weight: .medium)).foregroundStyle(.white.opacity(0.65))
-            }
-            Spacer()
-            Button { showControls = true } label: {
-                Image(systemName: "slider.horizontal.3").font(.system(size: 19, weight: .semibold))
-                    .frame(width: 46, height: 46).background(Color(white: 0.14), in: RoundedRectangle(cornerRadius: 16))
-            }.accessibilityLabel("Ajustes de cámara").accessibilityIdentifier("camera.settings").disabled(!controlsEnabled)
+        HStack(spacing:16) {
+            Button { showQuickControls.toggle() } label: {
+                Image(systemName:showQuickControls ? "chevron.up" : "chevron.down")
+                    .font(.system(size:16,weight:.semibold)).frame(width:44,height:44)
+                    .background(.black.opacity(0.55),in:Circle())
+            }.accessibilityLabel("Ajustes rápidos").accessibilityIdentifier("camera.quickSettings")
+            Spacer(minLength:0)
+            Text(options.hdrBracketing ? "HDR · 3 exposiciones" : (options.nightStatic ? "Noche estática · \((options.nightRAW && camera.supportsRAW) ? "RAW experimental" : "JPEG")" :
+                (stack ? "Pila de \(stackCount)" : (rawEnabled ? "RAW + JPEG" : "Cámara"))))
+                .font(.system(size:12,weight:.medium)).foregroundStyle(.white.opacity(0.8))
+            Spacer(minLength:0)
+            Menu {
+                Toggle("Cuadrícula",isOn:$grid)
+                Picker("Composición",selection:$guide) { ForEach(CompositionGuide.allCases) { Text($0.rawValue).tag($0) } }
+            } label: { Image(systemName:"viewfinder").font(.system(size:19)).frame(width:44,height:44).background(.black.opacity(0.55),in:Circle()) }
+                .accessibilityLabel("Guías de composición")
         }
     }
 
@@ -187,7 +193,7 @@ struct CameraView: View {
             } label: {
                 Label(flash.label, systemImage: flash == .off ? "bolt.slash.fill" : "bolt.fill")
                     .font(.system(size: 11, weight: .bold))
-                    .foregroundStyle(flash == .off ? Color.white : .yellow)
+                    .foregroundStyle(flash == .off ? Color.white : CameraPalette.accent)
                     .padding(.horizontal, 10).frame(height: 40)
                     .background(.black.opacity(0.75), in: Capsule())
             }.accessibilityLabel("Flash \(flash.label)")
@@ -230,7 +236,7 @@ struct CameraView: View {
                 Image(systemName: symbol)
                 if !text.isEmpty { Text(text).font(.system(size: 11, weight: .bold)) }
             }
-            .foregroundStyle(selected ? Color.yellow : .white)
+            .foregroundStyle(selected ? CameraPalette.accent : .white)
             .padding(.horizontal, 12).frame(height: 40)
             .background(.black.opacity(0.75), in: Capsule())
         }.disabled(!controlsEnabled)
@@ -239,39 +245,40 @@ struct CameraView: View {
 
     private var bottomDock: some View {
         VStack(spacing: 10) {
-            HStack(spacing: 8) {
-                ForEach(camera.lenses.filter { $0 != .front }) { item in
-                    Button { camera.switchLens(item) } label: {
-                        Text(item.label).font(.system(size: 14, weight: .bold, design: .rounded))
-                            .foregroundStyle(lens == item ? .black : .white)
-                            .frame(width: 48, height: 38)
-                            .background(lens == item ? Color.yellow : Color(white: 0.16), in: Capsule())
-                    }.accessibilityLabel("Cámara \(item.label)")
-                }
-                if lens == .front { Text("Frontal").font(.caption.bold()).foregroundStyle(.yellow) }
-                Spacer()
-                Text("EV").font(.caption.bold()).foregroundStyle(.white.opacity(0.7))
-                Slider(value: $bias, in: -2...2, step: 0.1).frame(maxWidth: 95)
-                    .disabled(manualExposure).accessibilityLabel("Compensación de exposición")
-                Text("\(bias, specifier: "%+.1f")").font(.caption.monospacedDigit()).frame(width: 30)
-            }.disabled(!controlsEnabled || !camera.ready)
+            HStack(spacing:12) {
+                Button { panel = .profiles; showControls = true } label: { Image(systemName:"person.crop.square").frame(width:44,height:44) }
+                    .accessibilityLabel("Perfiles de lente")
+                Spacer(minLength:0)
+                HStack(spacing:4) {
+                    ForEach(camera.lenses.filter { $0 != .front }) { item in
+                        Button { camera.switchLens(item) } label: {
+                            Text(item.label).font(.system(size:13,weight:.semibold))
+                                .foregroundStyle(lens == item ? .black : .white)
+                                .frame(width:42,height:36).background(lens == item ? CameraPalette.accent : Color(white:0.14),in:Capsule())
+                        }.accessibilityLabel("Cámara \(item.label)")
+                    }
+                }.padding(4).background(.black.opacity(0.6),in:Capsule())
+                Spacer(minLength:0)
+                Button { panel = .color; showControls = true } label: { Image(systemName:"cube.transparent").frame(width:44,height:44) }
+                    .accessibilityLabel("LUT y color")
+            }.disabled(!controlsEnabled)
             HStack {
                 Button { showResult = true } label: {
                     Group {
                         if let preview = camera.preview { Image(uiImage: preview).resizable().scaledToFill() }
                         else { Image(systemName: "photo.on.rectangle").font(.title3).foregroundStyle(.white.opacity(0.7)) }
                     }.frame(width: 50, height: 50).background(Color(white: 0.15))
-                        .clipShape(RoundedRectangle(cornerRadius: 15))
-                        .overlay(RoundedRectangle(cornerRadius: 15).stroke(.white.opacity(0.25)))
+                        .clipShape(Circle())
+                        .overlay(Circle().stroke(.white.opacity(0.4),lineWidth:2))
                 }.accessibilityLabel("Revisar última captura").disabled(camera.preview == nil || !controlsEnabled)
                 Spacer()
                 Button { countdown > 0 ? cancelCountdown() : takePhoto() } label: {
                     ZStack {
-                        Circle().stroke(camera.busy ? Color.yellow : .white, lineWidth: 3)
-                        Circle().fill(countdown > 0 ? Color.yellow : .white).padding(7)
+                        Circle().stroke(camera.busy ? CameraPalette.accent : .white, lineWidth: 3)
+                        Circle().fill(countdown > 0 ? CameraPalette.accent : .white).padding(7)
                         if camera.busy { ProgressView().tint(.black).scaleEffect(1.2) }
                         else if countdown > 0 { Image(systemName: "xmark").font(.title2.bold()).foregroundStyle(.black) }
-                    }.frame(width: 76, height: 76)
+                    }.frame(width: 72, height: 72)
                 }.accessibilityLabel(countdown > 0 ? "Cancelar temporizador" : (options.nightStatic ? "Capturar noche estática" : (stack ? "Capturar pila de \(stackCount) fotos" : "Tomar foto")))
                     .accessibilityIdentifier("camera.shutter").disabled(camera.busy || (!camera.ready && countdown == 0))
                 Spacer()
@@ -281,28 +288,34 @@ struct CameraView: View {
                 }.accessibilityLabel("Cambiar entre cámara frontal y trasera")
                     .disabled(!controlsEnabled || !camera.ready || !camera.lenses.contains(.front))
             }
-            HStack(spacing: 5) {
-                modeButton("FOTO", selected: !stack) { options.nightStatic = false; stack = false }
-                modeButton("PILA", selected: stack && !options.nightStatic) { options.nightStatic = false; stack = true }
-                modeButton("NOCHE", selected: options.nightStatic) { applyPreset("Noche estática") }
-                if stack && !options.nightStatic {
-                    Menu { ForEach([3,5,7,9], id: \.self) { count in Button("\(count) fotos") { stackCount = count } } } label: {
-                        Text("\(stackCount) ▾").font(.system(size: 13, weight: .bold)).frame(width: 48, height: 34)
-                    }.accessibilityLabel("Número de fotos de la pila")
+            HStack(spacing:4) {
+                Button { showControls = true } label: { Image(systemName:"gearshape").font(.system(size:19)).frame(width:40,height:44) }
+                    .accessibilityLabel("Ajustes de cámara").accessibilityIdentifier("camera.settings")
+                ScrollView(.horizontal,showsIndicators:false) {
+                    HStack(spacing:4) {
+                        modeButton("Noche",selected:options.nightStatic) { applyPreset("Noche estática") }
+                        modeButton("Cámara",selected:!stack && !options.hdrBracketing) { options.nightStatic=false;options.hdrBracketing=false;stack=false }
+                        modeButton("HDR",selected:options.hdrBracketing) { activateHDR() }.accessibilityIdentifier("camera.mode.hdr")
+                        modeButton("Pila",selected:stack && !options.nightStatic && !options.hdrBracketing) { options.nightStatic=false;options.hdrBracketing=false;stack=true }
+                    }
                 }
+                Button { panel = .color; showControls = true } label: { Image(systemName:"slider.horizontal.3").font(.system(size:19)).frame(width:40,height:44) }
+                    .accessibilityLabel("Ajustes de imagen")
             }.disabled(!controlsEnabled)
+            if camera.busy || !camera.ready {
             Text(camera.status).font(.system(size: 12, weight: .medium))
                 .foregroundStyle(.white.opacity(0.75)).multilineTextAlignment(.center)
                 .lineLimit(2).frame(maxWidth: .infinity, minHeight: 30)
                 .accessibilityIdentifier("camera.status")
-        }.padding(.horizontal, 20).padding(.top, 10).padding(.bottom, 5).tint(.yellow)
+            }
+        }.padding(.horizontal, 20).padding(.top, 10).padding(.bottom, 5).tint(CameraPalette.accent)
     }
 
     private func modeButton(_ title: String, selected: Bool, action: @escaping () -> Void) -> some View {
         Button(action: action) {
             Text(title).font(.system(size: 13, weight: .bold)).tracking(1)
-                .foregroundStyle(selected ? .yellow : .white.opacity(0.65))
-                .padding(.horizontal, 20).frame(height: 34)
+                .foregroundStyle(selected ? CameraPalette.accent : .white.opacity(0.65))
+                .padding(.horizontal, 12).frame(height: 38)
                 .background(selected ? Color(white: 0.16) : .clear, in: Capsule())
         }.accessibilityAddTraits(selected ? .isSelected : [])
     }
@@ -314,7 +327,7 @@ struct CameraView: View {
                     HStack(spacing: 8) {
                         ForEach(ControlPanel.allCases) { item in
                             Button(item.rawValue) { panel = item }
-                                .buttonStyle(.bordered).tint(panel == item ? .yellow : .white)
+                                .buttonStyle(.bordered).tint(panel == item ? CameraPalette.accent : .white)
                                 .accessibilityIdentifier("settings.tab." + item.rawValue)
                         }
                     }.padding(.horizontal).padding(.vertical, 12)
@@ -331,7 +344,7 @@ struct CameraView: View {
             }
             .navigationTitle("Ajustes").navigationBarTitleDisplayMode(.inline)
             .toolbar { ToolbarItem(placement: .confirmationAction) { Button("Listo") { showControls = false } } }
-            .tint(.yellow)
+            .tint(CameraPalette.accent)
         }.presentationDetents([.large]).presentationDragIndicator(.visible)
             .fileImporter(isPresented: $importFile, allowedContentTypes: importingLUT ? [.data] : [.json], onCompletion: importDocument)
             .fileExporter(isPresented: $exportFile, document: exportData, contentType: .json, defaultFilename: "UltimateCAM-profile") { result in
@@ -371,6 +384,12 @@ struct CameraView: View {
                 Picker("Temporizador", selection: $timerSeconds) { Text("Desactivado").tag(0); Text("3 segundos").tag(3); Text("10 segundos").tag(10) }
                 Toggle("Cuadrícula", isOn: $grid)
                 if grid { Picker("Guía", selection: $guide) { ForEach(CompositionGuide.allCases) { Text($0.rawValue).tag($0) } } }
+            }
+            if options.hdrBracketing {
+                Section("HDR por horquillado") {
+                    Picker("Separación respecto a la referencia",selection:$options.hdrSpan) { Text("±1 EV").tag(1.0);Text("±2 EV").tag(2.0);Text("±3 EV").tag(3.0) }
+                    Text("Tres exposiciones JPEG distintas con fusión de radiancia aproximada. Salida SDR. Es experimental; no es el motor HDR+ de Google.").font(.footnote).foregroundStyle(.secondary)
+                }
             }
             Section("Pila de imágenes") {
                 Picker("Fotogramas", selection: $stackCount) { ForEach([3,5,7,9], id: \.self) { Text("\($0) fotos").tag($0) } }
@@ -453,14 +472,14 @@ struct CameraView: View {
                 HStack {
                     ForEach(["Natural", "Detalle", "Noche estática"], id: \.self) { name in
                         Button(name) { applyPreset(name) }.buttonStyle(.bordered)
-                            .tint(preset == name ? .yellow : .white)
+                            .tint(preset == name ? CameraPalette.accent : .white)
                     }
                 }
                 Button("Estático avanzado · experimental") {
                     applyPreset("Noche estática")
                     options.localAlignment = true; options.adaptiveMotionRejection = true
                     options.chromaDenoise = 0.35; options.localContrast = 0.2; options.fineDetail = 0.12
-                }.buttonStyle(.bordered).tint(preset == "Estático avanzado" ? .yellow : .white)
+                }.buttonStyle(.bordered).tint(preset == "Estático avanzado" ? CameraPalette.accent : .white)
                 Text("Para escenas inmóviles y con el iPhone apoyado.").font(.footnote).foregroundStyle(.secondary)
                 DisclosureGroup("Cómo funciona Noche estática") {
                 Text("Noche estática necesita el iPhone apoyado y una escena inmóvil. Ajusta la exposición y fusiona JPEG de cámara. La opción DNG experimental puede introducir dominantes de color en sombras. Conserva la referencia. Es experimental y no equivale a Night Sight ni al modo Noche de Apple.")
@@ -496,6 +515,10 @@ struct CameraView: View {
 
     private var colorSettings: some View {
         Group {
+            Section {
+                Picker("Herramientas de color",selection:$colorPanel) { ForEach(ColorPanel.allCases) { Text($0.rawValue).tag($0) } }.pickerStyle(.segmented)
+            }
+            if colorPanel == .basic {
             Section("Luz y color del resultado") {
                 optionSlider("Exposición del JPEG (EV)", value: $options.postExposure, range: -2...2)
                 optionSlider("Compresión de luces", value: $options.highlightCompression, range: 0...1)
@@ -505,10 +528,11 @@ struct CameraView: View {
                 optionSlider("Gamma", value: $options.gamma, range: 0.5...2)
                 optionSlider("Viñeta", value: $options.vignette, range: 0...1)
             }
+            } else { ColorRecipeEditor(panel:colorPanel,recipe:$options.color) }
             Section("LUT 3D") {
                 Button("Importar LUT .cube") { importingLUT = true; importFile = true }
                 if options.lutID != nil {
-                    Text("LUT personalizada activa").foregroundStyle(.yellow)
+                    Text("LUT personalizada activa").foregroundStyle(CameraPalette.accent)
                     optionSlider("Intensidad LUT", value: $options.lutIntensity, range: 0...1)
                     Button("Quitar LUT") { options.lutID = nil }
                 }
@@ -564,7 +588,7 @@ struct CameraView: View {
             _ = try value.validated()
             if let id = value.lutID { _ = try ColorLUTStore.load(id) }
             options = value
-            if value.nightStatic { stack = true; rawEnabled = false; flash = .off; manualExposure = false; camera.setManualExposure(iso: nil) }
+            if value.nightStatic || value.hdrBracketing { stack = true; rawEnabled = false; flash = .off; manualExposure = false; camera.setManualExposure(iso: nil) }
             return true
         } catch { fileMessage = "No se aplicó el perfil: " + error.localizedDescription; return false }
     }
@@ -577,11 +601,16 @@ struct CameraView: View {
     }
 
     private func valueLabel(_ title: String, _ value: String) -> some View {
-        HStack { Text(title); Spacer(); Text(value).monospacedDigit().foregroundStyle(.yellow) }
+        HStack { Text(title); Spacer(); Text(value).monospacedDigit().foregroundStyle(CameraPalette.accent) }
     }
     private func resetUIControls() {
         bias = 0; manualWB = false; manualExposure = false; manualFocus = false
         rawEnabled = false; tint = 0; flash = .off
+    }
+    private func activateHDR() {
+        options.nightStatic=false;options.nightRAW=false;options.hdrBracketing=true
+        stack=true;rawEnabled=false;flash = .off;manualExposure=false
+        camera.setManualExposure(iso:nil)
     }
     private func applyPreset(_ name: String) {
         options = ProcessingOptions()
@@ -641,7 +670,7 @@ struct CameraView: View {
                     Text(camera.resultDetails).font(.subheadline).frame(maxWidth: .infinity, alignment: .leading)
                     if !showReference, let statistics = camera.resultStatistics { ResultHistogram(statistics: statistics) }
                     if camera.hasRAWResult {
-                        Label("RAW original + JPEG", systemImage: "square.stack.3d.up").font(.subheadline.bold()).foregroundStyle(.yellow)
+                        Label("RAW original + JPEG", systemImage: "square.stack.3d.up").font(.subheadline.bold()).foregroundStyle(CameraPalette.accent)
                         Text("Fotos recibirá el DNG de referencia con su JPEG de cámara. El JPEG fusionado o editado se guarda aparte; el DNG no está fusionado.")
                             .font(.footnote).foregroundStyle(.secondary)
                     } else if camera.hasSeparateReference {
@@ -657,17 +686,17 @@ struct CameraView: View {
                     } label: {
                         Label(camera.savedResult ? "Guardado" : (camera.hasRAWResult ? "Guardar RAW + JPEG" : "Guardar foto"), systemImage: camera.savedResult ? "checkmark.circle.fill" : "square.and.arrow.down")
                             .frame(maxWidth: .infinity).padding(.vertical, 7)
-                    }.buttonStyle(.borderedProminent).tint(.yellow).foregroundStyle(.black)
+                    }.buttonStyle(.borderedProminent).tint(CameraPalette.accent).foregroundStyle(.black)
                         .disabled(camera.busy || camera.savedResult).accessibilityIdentifier("review.save")
                     if camera.hasRAWResult {
                         Button(camera.savedJPEGOnly ? "JPEG guardado" : "Guardar solo JPEG") { camera.save(jpegOnly: true) }
                             .disabled(camera.busy || camera.savedJPEGOnly).accessibilityIdentifier("review.saveJPEG")
                     }
-                    if camera.busy { ProgressView().tint(.yellow) }
+                    if camera.busy { ProgressView().tint(CameraPalette.accent) }
                 }.padding().background(.regularMaterial)
             }
             .navigationTitle("Última captura").navigationBarTitleDisplayMode(.inline)
             .toolbar { ToolbarItem(placement: .confirmationAction) { Button("Cerrar") { showResult = false } } }
-        }.tint(.yellow).preferredColorScheme(.dark)
+        }.tint(CameraPalette.accent).preferredColorScheme(.dark)
     }
 }

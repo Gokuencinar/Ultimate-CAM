@@ -222,6 +222,21 @@ struct ProcessorChecks {
             try require(message != "Mismatched RAW/JPEG accepted", message)
         }
         log("NIGHT TONE CHECKS PASSED · PNG fixture only, not DNG or optical quality")
+        var hdrOptions=ProcessingOptions();hdrOptions.hdrBracketing=true
+        var bracket=[Data]()
+        let hdrExposures=[FrameExposure(seconds:0.01,iso:100),FrameExposure(seconds:0.0025,iso:100),FrameExposure(seconds:0.04,iso:100)]
+        for gain in [1.0,0.25,4.0] {
+            let brightPatch=CIImage(color:CIColor(red:2,green:1.5,blue:1.2)).cropped(to:CGRect(x:80,y:80,width:64,height:64))
+            let scene=brightPatch.composited(over:cleanImage.applyingFilter("CIExposureAdjust",parameters:[kCIInputEVKey:-2]))
+                .applyingFilter("CIExposureAdjust",parameters:[kCIInputEVKey:log2(gain)])
+                .applyingFilter("CIColorClamp",parameters:["inputMinComponents":CIVector(x:0,y:0,z:0,w:0),"inputMaxComponents":CIVector(x:1,y:1,z:1,w:1)])
+            bracket.append(context.pngRepresentation(of:scene,format:.RGBA16,colorSpace:space)!)
+        }
+        let hdrResult=try HDRProcessor().process(bracket,exposures:hdrExposures,options:hdrOptions)
+        try require(hdrResult.mergedFrames>=2 && hdrResult.source=="HDR-JPEG-radiance", "HDR pipeline did not merge a valid synthetic bracket")
+        let hdrBitmap=try bitmap(hdrResult.jpeg)
+        try require(hdrBitmap.width>size*9/10 && hdrBitmap.height>size*9/10,"HDR registration lost excessive field of view")
+        log("HDR BRACKET CHECKS PASSED · synthetic clipped PNG bracket, not physical exposure validation")
         log("PROCESSOR CHECKS PASSED · synthetic fixtures only")
     }
 }

@@ -90,6 +90,9 @@ final class CameraModel: NSObject, ObservableObject, AVCapturePhotoCaptureDelega
     private var rawRequested = false
     private var rawData: Data?
     private var nightRawFrames = [Data]()
+    private var hdrPlan: [FrameExposure] = []
+    private var hdrExposures: [FrameExposure] = []
+    private var lastHDRTimestamp: Double?
     private var nightFrameSeconds: Double = 0
     private var lastNightTimestamp: Double?
     private var exportedResult: URL?
@@ -487,8 +490,9 @@ final class CameraModel: NSObject, ObservableObject, AVCapturePhotoCaptureDelega
         queue.async {
             guard self.active, self.session.isRunning, !self.interrupted, !self.inFlight, !self.captureRecoveryRequired,
                   let device = self.input?.device else { return }
-            let night = options.nightStatic
-            let burst = stack || night
+            do { _ = try options.validated() } catch { self.message(error.localizedDescription); return }
+            let night = options.nightStatic, hdr = options.hdrBracketing
+            let burst = stack || night || hdr
             guard !raw || (!burst && !self.output.availableRawPhotoPixelFormatTypes.isEmpty) else {
                 self.message(burst ? "En Noche, RAW se selecciona automáticamente; en Pila se usa JPEG." : "Esta cámara no admite RAW.")
                 CaptureTrace.record("capture.rejected", ["reason": "RAW unavailable in this configuration"])
@@ -505,9 +509,10 @@ final class CameraModel: NSObject, ObservableObject, AVCapturePhotoCaptureDelega
             self.transaction = UUID()
             self.frames = []
             self.nightRawFrames = []
+            self.hdrPlan = []; self.hdrExposures = []; self.lastHDRTimestamp = nil
             self.nightFrameSeconds = 0
             self.lastNightTimestamp = nil
-            self.desiredCount = burst ? min(9, max(3, count)) : 1
+            self.desiredCount = hdr ? 3 : (burst ? min(9, max(3, count)) : 1)
             self.processingOptions = options
             self.rawRequested = (raw || (night && options.nightRAW)) && !self.output.availableRawPhotoPixelFormatTypes.isEmpty
             self.rawData = nil
@@ -521,13 +526,16 @@ final class CameraModel: NSObject, ObservableObject, AVCapturePhotoCaptureDelega
                     guard device.isExposureModeSupported(.locked), device.isWhiteBalanceModeSupported(.locked) else {
                         throw CameraFailure.message("Esta cámara no admite los bloqueos necesarios para la pila.")
                     }
-                    if night && (device.exposureMode == .custom || device.exposureMode == .locked || !device.isExposureModeSupported(.custom)) {
-                        throw CameraFailure.message("Noche estática necesita exposición automática: desactiva ISO manual o toca el visor para liberar AE. Puedes fijar solo el enfoque con el control manual.")
+                    if (night || hdr) && (device.exposureMode == .custom || device.exposureMode == .locked || !device.isExposureModeSupported(.custom)) {
+                        throw CameraFailure.message("Noche y HDR necesitan exposición automática: desactiva ISO manual o toca el visor para liberar AE. Puedes fijar solo el enfoque con el control manual.")
                     }
                     let plan = night ? try NightCapturePlan.make(iso: Double(device.iso), seconds: device.exposureDuration.seconds,
                         isoRange: Double(device.activeFormat.minISO)...Double(device.activeFormat.maxISO),
                         durationRange: device.activeFormat.minExposureDuration.seconds...device.activeFormat.maxExposureDuration.seconds,
                         targetOffset: Double(device.exposureTargetOffset)) : nil
+                    let bracket = hdr ? try HDRCapturePlan.make(iso:Double(device.iso),seconds:device.exposureDuration.seconds,span:options.hdrSpan,
+                        isoRange:Double(device.activeFormat.minISO)...Double(device.activeFormat.maxISO),
+                        durationRange:device.activeFormat.minExposureDuration.seconds...device.activeFormat.maxExposureDuration.seconds) : nil
                     try device.lockForConfiguration()
                     defer { device.unlockForConfiguration() }
                     if device.exposureMode != .custom { self.savedExposure = device.exposureMode }
@@ -536,6 +544,12 @@ final class CameraModel: NSObject, ObservableObject, AVCapturePhotoCaptureDelega
                     if device.isFocusModeSupported(.locked) {
                         self.savedFocus = device.focusMode
                         device.focusMode = .locked
+                    }
+                    if let bracket {
+                        self.hdrPlan = bracket
+                        self.savedFrameDurations = (device.activeVideoMinFrameDuration,device.activeVideoMaxFrameDuration)
+                        self.queue.async { self.prepareHDRFrame() }
+                        return
                     }
                     if let plan {
                         self.savedFrameDurations = (device.activeVideoMinFrameDuration, device.activeVideoMaxFrameDuration)
@@ -569,6 +583,32 @@ final class CameraModel: NSObject, ObservableObject, AVCapturePhotoCaptureDelega
                 }
                 self.captureNext()
             } catch { self.finishFailure(error) }
+        }
+    }
+
+    private func prepareHDRFrame() {
+        guard inFlight, processingOptions.hdrBracketing, frames.count < hdrPlan.count,
+              active, !interrupted, let device = input?.device else {
+            finishFailure(CameraFailure.message("Secuencia HDR interrumpida.")); return
+        }
+        let exposure = hdrPlan[frames.count], token = transaction
+        captureStage = "hdr-setup"
+        do {
+            try device.lockForConfiguration()
+            defer { device.unlockForConfiguration() }
+            device.setExposureModeCustom(duration:CMTime(seconds:exposure.seconds,preferredTimescale:1_000_000_000),iso:Float(exposure.iso)) { _ in
+                self.queue.async {
+                    guard self.inFlight, self.transaction == token, self.captureStage == "hdr-setup" else { return }
+                    CaptureTrace.record("hdr.exposure.applied",["index":self.frames.count,"seconds":device.exposureDuration.seconds,"iso":device.iso])
+                    self.captureNext()
+                }
+            }
+        } catch { finishFailure(error); return }
+        queue.asyncAfter(deadline:.now()+5) {
+            guard self.inFlight, self.transaction == token, self.captureStage == "hdr-setup" else { return }
+            self.captureRecoveryRequired = true
+            self.publish { self.ready = false }
+            self.finishFailure(CameraFailure.message("No se confirmó la exposición HDR. Reabre la app; no se repetirá la captura."))
         }
     }
 
@@ -648,7 +688,16 @@ final class CameraModel: NSObject, ObservableObject, AVCapturePhotoCaptureDelega
                         if timestamp >= 0 { self.lastNightTimestamp = timestamp }
                     }
                     self.rawData = data
-                } else { self.frames.append(data) }
+                } else {
+                    if self.processingOptions.hdrBracketing {
+                        let exposure = FrameExposure(seconds:sensorExposure,iso:sensorISO)
+                        guard exposure.isValid, timestamp >= 0, self.lastHDRTimestamp.map({ timestamp > $0 }) ?? true else {
+                            self.finishFailure(CameraFailure.message("Fotograma HDR sin exposición válida o repetido; no se repetirá la captura.")); return
+                        }
+                        self.hdrExposures.append(exposure); self.lastHDRTimestamp = timestamp
+                    }
+                    self.frames.append(data)
+                }
             }
             else { self.finishFailure(CameraFailure.message("La cámara no ha devuelto datos de imagen.")) }
         }
@@ -680,11 +729,14 @@ final class CameraModel: NSObject, ObservableObject, AVCapturePhotoCaptureDelega
                         guard self.inFlight, self.transaction == token, self.captureStage == "night-wait" else { return }
                         self.captureNext()
                     }
-                } else { self.captureNext() }
+                } else if self.processingOptions.hdrBracketing { self.prepareHDRFrame() }
+                else { self.captureNext() }
                 return
             }
             self.restoreDevice()
             let captured = self.frames
+            let bracketExposures = self.hdrExposures
+            self.hdrPlan = []; self.hdrExposures = []
             let token = self.transaction
             let options = self.processingOptions
             let raw = self.rawData
@@ -713,11 +765,17 @@ final class CameraModel: NSObject, ObservableObject, AVCapturePhotoCaptureDelega
                 let processingStarted = ProcessInfo.processInfo.systemUptime
                 let processed = Result { try autoreleasepool {
                     do {
-                        var result = try BurstProcessor().process(captured, options: options, rawFrames: rawBurst, cancellation: cancellation) { text in
+                        let progress: (String) -> Void = { text in
                             self.queue.async {
                                 guard self.transaction == token, self.inFlight, self.captureStage == "processing" else { return }
                                 self.message(text)
                             }
+                        }
+                        var result: CaptureResult
+                        if options.hdrBracketing {
+                            result = try HDRProcessor().process(captured,exposures:bracketExposures,options:options,cancellation:cancellation,progress:progress)
+                        } else {
+                            result = try BurstProcessor().process(captured,options:options,rawFrames:rawBurst,cancellation:cancellation,progress:progress)
                         }
                         if !options.nightStatic { result.raw = raw }
                         result.statistics = ImageStatistics.measure(result.jpeg)
@@ -792,7 +850,7 @@ final class CameraModel: NSObject, ObservableObject, AVCapturePhotoCaptureDelega
             if let mode = savedExposure { device.exposureMode = mode }
             if let saved = savedFrameDurations {
                 restoreFrameDurations(saved, on: device)
-                CaptureTrace.record("night.device.restored", ["minFrameSeconds": device.activeVideoMinFrameDuration.seconds,
+                CaptureTrace.record(processingOptions.hdrBracketing ? "hdr.device.restored" : "night.device.restored", ["minFrameSeconds": device.activeVideoMinFrameDuration.seconds,
                     "maxFrameSeconds": device.activeVideoMaxFrameDuration.seconds, "exposureMode": device.exposureMode.rawValue])
                 savedFrameDurations = nil
             }
@@ -813,6 +871,7 @@ final class CameraModel: NSObject, ObservableObject, AVCapturePhotoCaptureDelega
         processingCancellation?.cancel(); processingCancellation = nil
         frames = []
         nightRawFrames = []
+        hdrPlan = []; hdrExposures = []; lastHDRTimestamp = nil
         rawData = nil
         inFlight = false
         publish { self.busy = false; self.processingInProgress = false; self.status = error.localizedDescription }

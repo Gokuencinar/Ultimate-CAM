@@ -13,6 +13,7 @@ final class CameraInteractionTests: XCTestCase {
         let point = viewfinder.coordinate(withNormalizedOffset: CGVector(dx: 0.45, dy: 0.45))
         point.tap()
         point.press(forDuration: 0.8)
+        app.buttons["camera.quickSettings"].tap()
         app.buttons["Temporizador OFF"].tap()
         XCTAssertTrue(app.buttons["Temporizador 3s"].exists)
         app.buttons["Temporizador 3s"].tap()

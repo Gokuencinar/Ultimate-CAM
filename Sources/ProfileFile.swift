@@ -19,7 +19,7 @@ struct ResultHistogram: View {
                 let width = size.width / CGFloat(statistics.histogram.count)
                 for (index, count) in statistics.histogram.enumerated() {
                     let height = size.height * CGFloat(count / peak)
-                    context.fill(Path(CGRect(x: CGFloat(index) * width, y: size.height-height, width: max(1, width-1), height: height)), with: .color(.yellow))
+                    context.fill(Path(CGRect(x: CGFloat(index) * width, y: size.height-height, width: max(1, width-1), height: height)), with: .color(CameraPalette.accent))
                 }
             }.frame(height: 70).accessibilityLabel("Distribución de luminosidad del JPEG")
             Text(String(format: "Negros ≤3: %.1f %% · Luces ≥252: %.1f %%", statistics.shadows * 100, statistics.highlights * 100))

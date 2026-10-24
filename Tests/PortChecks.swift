@@ -143,6 +143,45 @@ import Darwin
         unreadable.flush()
         try check(try Data(contentsOf:corrupt) == Data("not JSON".utf8), "Corrupt profile archive was overwritten")
         try check(try BurstProcessor().process([png]).jpeg == png, "Untouched single-photo passthrough changed")
+        let plan = try HDRCapturePlan.make(iso:100,seconds:1.0/60,span:2,isoRange:25...3200,durationRange:(1.0/8000)...1)
+        try check(plan.count == 3 && abs(log2(plan[1].product/plan[0].product)+2) < 0.001 && abs(log2(plan[2].product/plan[0].product)-2) < 0.001, "HDR planner changed target bracket")
+        var hdr = base; hdr.hdrBracketing=true
+        try rejects({ _ = try HDRProcessor().process([png,png,png],exposures:[FrameExposure](repeating:FrameExposure(seconds:0.01,iso:100),count:3),options:hdr) }, "Identical HDR exposures")
+        try rejects({ _ = try HDRProcessor().process([png],exposures:plan,options:hdr) }, "Incomplete HDR bracket")
+        let bounds = CGRect(x:0,y:0,width:8,height:8)
+        let linear = CGColorSpace(name:CGColorSpace.extendedLinearSRGB)!
+        func field(_ value: Float) -> CIImage {
+            var values = [Float](repeating:value,count:8*8*4)
+            for index in stride(from:3,to:values.count,by:4) { values[index]=1 }
+            return CIImage(bitmapData:values.withUnsafeBufferPointer { Data(buffer:$0) },bytesPerRow:8*16,size:CGSize(width:8,height:8),format:.RGBAf,colorSpace:linear)
+        }
+        let recovered = try HDRProcessor.fuse(field(1),field(2),field(0.25),scales:CIVector(x:1,y:0.25,z:4),extent:bounds)
+        var radiance = [Float](repeating:0,count:8*8*4)
+        radiance.withUnsafeMutableBytes { context.render(recovered,toBitmap:$0.baseAddress!,rowBytes:8*16,bounds:bounds,format:.RGBAf,colorSpace:linear) }
+        try check(abs(radiance[0]-2)<0.01, "HDR did not recover unclipped short-exposure radiance")
+        let black = try HDRProcessor.fuse(field(0),field(0),field(0),scales:CIVector(x:1,y:0.25,z:4),extent:bounds)
+        try check(pixels(black).allSatisfy(\.isFinite), "HDR black fallback produced NaN")
+        let neutralRecipe = ColorRecipe()
+        let neutralCube = try ColorRecipeLUT.make(neutralRecipe,dimension:9)
+        try check(try difference(neutralCube.apply(to:image,intensity:1),image)<0.02, "Neutral color recipe changes color")
+        var hsl = neutralRecipe; hsl.hsl[0].saturation = -1
+        let adjustedRed = ColorRecipeLUT.transform([0.8,0.1,0.1],recipe:hsl)
+        try check(adjustedRed.max()!-adjustedRed.min()! < 0.5, "Red HSL control did not reduce chroma")
+        let gray = ColorRecipeLUT.transform([0.3,0.3,0.3],recipe:hsl)
+        try check(abs(gray[0]-gray[1])<0.0001, "Selective HSL tinted an achromatic pixel")
+        var grade = neutralRecipe;grade.shadows=GradeWheel(hue:220,amount:0.6)
+        let tinted = ColorRecipeLUT.transform([0.2,0.2,0.2],recipe:grade)
+        try check(tinted[2]>tinted[0]+0.02, "Shadow wheel did not add blue chroma")
+        var curveRecipe = neutralRecipe;curveRecipe.redCurve[2]=0.8
+        try check(ColorRecipeLUT.transform([0.5,0.5,0.5],recipe:curveRecipe)[0]>0.75, "Red curve not applied")
+        var invalidColor = neutralRecipe;invalidColor.hsl=[]
+        try rejects({ _ = try invalidColor.validated() }, "Missing HSL bands")
+        var grainOptions=base;grainOptions.color.grain=0.5
+        let grainImage = try AdvancedProcessor.apply(neutral,options:grainOptions)
+        try check(difference(grainImage,neutral)>0.001 && pixels(grainImage).allSatisfy(\.isFinite), "Grain kernel has no effect or produces nonfinite pixels")
+        var fullColor=base;fullColor.color=grade;fullColor.color.redCurve=curveRecipe.redCurve
+        let roundTrip=try JSONDecoder().decode(ProcessingOptions.self,from:JSONEncoder().encode(fullColor))
+        try check(roundTrip == fullColor,"Color recipe did not survive profile serialization")
         print("Validated recipes, LUTs/domains, rendering kernels, residual mesh, adaptive rejection, crop/P3, histogram, profile persistence, bounded/oriented previews, cooperative cancellation and legacy passthrough.")
     }
 }

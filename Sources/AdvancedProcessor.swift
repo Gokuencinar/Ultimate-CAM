@@ -33,6 +33,13 @@ enum AdvancedProcessor {
         }
         if o.vibrance != 0 { result = result.applyingFilter("CIVibrance", parameters: ["inputAmount": o.vibrance]) }
         if o.gamma != 1 { result = result.applyingFilter("CIGammaAdjust", parameters: ["inputPower": 1 / o.gamma]) }
+        if o.color.needsCube { result = try ColorRecipeLUT.make(o.color).apply(to:result,intensity:1) }
+        if o.color.grain > 0 {
+            guard let output = grainKernel?.apply(extent:extent,arguments:[result,o.color.grain,o.color.grainSize]) else {
+                throw CameraFailure.message("No se pudo aplicar el grano.")
+            }
+            result = output
+        }
         if let id = o.lutID, o.lutIntensity > 0 { result = try ColorLUTStore.load(id).apply(to: result, intensity: o.lutIntensity) }
         if o.vignette > 0 {
             result = result.applyingFilter("CIVignetteEffect", parameters: [
@@ -51,6 +58,17 @@ enum AdvancedProcessor {
         // Stay inside the input, with integer output pixels.
         return CGRect(x: ceil(extent.midX - width / 2), y: ceil(extent.midY - height / 2), width: floor(width), height: floor(height)).intersection(extent)
     }
+
+    private static let grainKernel = CIColorKernel(source: """
+        kernel vec4 grain(__sample p, float amount, float size) {
+            vec2 q = floor(destCoord() / size);
+            float a = fract(sin(dot(q, vec2(12.9898,78.233))) * 43758.5453);
+            float b = fract(sin(dot(q, vec2(39.3467,11.135))) * 23421.631);
+            float y = dot(p.rgb, vec3(0.2126,0.7152,0.0722));
+            float n = (a+b-1.0) * amount * 0.08 * (0.4+sqrt(max(y,0.0)));
+            return vec4(max(p.rgb+vec3(n),vec3(0.0)),p.a);
+        }
+        """)
 
     private static let chromaKernel = CIColorKernel(source: """
         kernel vec4 chroma(__sample p, __sample b, float amount) {

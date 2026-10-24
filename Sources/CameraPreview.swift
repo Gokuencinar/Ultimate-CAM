@@ -15,14 +15,14 @@ final class PreviewSurface: UIView {
         accessibilityLabel = "Visor. Toca para enfocar o mantén pulsado para bloquear enfoque y exposición."
         isAccessibilityElement = true
         ring.isUserInteractionEnabled = false
-        ring.layer.borderColor = UIColor.systemYellow.cgColor
+        ring.layer.borderColor = UIColor.white.cgColor
         ring.layer.borderWidth = 1.5
         ring.layer.cornerRadius = 10
         ring.isHidden = true
         addSubview(ring)
         caption.font = .monospacedSystemFont(ofSize: 11, weight: .semibold)
         caption.textColor = .black
-        caption.backgroundColor = .systemYellow
+        caption.backgroundColor = UIColor(red:0.77,green:0.84,blue:0.99,alpha:1)
         caption.textAlignment = .center
         caption.layer.cornerRadius = 5
         caption.clipsToBounds = true

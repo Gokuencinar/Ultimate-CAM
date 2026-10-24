@@ -12,6 +12,9 @@ enum PhotoAspect: String, Codable, CaseIterable, Identifiable {
 }
 
 struct ProcessingOptions: Codable, Equatable {
+    var hdrBracketing: Bool = false
+    var hdrSpan: Double = 2
+    var color = ColorRecipe()
     var nightStatic: Bool = false
     var nightRAW: Bool = false
     var chooseSharpestReference: Bool = true
@@ -41,12 +44,14 @@ struct ProcessingOptions: Codable, Equatable {
     var lutIntensity: Double = 1
 
     var advancedRendering: Bool {
-        chromaDenoise > 0 || localContrast > 0 || fineDetail > 0 || contrast != 1 || saturation != 1 ||
+        color.isActive || chromaDenoise > 0 || localContrast > 0 || fineDetail > 0 || contrast != 1 || saturation != 1 ||
         vibrance != 0 || gamma != 1 || postExposure != 0 || highlightCompression > 0 || vignette > 0 ||
         jpegQuality != nil || outputColor != .sRGB || aspect != .original || (lutID != nil && lutIntensity > 0)
     }
 
     func validated() throws -> ProcessingOptions {
+        _ = try color.validated()
+        guard !(hdrBracketing && nightStatic), hdrSpan.isFinite, (1...3).contains(hdrSpan) else { throw CameraFailure.message("Configuración HDR incompatible o fuera de rango.") }
         guard maximumDimension.isFinite, (1024...4096).contains(maximumDimension) else { throw CameraFailure.message("Valor fuera de rango: maximumDimension.") }
         guard noiseReduction.isFinite, (0...0.08).contains(noiseReduction) else { throw CameraFailure.message("Valor fuera de rango: noiseReduction.") }
         guard sharpening.isFinite, (0...0.8).contains(sharpening) else { throw CameraFailure.message("Valor fuera de rango: sharpening.") }
@@ -76,11 +81,14 @@ struct ProcessingOptions: Codable, Equatable {
 // not silently clamped into a different recipe.
 extension ProcessingOptions {
     enum CodingKeys: String, CodingKey {
-        case nightStatic, nightRAW, chooseSharpestReference, rejectMotion, maximumDimension, noiseReduction, sharpening, liftShadows, localAlignment, adaptiveMotionRejection, motionSigma, chromaDenoise, localContrast, fineDetail, contrast, saturation, vibrance, gamma, postExposure, highlightCompression, sharpenRadius, vignette, jpegQuality, outputColor, aspect, lutID, lutIntensity
+        case hdrBracketing, hdrSpan, color, nightStatic, nightRAW, chooseSharpestReference, rejectMotion, maximumDimension, noiseReduction, sharpening, liftShadows, localAlignment, adaptiveMotionRejection, motionSigma, chromaDenoise, localContrast, fineDetail, contrast, saturation, vibrance, gamma, postExposure, highlightCompression, sharpenRadius, vignette, jpegQuality, outputColor, aspect, lutID, lutIntensity
     }
     init(from decoder: Decoder) throws {
         self.init()
         let c = try decoder.container(keyedBy: CodingKeys.self)
+        hdrBracketing = try c.decodeIfPresent(Bool.self, forKey: .hdrBracketing) ?? hdrBracketing
+        hdrSpan = try c.decodeIfPresent(Double.self, forKey: .hdrSpan) ?? hdrSpan
+        color = try c.decodeIfPresent(ColorRecipe.self, forKey: .color) ?? color
         nightStatic = try c.decodeIfPresent(Bool.self, forKey: .nightStatic) ?? nightStatic
         nightRAW = try c.decodeIfPresent(Bool.self, forKey: .nightRAW) ?? nightRAW
         chooseSharpestReference = try c.decodeIfPresent(Bool.self, forKey: .chooseSharpestReference) ?? chooseSharpestReference

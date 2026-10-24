@@ -231,47 +231,18 @@ final class BurstProcessor {
         try cancellation?.check()
         progress?("Aplicando ajustes…")
         if options.nightStatic { accumulator = try nightTone(accumulator.cropped(to: common), maximumGain: isRAW ? 32 : 8) }
-        if options.noiseReduction > 0 {
-            accumulator = accumulator.applyingFilter("CINoiseReduction", parameters: [
-                "inputNoiseLevel": min(0.08, options.noiseReduction), "inputSharpness": 0.4
-            ])
-        }
-        if options.liftShadows > 0 {
-            accumulator = accumulator.applyingFilter("CIHighlightShadowAdjust", parameters: [
-                "inputShadowAmount": min(1, options.liftShadows), "inputHighlightAmount": 0.9
-            ])
-        }
-        if options.sharpening > 0 {
-            if options.sharpenRadius == 1 {
-                accumulator = accumulator.applyingFilter("CISharpenLuminance", parameters: [kCIInputSharpnessKey: options.sharpening])
-            } else {
-                accumulator = accumulator.applyingFilter("CIUnsharpMask", parameters: [kCIInputRadiusKey: options.sharpenRadius, kCIInputIntensityKey: options.sharpening])
-            }
-        }
-        accumulator = try AdvancedProcessor.apply(accumulator.cropped(to: common), options: options)
-        common = AdvancedProcessor.crop(common, aspect: options.aspect)
-        let outputSpace = CGColorSpace(name: options.outputColor == .displayP3 ? CGColorSpace.displayP3 : CGColorSpace.sRGB)!
-        guard let cg = context.createCGImage(accumulator, from: common,
-                    format: .RGBA8, colorSpace: outputSpace) else {
-            throw CameraFailure.message("No se pudo renderizar la pila.")
-        }
+        let rendered = try JPEGRenderer.render(accumulator,extent:common,options:options,context:context)
         try cancellation?.check()
-        let data = NSMutableData()
-        guard let destination = CGImageDestinationCreateWithData(data, "public.jpeg" as CFString, 1, nil) else {
-            throw CameraFailure.message("No se pudo crear el JPEG.")
-        }
-        CGImageDestinationAddImage(destination, cg, [kCGImageDestinationLossyCompressionQuality: options.jpegQuality ?? 0.95] as CFDictionary)
-        guard CGImageDestinationFinalize(destination) else { throw CameraFailure.message("Error al codificar el JPEG.") }
         let details: String
         if frames.count == 1 {
-            details = "Foto individual con ajustes. \(cg.width) × \(cg.height) px."
+            details = "Foto individual con ajustes. \(rendered.width) × \(rendered.height) px."
         } else if accepted == 1 {
-            details = "No se pudo alinear la pila. Referencia \(referenceIndex + 1) con ajustes, sin fusión. \(cg.width) × \(cg.height) px."
+            details = "No se pudo alinear la pila. Referencia \(referenceIndex + 1) con ajustes, sin fusión. \(rendered.width) × \(rendered.height) px."
         } else {
-            details = "Fusionadas \(accepted)/\(frames.count) fotos. Referencia \(referenceIndex + 1). \(cg.width) × \(cg.height) px. Rechazo de movimiento: \(options.rejectMotion ? "sí" : "no")."
+            details = "Fusionadas \(accepted)/\(frames.count) fotos. Referencia \(referenceIndex + 1). \(rendered.width) × \(rendered.height) px. Rechazo de movimiento: \(options.rejectMotion ? "sí" : "no")."
         }
         let prefix = options.nightStatic ? "Noche estática · \(isRAW ? "DNG revelados" : "JPEG") · " : ""
-        return CaptureResult(jpeg: data as Data, reference: referenceData,
+        return CaptureResult(jpeg: rendered.data, reference: referenceData,
             details: prefix + details, mergedFrames: accepted,
             raw: rawFrames?[referenceIndex], source: isRAW ? "developed-RAW" : "JPEG")
     }
