@@ -36,8 +36,7 @@ enum AdaptiveHDR {
                                 originalHDR: originalHDR, extent: extent)
         let qualityKey = CIImageRepresentationOption(rawValue: kCGImageDestinationLossyCompressionQuality as String)
         guard let data = context.jpegRepresentation(of: base.cropped(to: extent),
-            colorSpace: colorSpace, options: [.hdrImage: hdr, .hdrGainMapAsRGB: false,
-                                              qualityKey: quality]), hasGainMap(data) else {
+            colorSpace: colorSpace, options: [.hdrImage: hdr, qualityKey: quality]), hasGainMap(data) else {
             throw CameraFailure.message("El codificador no generó el mapa HDR. Se conserva la referencia; no se etiqueta SDR como HDR.")
         }
         return data
