@@ -328,23 +328,25 @@ struct CameraView: View {
             .toolbar { ToolbarItem(placement: .confirmationAction) { Button("Listo") { showControls = false } } }
             .tint(.yellow)
         }.presentationDetents([.large]).presentationDragIndicator(.visible)
-            .fileImporter(isPresented: $importFile, allowedContentTypes: importingLUT ? [.data] : [.json]) { result in
-                do {
-                    let url = try result.get(), access = url.startAccessingSecurityScopedResource()
-                    defer { if access { url.stopAccessingSecurityScopedResource() } }
-                    let size = try url.resourceValues(forKeys: [.fileSizeKey]).fileSize ?? 0
-                    guard size <= 16 * 1024 * 1024 else { throw CameraFailure.message("El archivo supera 16 MB.") }
-                    let data = try Data(contentsOf: url)
-                    if importingLUT {
-                        let lut = try CubeLUT.parse(data, name: url.deletingPathExtension().lastPathComponent)
-                        options.lutID = try ColorLUTStore.save(lut)
-                        fileMessage = "LUT importada: " + lut.title
-                    } else { loadProfile(try profiles.importDocument(data)); fileMessage = "Perfil importado." }
-                } catch { fileMessage = error.localizedDescription }
-            }
+            .fileImporter(isPresented: $importFile, allowedContentTypes: importingLUT ? [.data] : [.json], onCompletion: importDocument)
             .fileExporter(isPresented: $exportFile, document: exportData, contentType: .json, defaultFilename: "UltimateCAM-profile") { result in
                 switch result { case .success: fileMessage = "Perfil exportado."; case .failure(let error): fileMessage = error.localizedDescription }
             }
+    }
+
+    private func importDocument(_ result: Result<URL, Error>) {
+        do {
+            let url = try result.get(), access = url.startAccessingSecurityScopedResource()
+            defer { if access { url.stopAccessingSecurityScopedResource() } }
+            let size = try url.resourceValues(forKeys: [.fileSizeKey]).fileSize ?? 0
+            guard size <= 16 * 1024 * 1024 else { throw CameraFailure.message("El archivo supera 16 MB.") }
+            let data = try Data(contentsOf: url)
+            if importingLUT {
+                let lut = try CubeLUT.parse(data, name: url.deletingPathExtension().lastPathComponent)
+                options.lutID = try ColorLUTStore.save(lut)
+                fileMessage = "LUT importada: " + lut.title
+            } else { loadProfile(try profiles.importDocument(data)); fileMessage = "Perfil importado." }
+        } catch { fileMessage = error.localizedDescription }
     }
 
     private var captureSettings: some View {
@@ -363,7 +365,7 @@ struct CameraView: View {
                     .font(.footnote).foregroundStyle(.secondary)
                 Picker("Temporizador", selection: $timerSeconds) { Text("Desactivado").tag(0); Text("3 segundos").tag(3); Text("10 segundos").tag(10) }
                 Toggle("Cuadrícula", isOn: $grid)
-                if grid { Picker("Guía", selection: $guide) { ForEach(CompositionGuide.allCases) { Text($0.rawValue).tag($0) } }
+                if grid { Picker("Guía", selection: $guide) { ForEach(CompositionGuide.allCases) { Text($0.rawValue).tag($0) } } }
             }
             Section("Pila de imágenes") {
                 Picker("Fotogramas", selection: $stackCount) { ForEach([3,5,7,9], id: \.self) { Text("\($0) fotos").tag($0) } }
@@ -449,6 +451,11 @@ struct CameraView: View {
                             .tint(preset == name ? .yellow : .gray)
                     }
                 }
+                Button("Estático avanzado · experimental") {
+                    applyPreset("Noche estática")
+                    options.localAlignment = true; options.adaptiveMotionRejection = true
+                    options.chromaDenoise = 0.35; options.localContrast = 0.2; options.fineDetail = 0.12
+                }.buttonStyle(.bordered)
                 Text("Noche estática necesita el iPhone apoyado y una escena inmóvil. Ajusta la exposición y fusiona JPEG de cámara. La opción DNG experimental puede introducir dominantes de color en sombras. Conserva la referencia. Es experimental y no equivale a Night Sight ni al modo Noche de Apple.")
                     .font(.footnote).foregroundStyle(.secondary)
             }

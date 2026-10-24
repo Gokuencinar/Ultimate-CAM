@@ -1,0 +1,1523 @@
+{
+  "package": "com.agc.gcam",
+  "version": "1.8.6",
+  "files": 5847,
+  "bytes": 85587293,
+  "extensions": {
+    ".xml": 894,
+    ".json": 1,
+    ".prof": 1,
+    ".profm": 1,
+    ".cube": 2,
+    ".png": 268,
+    ".tflite": 1,
+    ".task": 1,
+    ".xmp": 1,
+    ".glsl": 60,
+    ".vert": 2,
+    ".frag": 1,
+    ".txt": 41,
+    ".ttf": 4,
+    ".bin": 1,
+    ".properties": 14,
+    ".proto": 10,
+    ".kotlin_builtins": 8,
+    ".so": 5,
+    ".version": 51,
+    "": 1,
+    ".textproto": 1,
+    ".ogg": 8,
+    ".smali": 2236,
+    ".java": 2234
+  },
+  "native_libraries": [
+    "resources\\lib\\arm64-v8a\\libc++_shared.so",
+    "resources\\lib\\arm64-v8a\\libcyclops.so",
+    "resources\\lib\\arm64-v8a\\libgcam_agc_native.so",
+    "resources\\lib\\arm64-v8a\\liblightcycle.so",
+    "resources\\lib\\arm64-v8a\\libmediapipe_tasks_jni.so"
+  ],
+  "license_files": [
+    "resources\\META-INF\\androidx\\constraintlayout\\constraintlayout-core\\LICENSE.txt"
+  ],
+  "preferences": [
+    {
+      "file": "resources/res/xml/preferences.xml",
+      "type": "PreferenceCategory",
+      "iconSpaceReserved": "false",
+      "key": "pref_category_custom",
+      "layout": "@layout/preference_category_material",
+      "title": "Custom"
+    },
+    {
+      "file": "resources/res/xml/preferences.xml",
+      "type": "Preference",
+      "fragment": "com.agc.gcam.app.LensSettingsFragment",
+      "icon": "@drawable/ic_lens_24",
+      "key": "lens_settings_nav",
+      "summary": "Here you can configure each lens separately.",
+      "title": "Lens settings"
+    },
+    {
+      "file": "resources/res/xml/preferences.xml",
+      "type": "Preference",
+      "fragment": "com.agc.gcam.app.CustomFilesFragment",
+      "icon": "@drawable/ic_file_open_24",
+      "key": "custom_files_nav",
+      "summary": "Import / delete Configs, Noise, Color, White balance & LUT files",
+      "title": "Custom files"
+    },
+    {
+      "file": "resources/res/xml/preferences.xml",
+      "type": "Preference",
+      "fragment": "com.agc.gcam.app.DeveloperSettingsFragment",
+      "icon": "@drawable/ic_bug_report_24",
+      "key": "developer_nav",
+      "summary": "Developer mode, pipeline debug toggles, tuning & diagnostic dumps",
+      "title": "Developer"
+    },
+    {
+      "file": "resources/res/xml/preferences.xml",
+      "type": "PreferenceCategory",
+      "iconSpaceReserved": "false",
+      "key": "pref_category_general",
+      "layout": "@layout/preference_category_material",
+      "title": "General"
+    },
+    {
+      "file": "resources/res/xml/preferences.xml",
+      "type": "ListPreference",
+      "defaultValue": "system",
+      "entries": "@array/theme_mode_entries",
+      "entryValues": "@array/theme_mode_values",
+      "icon": "@drawable/ic_dark_mode_24",
+      "key": "pref_theme_mode_key",
+      "title": "Theme",
+      "useSimpleSummaryProvider": "true"
+    },
+    {
+      "file": "resources/res/xml/preferences.xml",
+      "type": "ListPreference",
+      "defaultValue": "agc",
+      "entries": "@array/launcher_icon_entries",
+      "entryValues": "@array/launcher_icon_values",
+      "icon": "@drawable/ic_app_shortcut_24",
+      "key": "pref_launcher_icon_key",
+      "title": "Launcher icon",
+      "useSimpleSummaryProvider": "true"
+    },
+    {
+      "file": "resources/res/xml/preferences.xml",
+      "type": "ListPreference",
+      "defaultValue": "system",
+      "entries": "@array/app_language_entries",
+      "entryValues": "@array/app_language_values",
+      "icon": "@drawable/ic_language_24",
+      "key": "pref_app_language_key",
+      "title": "Language",
+      "useSimpleSummaryProvider": "true"
+    },
+    {
+      "file": "resources/res/xml/preferences.xml",
+      "type": "SwitchPreferenceCompat",
+      "defaultValue": "false",
+      "icon": "@drawable/ic_location_pin_24",
+      "key": "pref_camera_recordlocation_key",
+      "summary": "Other apps may be able to view photo & video location info",
+      "title": "Save location"
+    },
+    {
+      "file": "resources/res/xml/preferences.xml",
+      "type": "SwitchPreferenceCompat",
+      "defaultValue": "true",
+      "icon": "@drawable/ic_volume_up_24",
+      "key": "pref_camera_sounds_key",
+      "title": "Camera sounds"
+    },
+    {
+      "file": "resources/res/xml/preferences.xml",
+      "type": "ListPreference",
+      "defaultValue": "default",
+      "dependency": "pref_camera_sounds_key",
+      "entries": "@array/shutter_tone_entries",
+      "entryValues": "@array/shutter_tone_values",
+      "icon": "@drawable/ic_graphic_eq_24",
+      "key": "pref_shutter_tone_key",
+      "title": "Shutter sound",
+      "useSimpleSummaryProvider": "true"
+    },
+    {
+      "file": "resources/res/xml/preferences.xml",
+      "type": "ListPreference",
+      "defaultValue": "shutter",
+      "entries": "@array/volume_key_action_entries",
+      "entryValues": "@array/volume_key_action_values",
+      "icon": "@drawable/ic_touch_app_24",
+      "key": "pref_volume_key_action",
+      "title": "Volume key action",
+      "useSimpleSummaryProvider": "true"
+    },
+    {
+      "file": "resources/res/xml/preferences.xml",
+      "type": "SwitchPreferenceCompat",
+      "defaultValue": "true",
+      "icon": "@drawable/ic_video_stable_24",
+      "key": "pref_video_stabilization_key",
+      "summary": "Reduce camera shake to make videos smoother. Will result in a zoomed-in view.",
+      "title": "Video stabilization"
+    },
+    {
+      "file": "resources/res/xml/preferences.xml",
+      "type": "SwitchPreferenceCompat",
+      "defaultValue": "true",
+      "icon": "@drawable/ic_camera_front_24",
+      "key": "pref_camera_selfie_mirror_key",
+      "summary": "Save selfie photos as they appear in the viewer",
+      "title": "Save selfie as previewed"
+    },
+    {
+      "file": "resources/res/xml/preferences.xml",
+      "type": "PreferenceCategory",
+      "iconSpaceReserved": "false",
+      "key": "pref_category_storage",
+      "layout": "@layout/preference_category_material",
+      "title": "Storage"
+    },
+    {
+      "file": "resources/res/xml/preferences.xml",
+      "type": "EditTextPreference",
+      "defaultValue": "AGC",
+      "dialogTitle": "Save folder",
+      "icon": "@drawable/ic_sd_storage_24",
+      "key": "pref_save_folder_key",
+      "summary": "DCIM/AGC",
+      "title": "Save folder"
+    },
+    {
+      "file": "resources/res/xml/preferences.xml",
+      "type": "ListPreference",
+      "defaultValue": "auto",
+      "entries": "@array/gallery_app_entries",
+      "entryValues": "@array/gallery_app_values",
+      "icon": "@drawable/ic_collections_24",
+      "key": "pref_gallery_app_key",
+      "summary": "App used when tapping recent thumbnail",
+      "title": "Open gallery with",
+      "useSimpleSummaryProvider": "true"
+    },
+    {
+      "file": "resources/res/xml/preferences.xml",
+      "type": "Preference",
+      "fragment": "com.agc.gcam.app.AdvancedSettingsFragment",
+      "icon": "@drawable/ic_more_horiz_24",
+      "key": "advanced_nav",
+      "summary": "RAW/JPEG output control + OIS + shutter feedback",
+      "title": "Advanced"
+    },
+    {
+      "file": "resources/res/xml/preferences.xml",
+      "type": "PreferenceCategory",
+      "iconSpaceReserved": "false",
+      "key": "pref_category_about",
+      "layout": "@layout/preference_category_material",
+      "title": "About"
+    },
+    {
+      "file": "resources/res/xml/preferences.xml",
+      "type": "Preference",
+      "icon": "@drawable/ic_info_24",
+      "key": "version",
+      "selectable": "false",
+      "title": "Version"
+    },
+    {
+      "file": "resources/res/xml/preferences.xml",
+      "type": "Preference",
+      "icon": "@drawable/ic_bug_report_24",
+      "key": "send_device_report",
+      "summary": "Camera capabilities and settings. No photos or personal data.",
+      "title": "Send Diagnostic Report"
+    },
+    {
+      "file": "resources/res/xml/preferences.xml",
+      "type": "Preference",
+      "icon": "@drawable/ic_system_update_24",
+      "key": "check_updates",
+      "title": "Check for updates"
+    },
+    {
+      "file": "resources/res/xml/preferences_advanced.xml",
+      "type": "SeekBarPreference",
+      "max": "100",
+      "defaultValue": "95",
+      "icon": "@drawable/ic_definition_24",
+      "key": "pref_jpeg_quality_key",
+      "min": "50",
+      "seekBarIncrement": "1",
+      "showSeekBarValue": "true",
+      "summary": "Higher = larger file, less compression artifact",
+      "title": "JPEG quality",
+      "updatesContinuously": "false"
+    },
+    {
+      "file": "resources/res/xml/preferences_advanced.xml",
+      "type": "SwitchPreferenceCompat",
+      "defaultValue": "false",
+      "icon": "@drawable/ic_raw_on_24",
+      "key": "pref_save_raw_key",
+      "summary": "HDR Off mode saves JPEG + DNG raw sensor data",
+      "title": "Save RAW DNG"
+    },
+    {
+      "file": "resources/res/xml/preferences_advanced.xml",
+      "type": "SwitchPreferenceCompat",
+      "defaultValue": "false",
+      "icon": "@drawable/ic_color_filter_grgb_24",
+      "key": "pref_p3_key",
+      "summary": "Capture photos with Display P3 wide color gamut",
+      "title": "Display P3 color space"
+    },
+    {
+      "file": "resources/res/xml/preferences_advanced.xml",
+      "type": "SwitchPreferenceCompat",
+      "defaultValue": "false",
+      "icon": "@drawable/ic_hdr_on",
+      "key": "pref_ultra_hdr_key",
+      "summary": "Ultra HDR brightens the lightest parts of images and shows more vibrant colors than default HDR+ processing.",
+      "title": "Ultra HDR"
+    },
+    {
+      "file": "resources/res/xml/preferences_advanced.xml",
+      "type": "SwitchPreferenceCompat",
+      "defaultValue": "false",
+      "icon": "@drawable/ic_ois_24",
+      "key": "pref_enable_apply_prev_ois_key",
+      "summary": "Reduce handshake blur. May brighten shots ~1 stop on some devices",
+      "title": "Optical stabilization (OIS)"
+    },
+    {
+      "file": "resources/res/xml/preferences_advanced.xml",
+      "type": "SwitchPreferenceCompat",
+      "defaultValue": "false",
+      "icon": "@drawable/ic_bug_report_24",
+      "key": "pref_statistics_ois_data_key",
+      "summary": "Dump per-frame lens shift samples to EXIF (debug only). Device may not support.",
+      "title": "Statistics OIS data"
+    },
+    {
+      "file": "resources/res/xml/preferences_advanced.xml",
+      "type": "SwitchPreferenceCompat",
+      "defaultValue": "false",
+      "icon": "@drawable/ic_stabilization_24",
+      "key": "pref_vibrate_on_shutter_key",
+      "summary": "Short vibration when capturing",
+      "title": "Vibration on shutter"
+    },
+    {
+      "file": "resources/res/xml/preferences_custom_files.xml",
+      "type": "PreferenceCategory",
+      "iconSpaceReserved": "false",
+      "key": "pref_category_noise_model",
+      "layout": "@layout/preference_category_material",
+      "summary": "Sensor noise calibration. Select per-lens in the Pro tab.",
+      "title": "Noise Model"
+    },
+    {
+      "file": "resources/res/xml/preferences_custom_files.xml",
+      "type": "Preference",
+      "icon": "@drawable/ic_file_upload_24",
+      "key": "noise_model_import",
+      "summary": "The format should be .c",
+      "title": "Import noise model"
+    },
+    {
+      "file": "resources/res/xml/preferences_custom_files.xml",
+      "type": "Preference",
+      "icon": "@drawable/ic_sim_card_download_24",
+      "key": "noise_model_delete",
+      "title": "Delete noise model"
+    },
+    {
+      "file": "resources/res/xml/preferences_custom_files.xml",
+      "type": "PreferenceCategory",
+      "iconSpaceReserved": "false",
+      "key": "pref_category_color_matrix",
+      "layout": "@layout/preference_category_material",
+      "summary": "Per-CCT color correction. Select per-lens in the Pro tab.",
+      "title": "Color Matrix"
+    },
+    {
+      "file": "resources/res/xml/preferences_custom_files.xml",
+      "type": "Preference",
+      "icon": "@drawable/ic_file_upload_24",
+      "key": "cct_import",
+      "summary": "The format should be .txt or .bin.txt",
+      "title": "Import color matrix"
+    },
+    {
+      "file": "resources/res/xml/preferences_custom_files.xml",
+      "type": "Preference",
+      "icon": "@drawable/ic_sim_card_download_24",
+      "key": "cct_delete",
+      "title": "Delete color matrix"
+    },
+    {
+      "file": "resources/res/xml/preferences_custom_files.xml",
+      "type": "ListPreference",
+      "defaultValue": "2",
+      "dialogTitle": "Color preset",
+      "entries": "@array/cct_preset_entries",
+      "entryValues": "@array/cct_preset_values",
+      "icon": "@drawable/ic_color_filter_grgb_24",
+      "key": "pref_cct_preset_key",
+      "summary": "Wide vivid / Medium balanced / Narrow neutral",
+      "title": "Color preset"
+    },
+    {
+      "file": "resources/res/xml/preferences_custom_files.xml",
+      "type": "PreferenceCategory",
+      "iconSpaceReserved": "false",
+      "key": "pref_category_white_balance",
+      "layout": "@layout/preference_category_material",
+      "summary": "GCam-Mod WB reference. Select per-lens in the Pro tab.",
+      "title": "White Balance"
+    },
+    {
+      "file": "resources/res/xml/preferences_custom_files.xml",
+      "type": "Preference",
+      "icon": "@drawable/ic_file_upload_24",
+      "key": "awb_import",
+      "summary": "The format should be .txt",
+      "title": "Import white balance"
+    },
+    {
+      "file": "resources/res/xml/preferences_custom_files.xml",
+      "type": "Preference",
+      "icon": "@drawable/ic_sim_card_download_24",
+      "key": "awb_delete",
+      "title": "Delete white balance"
+    },
+    {
+      "file": "resources/res/xml/preferences_custom_files.xml",
+      "type": "PreferenceCategory",
+      "iconSpaceReserved": "false",
+      "key": "pref_category_lut",
+      "layout": "@layout/preference_category_material",
+      "summary": "Color grading LUTs. Select per-lens in the Pro tab.",
+      "title": "LUT"
+    },
+    {
+      "file": "resources/res/xml/preferences_custom_files.xml",
+      "type": "Preference",
+      "icon": "@drawable/ic_file_upload_24",
+      "key": "lut_import",
+      "summary": "The format should be .cube or .png",
+      "title": "Import LUT"
+    },
+    {
+      "file": "resources/res/xml/preferences_custom_files.xml",
+      "type": "Preference",
+      "icon": "@drawable/ic_sim_card_download_24",
+      "key": "lut_delete",
+      "title": "Delete LUT"
+    },
+    {
+      "file": "resources/res/xml/preferences_developer.xml",
+      "type": "PreferenceCategory",
+      "iconSpaceReserved": "false",
+      "key": "pref_category_developer_panel",
+      "layout": "@layout/preference_category_material",
+      "summary": "Visibility of developer sections across all UI surfaces",
+      "title": "Developer Panel"
+    },
+    {
+      "file": "resources/res/xml/preferences_developer.xml",
+      "type": "SwitchPreferenceCompat",
+      "defaultValue": "false",
+      "icon": "@drawable/ic_visibility_24",
+      "key": "pref_show_developer_panel_key",
+      "summary": "Show pipeline debug toggles + the photo Settings Dev tab",
+      "title": "Developer mode"
+    },
+    {
+      "file": "resources/res/xml/preferences_developer.xml",
+      "type": "SwitchPreferenceCompat",
+      "defaultValue": "true",
+      "dependency": "pref_show_developer_panel_key",
+      "icon": "@drawable/ic_visibility_24",
+      "key": "pref_show_tonecurve_base_key",
+      "summary": "Show the Tonecurve Base group in Dev tab",
+      "title": "Show Tonecurve Base"
+    },
+    {
+      "file": "resources/res/xml/preferences_developer.xml",
+      "type": "SwitchPreferenceCompat",
+      "defaultValue": "true",
+      "dependency": "pref_show_developer_panel_key",
+      "icon": "@drawable/ic_visibility_24",
+      "key": "pref_show_initial_pass_debug_key",
+      "summary": "Show the Initial Pass Debug (① Minimal Mode → ⑦ ContrastSin) group in Dev tab",
+      "title": "Show Initial Pass Debug"
+    },
+    {
+      "file": "resources/res/xml/preferences_developer.xml",
+      "type": "SwitchPreferenceCompat",
+      "defaultValue": "true",
+      "dependency": "pref_show_developer_panel_key",
+      "icon": "@drawable/ic_visibility_24",
+      "key": "pref_show_merge_fusion_key",
+      "summary": "Show the Merge & Fusion group (Adaptive Noise / ExposureFusion / Compressor) in Dev tab",
+      "title": "Show Merge & Fusion"
+    },
+    {
+      "file": "resources/res/xml/preferences_developer.xml",
+      "type": "SwitchPreferenceCompat",
+      "defaultValue": "true",
+      "dependency": "pref_show_developer_panel_key",
+      "icon": "@drawable/ic_visibility_24",
+      "key": "pref_show_ae_sharpen_key",
+      "summary": "Show the AE & Sharpening group (AE Enable / AE Target / CaptureSharpening) in Dev tab",
+      "title": "Show AE & Sharpening"
+    },
+    {
+      "file": "resources/res/xml/preferences_developer.xml",
+      "type": "SwitchPreferenceCompat",
+      "defaultValue": "true",
+      "dependency": "pref_show_developer_panel_key",
+      "icon": "@drawable/ic_visibility_24",
+      "key": "pref_show_pipeline_stop_after_key",
+      "summary": "Show the Pipeline Stop After (debug readback truncation) selector in Dev tab",
+      "title": "Show Pipeline Stop After"
+    },
+    {
+      "file": "resources/res/xml/preferences_developer.xml",
+      "type": "PreferenceCategory",
+      "iconSpaceReserved": "false",
+      "key": "pref_category_developer",
+      "layout": "@layout/preference_category_material",
+      "summary": "Pipeline tuning + diagnostic dumps not exposed in the viewfinder Dev tab",
+      "title": "Developer"
+    },
+    {
+      "file": "resources/res/xml/preferences_developer.xml",
+      "type": "SwitchPreferenceCompat",
+      "defaultValue": "false",
+      "icon": "@drawable/ic_bug_report_24",
+      "key": "pref_gcam_debug_key",
+      "summary": "Write per-shot summary and time log to the debug folder",
+      "title": "Debug dump"
+    },
+    {
+      "file": "resources/res/xml/preferences_developer.xml",
+      "type": "SwitchPreferenceCompat",
+      "defaultValue": "false",
+      "dependency": "pref_gcam_debug_key",
+      "icon": "@drawable/ic_bug_report_24",
+      "key": "pref_gcam_debug_save_raw_frames_key",
+      "summary": "Each frame ~18MB YUV. Off by default.",
+      "title": "Save raw frames in debug"
+    }
+  ],
+  "tunables": [
+    {
+      "file": "sources/com/agc/gcam/processing/LocalLaplacian.java",
+      "line": 22,
+      "type": "float",
+      "field": "detail",
+      "annotation": "category = \"LLF\", defaultValue = 0.25f, max = 2.0f, min = -1.0f, step = 0.05f, title = \"Detail\""
+    },
+    {
+      "file": "sources/com/agc/gcam/processing/LocalLaplacian.java",
+      "line": 25,
+      "type": "float",
+      "field": "highlights",
+      "annotation": "category = \"LLF\", defaultValue = 0.0f, max = 2.0f, min = 0.0f, step = 0.05f, title = \"Highlights\""
+    },
+    {
+      "file": "sources/com/agc/gcam/processing/LocalLaplacian.java",
+      "line": 28,
+      "type": "float",
+      "field": "shadows",
+      "annotation": "category = \"LLF\", defaultValue = 0.0f, max = 2.0f, min = 0.0f, step = 0.05f, title = \"Shadows\""
+    },
+    {
+      "file": "sources/com/agc/gcam/processing/LocalLaplacian.java",
+      "line": 31,
+      "type": "float",
+      "field": "midtone",
+      "annotation": "category = \"LLF\", defaultValue = 0.5f, max = 1.0f, min = 0.01f, step = 0.01f, title = \"Mid-tone Range\""
+    },
+    {
+      "file": "sources/com/agc/gcam/processing/gl/PostProcessPipeline.java",
+      "line": 116,
+      "type": "float",
+      "field": "kneeMax",
+      "annotation": "category = \"Auto Exposure\", defaultValue = 0.9f, max = 1.0f, min = 0.6f, step = 0.01f, title = \"Highlight Knee Max\""
+    },
+    {
+      "file": "sources/com/agc/gcam/processing/gl/PostProcessPipeline.java",
+      "line": 119,
+      "type": "float",
+      "field": "kneeMin",
+      "annotation": "category = \"Auto Exposure\", defaultValue = 0.55f, max = 1.0f, min = 0.3f, step = 0.01f, title = \"Highlight Knee Min\""
+    },
+    {
+      "file": "sources/com/agc/gcam/processing/gl/PostProcessPipeline.java",
+      "line": 122,
+      "type": "float",
+      "field": "noiseTarget",
+      "annotation": "category = \"Denoise\", defaultValue = 0.00390625f, max = 0.1f, min = 0.0f, step = 1.0E-4f, title = \"Noise Target\""
+    },
+    {
+      "file": "sources/com/agc/gcam/processing/gl/PostProcessPipeline.java",
+      "line": 125,
+      "type": "float",
+      "field": "captureSharpeningS",
+      "annotation": "category = \"Sharpening\", defaultValue = 1.05f, max = 2.0f, min = 0.5f, step = 0.01f, title = \"Sharp Size\""
+    },
+    {
+      "file": "sources/com/agc/gcam/processing/gl/PostProcessPipeline.java",
+      "line": 128,
+      "type": "float",
+      "field": "captureSharpeningIntense",
+      "annotation": "category = \"Sharpening\", defaultValue = 0.4f, max = 3.0f, min = 0.0f, step = 0.05f, title = \"Sharp Strength\""
+    }
+  ],
+  "shaders": [
+    {
+      "file": "resources/assets/shaders/alignment/align.glsl",
+      "sha256": "0c2b15f0f6ee4eac5e7759f35195a5cef4c2788d74b85b83464d10dfca0f463d",
+      "uniforms": [
+        "uniform highp sampler2D prevAlignment;",
+        "uniform highp sampler2D baseTexture;",
+        "uniform highp sampler2D alterTexture;",
+        "uniform 声明以贴近原始接口，但实际从未采样。\nuniform highp sampler2D baseCurve;",
+        "uniform highp sampler2D alterCurve;",
+        "uniform highp writeonly image2D outTexture;",
+        "uniform float noiseS;",
+        "uniform float noiseO;",
+        "uniform int first;",
+        "uniform ivec2 rawHalf;",
+        "uniform float exposure;",
+        "uniform float integralNorm;",
+        "uniform int subpixel;",
+        "uniform float significancy;"
+      ],
+      "bytes": 16004
+    },
+    {
+      "file": "resources/assets/shaders/alignment/histogram_align.glsl",
+      "sha256": "e952f04a032ca8d85484b187f34e570a3cb6f8cab04bc2ff9d159823606dedd6",
+      "uniforms": [
+        "uniform sampler2D inTexture;",
+        "uniform ivec2 uSize;",
+        "uniform vec4 exposure;"
+      ],
+      "bytes": 2076
+    },
+    {
+      "file": "resources/assets/shaders/alignment/normalize.glsl",
+      "sha256": "7928a6e35818a53f7654bcea5601b78a4651c2f9f87f25224d98a89d64098825",
+      "uniforms": [
+        "uniform 传进来，Java 侧用**同一个常数**\n//     复刻权重算 `prefilterN = 1/Σw²_1D`，喂给 align.glsl 的 `integralNorm`。\n//     ⚠️ 这两处必须用同一个 σ —— 一处改另一处不改 = 对齐的噪声模型静默失配，不报错。\n//     可分离滤波有个恰好的性质：√(Σw²_2D) = Σw²_1D，所以 1/Σw²_1D 正是 σ 的还原倍数。\n//     实算 σ=1.5：权重 [0.120078, 0.233881, 0.292082, 0.233881, 0.120078]，\n//     Σw²_1D = 0.223550 → **prefilterN = 4.47328**（上游 `PyramidAlignment` 打点同款）。\n//     旧箱式 4×4 的 Σw²_2D = 1/16 → σ_out/σ_in = 0.25，本该配 prefilterN = 4.0，\n//     **但我们当时传的是 1.0 → σ 高估整整 4 倍**，连锁三条：3σ 截断实际是 12σ（几乎空转）、\n//     显著性门等效严了 4 倍（significancy 2.0 实际相当于 8.0）、cost 绝对值整体小 4 倍。\n//\n//  ② **fetch 坐标必须 clamp**。越界 texelFetch 是**未定义行为**，而且会让边界 texel 变暗，\n//     给 tile matcher 造出**假结构**（上游原话：\"creating fake structure for the tile matcher\"）。\n//     旧版完全没钳位：`(xy+3)*2` 最远超出右/下边界 4 个 raw 像素。跟 delta A 同一类 bug。\n//\n//  ③ **gainMap 采样补 `+0.5` texel 中心**。旧版 `vec2(xy)/imageSize` 少了半个 texel，\n//     LSC 增益整体偏半格。跟已修的 `wiener_level` B1 同一类。\n//\n// ⚠️ **不做 min/max 去极值**：上游实测过（tools/alignment-bench，trim vs no-trim 误差相同\n//    但细节更少）—— 热点和卡死像素经过这一层平均 + 上面的高斯金字塔已经看不见了\n//    （一个饱和点只占某个通道某个 tap 的 ~1/25），而砍掉极值会真的削掉 matcher 要用的\n//    高光/暗部细节。别\"顺手加个 clamp 去热点\"。\n// ════════════════════════════════════════════════════════════════════════════\n\nprecision highp float;",
+        "uniform highp usampler2D inTexture;",
+        "uniform highp sampler2D gainMap;",
+        "uniform highp writeonly image2D outTexture;",
+        "uniform float whiteLevel;",
+        "uniform vec4 blackLevel;",
+        "uniform float exposure;",
+        "uniform float blurSigma;"
+      ],
+      "bytes": 6156
+    },
+    {
+      "file": "resources/assets/shaders/alignment/normalizebl.glsl",
+      "sha256": "d913067dacbc8911e70173b4998e288f217b07a378434e5f732ecb967a04b441",
+      "uniforms": [
+        "uniform highp sampler2D baseTexture;",
+        "uniform highp sampler2D gainMap;",
+        "uniform highp writeonly image2D outTexture;",
+        "uniform vec4 blackLevel;",
+        "uniform float whiteLevel;",
+        "uniform float sharpness;"
+      ],
+      "bytes": 2416
+    },
+    {
+      "file": "resources/assets/shaders/alignment/pack.glsl",
+      "sha256": "972fd2807fbbe5b9e21c506b103010c259d8cf058f8031d77e060f633b18279c",
+      "uniforms": [
+        "uniform highp sampler2D inTexture;",
+        "uniform highp writeonly image2D outTexture;",
+        "uniform ivec2 shift;"
+      ],
+      "bytes": 1120
+    },
+    {
+      "file": "resources/assets/shaders/autoexposure.glsl",
+      "sha256": "ac53724da3a6c40064d9384be2fbc4f83de2ba077e7544bc914f134ac316f6ff",
+      "uniforms": [
+        "uniform writeonly highp image2D outImage;",
+        "uniform ivec2 uSize;",
+        "uniform sampler2D uTexture;",
+        "uniform vec2 uTexelSize;",
+        "uniform float mpy;",
+        "uniform float whiteMax;",
+        "uniform float uChromaRestore;",
+        "uniform float uHdrHeadroom;",
+        "uniform float uHdrKnee;",
+        "uniform float uShoulderKnee;"
+      ],
+      "bytes": 8615
+    },
+    {
+      "file": "resources/assets/shaders/capturesharpening.glsl",
+      "sha256": "9ccbb9103920667ce766d60cba213a865dc767ba60eb567939104fc5bd15c052",
+      "uniforms": [
+        "uniform sampler2D InputBuffer;",
+        "uniform ivec2 uSize;"
+      ],
+      "bytes": 4743
+    },
+    {
+      "file": "resources/assets/shaders/colorgrade.glsl",
+      "sha256": "1b356c20fd7b436485f778029b48216a03dc689d42173e73803cbc3d06525b59",
+      "uniforms": [
+        "uniform writeonly highp image2D outImage;",
+        "uniform ivec2 uSize;",
+        "uniform sampler2D uTexture;",
+        "uniform vec2 uTexelSize;",
+        "uniform float uGradeShadowHue;",
+        "uniform float uGradeShadowSat;",
+        "uniform float uGradeMidtoneHue;",
+        "uniform float uGradeMidtoneSat;",
+        "uniform float uGradeHighlightHue;",
+        "uniform float uGradeHighlightSat;",
+        "uniform float uGradeBalance;",
+        "uniform float uGradeBlending;"
+      ],
+      "bytes": 4087
+    },
+    {
+      "file": "resources/assets/shaders/copy.glsl",
+      "sha256": "7a668f22b90a74753125e2cfbffa562a27a7a0e2408fce0b783dba28a892d29b",
+      "uniforms": [
+        "uniform writeonly highp image2D outImage;",
+        "uniform ivec2 uSize;",
+        "uniform sampler2D uTexture;"
+      ],
+      "bytes": 1484
+    },
+    {
+      "file": "resources/assets/shaders/copy_r16ui.glsl",
+      "sha256": "7fd5167f4a2a8035c6703844f432940c301474e76849e664236c9cf70f00cb45",
+      "uniforms": [
+        "uniform highp usampler2D uTextureUI;",
+        "uniform highp writeonly image2D outTexture;",
+        "uniform float uScale;"
+      ],
+      "bytes": 878
+    },
+    {
+      "file": "resources/assets/shaders/debug_raw_passthrough.glsl",
+      "sha256": "5d0b23b97735df97f117b3adf2b9fb4cfc18c7e9e32c68febbd5e601cac9fe48",
+      "uniforms": [
+        "uniform CFA → bug 在 rawTexU16 自身或\n//     readBitmap/copy.glsl\n//   - 如果用这个 shader 输出 → CFA pattern 正常出现 → bug 在 ref_pack/quad_unpack\n//\n// 没有 cfaOffset，没有 merge logic。每个全分辨率 pixel 直接读对应位置的 U16 raw bayer。\n// ════════════════════════════════════════════════════════════════════════════\n\nuniform highp usampler2D inTexture;",
+        "uniform highp writeonly image2D outTexture;",
+        "uniform float whiteLevel;",
+        "uniform float blackLevel;"
+      ],
+      "bytes": 1727
+    },
+    {
+      "file": "resources/assets/shaders/dehaze.glsl",
+      "sha256": "481dd7f2dd9b1100dd6e2f02c9d64530de701e2b5b2f4381ada873a0e98afc42",
+      "uniforms": [
+        "uniform writeonly highp image2D outImage;",
+        "uniform ivec2 uSize;",
+        "uniform sampler2D uTexture;",
+        "uniform vec2 uTexelSize;",
+        "uniform float uDehaze;",
+        "uniform float uDehazeDistance;",
+        "uniform vec3 uAtmColor;"
+      ],
+      "bytes": 3740
+    },
+    {
+      "file": "resources/assets/shaders/demosaic/awb_normalize.glsl",
+      "sha256": "748157ebada33d7ac0fd889746871ab9aef2a4d6a1425704cc3781cf61aede06",
+      "uniforms": [
+        "uniform highp sampler2D inTexture;",
+        "uniform sampler2D GainMap;",
+        "uniform highp writeonly image2D outTexture;",
+        "uniform vec4 uNeutral;",
+        "uniform ivec2 uSize;",
+        "uniform int uGainMapEnabled;",
+        "uniform vec3 uLevel;",
+        "uniform float uMergeBlFactor;",
+        "uniform int uCfaPattern;",
+        "uniform int uQuadBayer;"
+      ],
+      "bytes": 7289
+    },
+    {
+      "file": "resources/assets/shaders/demosaic/green_interp.glsl",
+      "sha256": "9b22ad3ee8e8aa2c692ecf32bdf438e82f7f71b0b4b6bb7c6fd5c4e4c62886b1",
+      "uniforms": [
+        "uniform sampler2D bayerTexture;",
+        "uniform highp readonly image2D inTexture;",
+        "uniform highp readonly image2D igTexture;",
+        "uniform highp writeonly image2D outTexture;",
+        "uniform int yOffset;"
+      ],
+      "bytes": 2217
+    },
+    {
+      "file": "resources/assets/shaders/demosaic/green_refine.glsl",
+      "sha256": "cf3eaa57edd15b3b130d0affddab3382228c4ed1c5aaf1cd6839f403f5645286",
+      "uniforms": [
+        "uniform highp readonly image2D inTexture;",
+        "uniform highp readonly image2D greenTexture;",
+        "uniform highp readonly image2D igTexture;",
+        "uniform highp writeonly image2D outTexture;",
+        "uniform int yOffset;"
+      ],
+      "bytes": 3512
+    },
+    {
+      "file": "resources/assets/shaders/demosaic/init_gradient.glsl",
+      "sha256": "235e70ace3623c86971ec95b8e92516c79b78d2fde449ab83d9d2bf3bcab69b7",
+      "uniforms": [
+        "uniform highp readonly image2D inTexture;",
+        "uniform highp writeonly image2D outTexture;",
+        "uniform int yOffset;"
+      ],
+      "bytes": 1912
+    },
+    {
+      "file": "resources/assets/shaders/demosaic/quadbayer_green.glsl",
+      "sha256": "d7e7c35413a95a89a34d89f8a58ec3f41c968024b37ce25428ea9dd67a8713cb",
+      "uniforms": [
+        "uniform highp readonly image2D inTexture;",
+        "uniform highp readonly image2D igTexture;",
+        "uniform highp writeonly image2D outTexture;",
+        "uniform int yOffset;"
+      ],
+      "bytes": 4188
+    },
+    {
+      "file": "resources/assets/shaders/demosaic/quadbayer_init_gradient.glsl",
+      "sha256": "201f2c9b645f2807dd25236b048990e637df0977fd85c021c24513bdd422b987",
+      "uniforms": [
+        "uniform highp readonly image2D inTexture;",
+        "uniform highp writeonly image2D outTexture;",
+        "uniform int yOffset;"
+      ],
+      "bytes": 1535
+    },
+    {
+      "file": "resources/assets/shaders/demosaic/quadbayer_rb_recon.glsl",
+      "sha256": "1d1a7e5fde93c01b85e0ae1258cd8c0aa79e23f29a003cadf1d4254b03f9c07d",
+      "uniforms": [
+        "uniform int CfaPattern` 但函数体里从没读过 —— block 对齐是 awb_normalize\n//    的责任，这里不重复做，所以本移植也不接这个 uniform。\n\n#define LAYOUT //\nLAYOUT\nprecision highp float;",
+        "uniform highp readonly image2D inTexture;",
+        "uniform highp readonly image2D greenTexture;",
+        "uniform highp writeonly image2D outTexture;",
+        "uniform int yOffset;"
+      ],
+      "bytes": 5262
+    },
+    {
+      "file": "resources/assets/shaders/demosaic/rb_recon.glsl",
+      "sha256": "9afc3dc8081bd5b3ec6541af1a472293d81f17f1a5513d12ef4b8c46200315f8",
+      "uniforms": [
+        "uniform highp readonly image2D inTexture;",
+        "uniform highp readonly image2D greenTexture;",
+        "uniform highp readonly image2D igTexture;",
+        "uniform highp writeonly image2D outTexture;",
+        "uniform int yOffset;"
+      ],
+      "bytes": 9684
+    },
+    {
+      "file": "resources/assets/shaders/denoise/detail_blend.glsl",
+      "sha256": "ff6e3dd71effb4cef3f521723f8a1064bc30422924851f561210ae374660760f",
+      "uniforms": [
+        "uniform sampler2D DenoisedTex;",
+        "uniform sampler2D OriginalTex;",
+        "uniform float uNoiseS;",
+        "uniform float uNoiseO;",
+        "uniform float uSnrLo;",
+        "uniform float uSnrHi;",
+        "uniform float uStrength;"
+      ],
+      "bytes": 2670
+    },
+    {
+      "file": "resources/assets/shaders/denoise/esd3d2.glsl",
+      "sha256": "5f212bc514d1c6d11af780c9322dcbf172962768534ab178f0fcc162b98ebe26",
+      "uniforms": [
+        "uniform (单次编译 reuse, 省 50-200ms / shot 编译开销, 代价是 Adreno 没法 compile-time\n//  unroll 内循环, ~5-10ms runtime cost). 净性能 win.\n//\n//  type-genericity (sampler2D / usampler2D 切换). Static file + uniform 是最简最快的方案.\n//\n//  Uniforms:\n//    InputBuffer    — 输入 (post-demosaic RGBA16F)\n//    uNoiseS/O      — adaptive 噪声模型 (basePipeline.noiseS/O / scale)\n//    uKernelSize    — gaussian spatial sigma (1 + sqrt(noiseMpy)*24)\n//    uKsize         — 卷积核 half size: KSIZE = (MSIZE-1)/2, MSIZE in [7,21]\n//    uMoire         — 色摩尔抑制强度 (0.0 for pre-pass, 1.5 for main pass)\n//    uLuma          — 亮度去噪强度 (0..2, 默认 0.8)\n// ════════════════════════════════════════════════════════════════════════════\nprecision highp float;",
+        "uniform sampler2D InputBuffer;",
+        "uniform float uNoiseS;",
+        "uniform float uNoiseO;",
+        "uniform float uKernelSize;",
+        "uniform int   uKsize;",
+        "uniform float uMoire;",
+        "uniform float uLuma;"
+      ],
+      "bytes": 7068
+    },
+    {
+      "file": "resources/assets/shaders/denoise/gaussdown.glsl",
+      "sha256": "df46f569991af477975690c3ba48af8cc0653a58d9ae1f465ebcc40293201065",
+      "uniforms": [
+        "uniform 单次编译.\n//\n//  Uniforms:\n//    uResize   — 下采样系数 k (2..4)\n//    uStride   — max(1, k/2) 采样间隔\n//    uSize1    — blur/stride = (k*0.5)/stride  gaussian sigma in stride 单位\n//    MSIZE1 固定 5 (5x5 separable gaussian)\n// ════════════════════════════════════════════════════════════════════════════\nprecision highp float;",
+        "uniform sampler2D InputBuffer;",
+        "uniform int   uResize;",
+        "uniform int   uStride;",
+        "uniform float uSize1;"
+      ],
+      "bytes": 2312
+    },
+    {
+      "file": "resources/assets/shaders/denoise/guidedupsample.glsl",
+      "sha256": "67985e199a01542896e53595062762132a6971910795db83a4e95b0f09960167",
+      "uniforms": [
+        "uniform sampler2D LowresInput;",
+        "uniform sampler2D Guide;",
+        "uniform sampler2D GuideHigh;",
+        "uniform float noiseS;",
+        "uniform float noiseO;",
+        "uniform int uScale;",
+        "uniform 避免 per-shot recompile\nout vec3 Output;"
+      ],
+      "bytes": 5321
+    },
+    {
+      "file": "resources/assets/shaders/denoise.glsl",
+      "sha256": "20ccb8300f2dbc401e05f90d10c01dfedc95f1bc4d0af8a1f84aba1c145f36b9",
+      "uniforms": [
+        "uniform writeonly highp image2D outImage;",
+        "uniform ivec2 uSize;",
+        "uniform sampler2D uTexture;",
+        "uniform vec2 uTexelSize;",
+        "uniform float uStrength;",
+        "uniform float uDetail;",
+        "uniform float uContrast;",
+        "uniform float uColorStrength;",
+        "uniform float uSmoothness;"
+      ],
+      "bytes": 6392
+    },
+    {
+      "file": "resources/assets/shaders/downsample_box.glsl",
+      "sha256": "f397554ad258a84e4dffb3dd0c5eb3f4ec1d274d99f3e6a2f95efaa96e7a7cdc",
+      "uniforms": [
+        "uniform writeonly highp image2D outImage;",
+        "uniform sampler2D uTexture;",
+        "uniform ivec2 uSize;",
+        "uniform ivec2 uSrcSize;",
+        "uniform int uScale;"
+      ],
+      "bytes": 1629
+    },
+    {
+      "file": "resources/assets/shaders/effects.glsl",
+      "sha256": "159c08f69587d425c3e4f494baa4338901a5e1a102ed57b0ef85111e328320d7",
+      "uniforms": [
+        "uniform writeonly highp image2D outImage;",
+        "uniform ivec2 uSize;",
+        "uniform sampler2D uTexture;",
+        "uniform vec2 uTexelSize;",
+        "uniform float uVignette;",
+        "uniform float uVigMidpoint;",
+        "uniform float uVigRoundness;",
+        "uniform float uVigFeather;",
+        "uniform float uVigStyle;",
+        "uniform float uVigHighlights;",
+        "uniform float uGrain;",
+        "uniform float uGrainSize;",
+        "uniform float uGrainRoughness;",
+        "uniform noise and multi-frequency noise\n        // 0.0 = uniform (single frequency), 1.0 = rough (multi-octave, varied)\n        if (uGrainRoughness > 0.01) {\n            // Add a second octave at half frequency for varied grain character\n            float noise2 = hashSmooth(grainCoord * 0.5) * 2.0 - 1.0;"
+      ],
+      "bytes": 7779
+    },
+    {
+      "file": "resources/assets/shaders/fullscreen_quad.vert",
+      "sha256": "315d1fff150d4ae9125e91e7693a68abc496216e69e69b5e64eaa6c3fabd5f79",
+      "uniforms": [],
+      "bytes": 598
+    },
+    {
+      "file": "resources/assets/shaders/gainmap_ratio.glsl",
+      "sha256": "52d7cbd088508dea71ae2c7839eaee0d4dc7490699547172ee6881d19806ff12",
+      "uniforms": [
+        "uniform writeonly highp image2D outImage;",
+        "uniform sampler2D uHdrTex;",
+        "uniform sampler2D uSdrTex;",
+        "uniform ivec2 uSize;",
+        "uniform float uLogRatioMax;"
+      ],
+      "bytes": 2185
+    },
+    {
+      "file": "resources/assets/shaders/histogram.glsl",
+      "sha256": "c4b0c86bb66d79d98e5b3829f2482dc90df6b8daa8df715853c1731b87334a71",
+      "uniforms": [
+        "uniform sampler2D uTexture;",
+        "uniform ivec2 uSize;"
+      ],
+      "bytes": 982
+    },
+    {
+      "file": "resources/assets/shaders/histogram_ae.glsl",
+      "sha256": "03a790d738143f5465190c55799015e68939b4fd36c619609c996acb955214fa",
+      "uniforms": [
+        "uniform sampler2D uTexture\n *   histogram_ae.glsl: R/G/B 三通道，binding=1/2/3，uniform sampler2D inTexture\n *\n * 对应 reference implementation:\n *   buffers[0].bind(1) → R 通道 → binding=1\n *   buffers[1].bind(2) → G 通道 → binding=2\n *   buffers[2].bind(3) → B 通道 → binding=3\n *   glProg.setTexture(\"inTexture\", input) → uniform sampler2D inTexture\n *   glProg.setVar(\"exposure\", r, g, b, a) → uniform vec4 exposure\n *\n * 下采样：GLHistogram.resize=3，即 dispatch 时传入 w/3, h/3\n * 每个像素的 bin = floor(channel * exposure[i])，exposure[i] = histSize-1 = 255\n */\n\nlayout(local_size_x = 8, local_size_y = 8, local_size_z = 1) in;",
+        "uniform sampler2D inTexture;",
+        "uniform ivec2 uSize;",
+        "uniform vec4 exposure;"
+      ],
+      "bytes": 2183
+    },
+    {
+      "file": "resources/assets/shaders/hsl.glsl",
+      "sha256": "902970fb7105a1cd3bd27e4126069fec977e2eb26c6f5dd0f7e8a5058d0f6cc2",
+      "uniforms": [
+        "uniform writeonly highp image2D outImage;",
+        "uniform ivec2 uSize;",
+        "uniform sampler2D uTexture;",
+        "uniform vec2 uTexelSize;",
+        "uniform float uHslRedH;",
+        "uniform float uHslRedS;",
+        "uniform float uHslRedL;",
+        "uniform float uHslOrangeH;",
+        "uniform float uHslOrangeS;",
+        "uniform float uHslOrangeL;",
+        "uniform float uHslYellowH;",
+        "uniform float uHslYellowS;",
+        "uniform float uHslYellowL;",
+        "uniform float uHslGreenH;",
+        "uniform float uHslGreenS;",
+        "uniform float uHslGreenL;",
+        "uniform float uHslAquaH;",
+        "uniform float uHslAquaS;",
+        "uniform float uHslAquaL;",
+        "uniform float uHslBlueH;",
+        "uniform float uHslBlueS;",
+        "uniform float uHslBlueL;",
+        "uniform float uHslPurpleH;",
+        "uniform float uHslPurpleS;",
+        "uniform float uHslPurpleL;",
+        "uniform float uHslMagentaH;",
+        "uniform float uHslMagentaS;",
+        "uniform float uHslMagentaL;"
+      ],
+      "bytes": 6495
+    },
+    {
+      "file": "resources/assets/shaders/initial.glsl",
+      "sha256": "4ee6d4c99ceeea72d97a548f99ac8b32a23df3cf73b07a18bab126e900c28587",
+      "uniforms": [
+        "uniform writeonly highp image2D outImage;",
+        "uniform writeonly highp image2D debugStages;",
+        "uniform writeonly highp image2D debugStages2;",
+        "uniform sampler2D uTexture;",
+        "uniform ivec2 uSize;",
+        "uniform ivec4 activeSize;",
+        "uniform sampler2D GammaCurve;",
+        "uniform mat3 sensorToIntermediate;",
+        "uniform mat3 intermediateToSRGB;",
+        "uniform vec3 neutralPoint;",
+        "uniform int uColorMatrixEnabled;",
+        "uniform 加入之前**逐字节相同**；>1 = gainmap 用的 HDR 那条。\n//   所有跟它相关的分支在 H=1 时都是可证明的 no-op：削顶上限就是 1、超出部分恒为 0。\n//   详 CLAUDE.md「Ultra HDR JPEG → 双 rendition」。\nuniform float uHdrHeadroom;",
+        "uniform int uScurveEnabled;",
+        "uniform int uReinhardEnabled;",
+        "uniform int uTonemapEnabled;",
+        "uniform int uSaturateEnabled;",
+        "uniform int uContrastSinEnabled;",
+        "uniform int uMinimalMode;",
+        "uniform sampler2D GainMap;",
+        "uniform int uGainMapEnabled;",
+        "uniform sampler2D FusionMap;",
+        "uniform int uFusionMapEnabled;",
+        "uniform float uFusionGain;",
+        "uniform highp sampler3D uLutTex;",
+        "uniform int uLutEnabled;",
+        "uniform float uLutIntensity;",
+        "uniform float uGammaX1;",
+        "uniform float uGammaX2;",
+        "uniform float uGammaX3;",
+        "uniform float uTonemapX1;",
+        "uniform float uTonemapX2;",
+        "uniform float uTonemapX3;",
+        "uniform [0.5, 1.5]，默认 0/0 → 都 = 1.0\n//    详 CLAUDE.md trap entry「Bright/Dark Sat 拆分 (LR Vibrance 是另一独立 axis)」.\n//\n// ⚠️ 2026-05-25 architecture align（之前一阶段）：以前 SATURATION/SATURATION2 是 hardcoded #define 1.0，\nuniform float uSaturationBright;",
+        "uniform float uSaturationDark;",
+        "uniform\n//    单次编译 reuse —— 数值语义完全相同，省掉每张照片 100-200ms 的重编译（跟 SATURATION\n//    那次转换同一套理由）。\n//    reference initial.glsl 里 `#define CONTRAST 1.0` 那个 1.0 是 historical default，\n//    运行时被 mSettings.contrastMpy 覆盖成 0.0（pref_contrast_seekbar_default = 0.0）。\nuniform float uPcContrast;",
+        "uniform float uPcShadows;",
+        "uniform float uNightShadowLift;"
+      ],
+      "bytes": 29617
+    },
+    {
+      "file": "resources/assets/shaders/levelcorrection.glsl",
+      "sha256": "346668a2643cfc6a97699e2cc390fb57a6b12c36c7285b7067521c96af3f93f7",
+      "uniforms": [
+        "uniform highp readonly  image2D inTexture;",
+        "uniform highp writeonly image2D outTexture;",
+        "uniform vec3 uBlackLevel;",
+        "uniform ivec2 uSize;"
+      ],
+      "bytes": 1106
+    },
+    {
+      "file": "resources/assets/shaders/local_contrast.glsl",
+      "sha256": "0858a37021eebd29a61a5826c9f2e8472dd24b5d0034499594d8b2b820fc4738",
+      "uniforms": [
+        "uniform ivec2 uSize;",
+        "uniform sampler2D uTexture;",
+        "uniform vec2 uTexelSize;",
+        "uniform float uTextureAmt;",
+        "uniform float uClarity;"
+      ],
+      "bytes": 4179
+    },
+    {
+      "file": "resources/assets/shaders/local_laplacian/downsample.glsl",
+      "sha256": "14b13e4988ed1c57c54fb0ee42d1e388dc97fb2cfb649e50f6288b4f7ce9b26c",
+      "uniforms": [
+        "uniform sampler2D InputBuffer;",
+        "uniform ivec2 inputSize;"
+      ],
+      "bytes": 1433
+    },
+    {
+      "file": "resources/assets/shaders/local_laplacian/reconstruct.glsl",
+      "sha256": "e684e6a7d194564193a0b6f83159114e2acafc1cd993c1150d7815f112005d9a",
+      "uniforms": [
+        "uniform sampler2D FineBuffer;",
+        "uniform sampler2D CoarseBuffer;",
+        "uniform sampler2D ReconstructedBuffer;",
+        "uniform ivec2 fineSize;",
+        "uniform ivec2 coarseSize;",
+        "uniform float sigma;",
+        "uniform float shadows;",
+        "uniform float highlights;",
+        "uniform float clarity;"
+      ],
+      "bytes": 6985
+    },
+    {
+      "file": "resources/assets/shaders/ltm/expose_bayer.glsl",
+      "sha256": "d67796eaa5daa41827bd0a28ee807f023f79f21e27dc6c069cc6791676b1e740",
+      "uniforms": [
+        "uniform 由 Java setVar 设置：\n//   strLow, strHigh — 低/高曝光增益\n//   useCurve        — 0/1: 启用 InterpolatedCurve+ShadowMap tone shaping\n//   inputSize       — bayer 尺寸（用于 GainMap uv 换算）\n\nuniform sampler2D InputBuffer;",
+        "uniform sampler2D GainMap;",
+        "uniform sampler2D InterpolatedCurve;",
+        "uniform sampler2D ShadowMap;",
+        "uniform ivec2 inputSize;",
+        "uniform vec3 neutral;",
+        "uniform float strLow;",
+        "uniform float strHigh;",
+        "uniform float upperLim;",
+        "uniform int useCurve;",
+        "uniform float target;",
+        "uniform float lapMin;",
+        "uniform 而上游走 setDefine —— 跟 strLow/strHigh/\n// useCurve 同款的既有偏离（避免每次拍摄重编 shader），不是抄漏。\n#define WEXPOSIGMA 0.2\n\n// Fragment output, written to framebuffer color attachment (RGBA16F)\nout vec4 result;"
+      ],
+      "bytes": 11401
+    },
+    {
+      "file": "resources/assets/shaders/ltm/fusion_bayer.glsl",
+      "sha256": "4d44d5a74a965e37600534517180812ce959f5b8e9d692cd52f4f3ea16f51369",
+      "uniforms": [
+        "uniform sampler2D normalExpo;",
+        "uniform sampler2D normalExpoDiff;",
+        "uniform sampler2D upsampled;",
+        "uniform int useUpsampled;",
+        "uniform int level;",
+        "uniform float blendMpy;",
+        "uniform float gauss;",
+        "uniform float target;",
+        "uniform vec2 upscaleIn;"
+      ],
+      "bytes": 8901
+    },
+    {
+      "file": "resources/assets/shaders/ltm/fusionmap.glsl",
+      "sha256": "3f803d54fb8746623cfd1afa8b163cdfa328555887a68ac15bd60ce4dfa0500e",
+      "uniforms": [
+        "uniform sampler2D InputBuffer;",
+        "uniform sampler2D BrBuffer;",
+        "uniform float factor;",
+        "uniform ivec2 outputSize;",
+        "uniform 等价（每次拍照都变所以 define 不方便）。\n//   作用：fusionmap 末尾 `clamp((a, b) / FUSIONGAIN, -1, 1)` 把回归系数除以 fusionGain 再 clamp。\n//   下游 initial.glsl 乘 FUSIONGAIN 抵消，净结果 = (a, b)（unclamped 范围 ~[-fusionGain, +fusionGain]）。\n//   ⚠️ 之前 hardcode FUSIONGAIN=1.0 导致 (a, b) 被严格 clamp 到 [-1, 1]，\nuniform float uFusionGain;",
+        "uniform highp image2D outImage;"
+      ],
+      "bytes": 5326
+    },
+    {
+      "file": "resources/assets/shaders/merge/alter_diff.glsl",
+      "sha256": "97a2f3072ebdce9b3044e6db4781e0069f080eb02b17f995b575ebfa20e882a8",
+      "uniforms": [
+        "uniform highp usampler2D inTexture;",
+        "uniform highp sampler2D alignmentTexture;",
+        "uniform highp readonly  image2D baseTexture;",
+        "uniform highp writeonly image2D outTexture;",
+        "uniform highp readonly  image2D alterTexture;",
+        "uniform float minLevel;",
+        "uniform float whiteLevel;",
+        "uniform vec4  blackLevel;",
+        "uniform float exposure;",
+        "uniform float exposureLow;",
+        "uniform bool  createDiff;",
+        "uniform float noiseS;",
+        "uniform float noiseO;",
+        "uniform ivec2 border;",
+        "uniform ivec2 shift;",
+        "uniform ivec2 alignmentSize;",
+        "uniform ivec2 rawHalf;",
+        "uniform vec4  analogBalance;",
+        "uniform 保留 declaration 兼容现有 Java setVarI 调用（merge 阶段 CFA-agnostic\n// 不再 shift。analogBalance 在 Java 端按 cfaPattern 重排顺序对应 native CFA quad layout，\n// CFA shift 移到 awb_normalize 末端做，详 CLAUDE.md 2026-05-24 trap entry 修正版）\nuniform int   cfaPattern;"
+      ],
+      "bytes": 7387
+    },
+    {
+      "file": "resources/assets/shaders/merge/avermix.glsl",
+      "sha256": "fe1fee506c3be39f79ebdc5df62b13bfe47c24a4bbade17eaf8ec668199d6d51",
+      "uniforms": [
+        "uniform highp image2D currentTexture;",
+        "uniform highp image2D newTexture;",
+        "uniform highp image2D outTexture;",
+        "uniform float weight;"
+      ],
+      "bytes": 1183
+    },
+    {
+      "file": "resources/assets/shaders/merge/bright_map.glsl",
+      "sha256": "867b43dd1bdd0ed488d3f8e49ecdb053e9502d2cde61c9b910cec2c5242f54d1",
+      "uniforms": [
+        "uniform highp readonly  image2D inTexture;",
+        "uniform highp writeonly image2D outTexture;"
+      ],
+      "bytes": 1657
+    },
+    {
+      "file": "resources/assets/shaders/merge/incremental_merge.glsl",
+      "sha256": "79cf26d43f145d9c8cf0b8f083058849e377ecb947549d1e2a560f518163436e",
+      "uniforms": [
+        "uniform highp usampler2D inTex;",
+        "uniform highp readonly  image2D inTexture;",
+        "uniform highp readonly  image2D diffTexture;",
+        "uniform highp writeonly image2D outTexture;",
+        "uniform highp readonly  image2D diffOrTexture;",
+        "uniform float weight;",
+        "uniform float exposure;",
+        "uniform float noiseS;",
+        "uniform float noiseO;",
+        "uniform float whiteLevel;",
+        "uniform vec4  blackLevel;",
+        "uniform vec4  analogBalance;",
+        "uniform 保留 declaration 兼容现有 Java setVarI 调用（merge 阶段 CFA-agnostic\n// 不再 shift）。详 merge0.glsl 同款注释 + CLAUDE.md 2026-05-24 trap entry 修正版。\nuniform int   cfaPattern;"
+      ],
+      "bytes": 7663
+    },
+    {
+      "file": "resources/assets/shaders/merge/noise_blend.glsl",
+      "sha256": "753c7a970d180296d339f83584058981e1854d906f256d07ea981d1804aa7091",
+      "uniforms": [
+        "uniform highp image2D currentTexture;",
+        "uniform highp image2D newTexture;",
+        "uniform highp image2D outTexture;",
+        "uniform float weight;",
+        "uniform ivec2 offset;",
+        "uniform int   firstPass;"
+      ],
+      "bytes": 1982
+    },
+    {
+      "file": "resources/assets/shaders/merge/noise_histogram.glsl",
+      "sha256": "777d66ba1c5c9a2b0f7877b2e2fbfdd63c4b9fcd18a5a9ce917f2cb23688a6ff",
+      "uniforms": [
+        "uniform highp sampler2D inTexture;",
+        "uniform ivec2 uSize;",
+        "uniform float uBrightnessScale;",
+        "uniform float uVarianceScale;",
+        "uniform int   uScale;",
+        "uniform float spatialKernel[9];"
+      ],
+      "bytes": 6259
+    },
+    {
+      "file": "resources/assets/shaders/merge/quad_unpack.glsl",
+      "sha256": "7a23dde838ceece5c6e46a35ab07b4ab55458c89f24d7a8c1abc1d02d91f6431",
+      "uniforms": [
+        "uniform highp sampler2D inTexture;",
+        "uniform highp sampler2D alignmentTexture;",
+        "uniform float whiteLevel;",
+        "uniform vec4 blackLevel;",
+        "uniform int yOffset;"
+      ],
+      "bytes": 2097
+    },
+    {
+      "file": "resources/assets/shaders/merge/quadbayer_phase_interleave.glsl",
+      "sha256": "864cd8c69840c13338e1eeb9db58b96920c2b2673665ec6915054c397730ab52",
+      "uniforms": [
+        "uniform highp readonly image2D inTexture;",
+        "uniform highp writeonly image2D outTexture;",
+        "uniform ivec2 uPhase;"
+      ],
+      "bytes": 989
+    },
+    {
+      "file": "resources/assets/shaders/merge/quadbayer_phase_split.glsl",
+      "sha256": "e971e3984fddaa679e60c1e7768d0a0c21ebcf4ea43fcf56db534c893d74148b",
+      "uniforms": [
+        "uniform highp usampler2D inTexture;",
+        "uniform ivec2 uPhase;"
+      ],
+      "bytes": 1571
+    },
+    {
+      "file": "resources/assets/shaders/merge/ref_pack.glsl",
+      "sha256": "df0334808ec171e83d0e34008ba47fb76b2dcc491cdc75284337456ca347ffee",
+      "uniforms": [
+        "uniform highp usampler2D inTexture;",
+        "uniform highp writeonly image2D outTexture;",
+        "uniform float whiteLevel;",
+        "uniform vec4  blackLevel;",
+        "uniform float exposure;",
+        "uniform bool  createDiff;",
+        "uniform float noiseS;",
+        "uniform float noiseO;",
+        "uniform ivec2 border;",
+        "uniform 保留 declaration 兼容现有 Java setVarI 调用（merge 阶段 CFA-agnostic\n// 不再 shift，CFA shift 移到 awb_normalize 末端做。\n// 详 CLAUDE.md trap entry「整图紫偏」2026-05-24 修正后版本）\nuniform int   cfaPattern;"
+      ],
+      "bytes": 3043
+    },
+    {
+      "file": "resources/assets/shaders/merge/wiener_level.glsl",
+      "sha256": "5bf8b2ba40416f20a40cd7c6bfd3e76bef896312f0edaa7bf9f426d55a99d170",
+      "uniforms": [
+        "uniform highp sampler2D brTexture;",
+        "uniform highp sampler2D baseTexture;",
+        "uniform highp readonly  image2D diffTexture;",
+        "uniform highp writeonly image2D outTexture;",
+        "uniform float minLevel;",
+        "uniform float noiseS;",
+        "uniform float noiseO;",
+        "uniform float integralNorm;",
+        "uniform int   first;",
+        "uniform int   cfaPattern;",
+        "uniform vec2  size;",
+        "uniform 保留是为了跟 reference 的接口一致。\n    if (first != 0) {\n    }\n\n    vec4 diffCenter = imageLoad(diffTexture, xy);"
+      ],
+      "bytes": 4283
+    },
+    {
+      "file": "resources/assets/shaders/preview_histogram.glsl",
+      "sha256": "bad180c86bdbe03cb5102fad348a80cc0ef6251cb1b44197e1507298f3d8fe55",
+      "uniforms": [
+        "uniform sampler2D inTexture;",
+        "uniform ivec2 uSize;",
+        "uniform vec4 exposure;"
+      ],
+      "bytes": 2572
+    },
+    {
+      "file": "resources/assets/shaders/preview_lut.frag",
+      "sha256": "cc30733cd24b6d096fc6cea0ac9769117b57c26ed2a5a6c5ff189870bb9bd6c1",
+      "uniforms": [
+        "uniform samplerExternalOES uCameraTex;",
+        "uniform sampler3D uLutTex;",
+        "uniform int uLutEnabled;",
+        "uniform float uLutIntensity;"
+      ],
+      "bytes": 1247
+    },
+    {
+      "file": "resources/assets/shaders/preview_lut.vert",
+      "sha256": "9d9b1c6285201dda8b22c6fb640e36f465e02f9d47520fdb2390047acf990cbe",
+      "uniforms": [
+        "uniform mat4 uTexMatrix;",
+        "uniform vec2 uCrop;"
+      ],
+      "bytes": 848
+    },
+    {
+      "file": "resources/assets/shaders/preview_saliency.glsl",
+      "sha256": "e0ab0f5963886741e650cb6c58e377ce8bc857760727871b55e4b3791cecdbf2",
+      "uniforms": [
+        "uniform sampler2D inTexture;",
+        "uniform ivec2 uSize;"
+      ],
+      "bytes": 5092
+    },
+    {
+      "file": "resources/assets/shaders/pyramid/gaussdown.glsl",
+      "sha256": "c96067be0f6075f10f177b0847a80e0b280d595d83dceeb36902dad8371c13c2",
+      "uniforms": [
+        "uniform sampler2D InputBuffer;",
+        "uniform ivec2 inputSize;",
+        "uniform ivec2 outputSize;",
+        "uniform float downscaleFactor;",
+        "uniform highp image2D outImage;"
+      ],
+      "bytes": 1969
+    },
+    {
+      "file": "resources/assets/shaders/pyramid/laplace.glsl",
+      "sha256": "9042a03b72957a3cc71b23fadce37b10a614b9d583b7acc6016bf77d1d51af18",
+      "uniforms": [
+        "uniform sampler2D target;",
+        "uniform sampler2D base;",
+        "uniform ivec2 outputSize;",
+        "uniform vec2  invOutputSize;",
+        "uniform highp image2D outImage;"
+      ],
+      "bytes": 1160
+    },
+    {
+      "file": "resources/assets/shaders/pyramid/upscale.glsl",
+      "sha256": "f5d3e678c040a876a4b454745e9b4cb1a72c303ee11f5e22537dbaea3c12b62e",
+      "uniforms": [
+        "uniform sampler2D InputBuffer;",
+        "uniform ivec2 outputSize;",
+        "uniform highp image2D outImage;"
+      ],
+      "bytes": 1009
+    },
+    {
+      "file": "resources/assets/shaders/region_mean.glsl",
+      "sha256": "24a5013c884fa68ae6add8ef356a65c4d57758c3459c61e9d9f7d3c942d45ff3",
+      "uniforms": [
+        "uniform sampler2D inTexture;",
+        "uniform ivec2 uSize;",
+        "uniform ivec4 uRect;",
+        "uniform ivec2 uDispatch;",
+        "uniform int uResize;"
+      ],
+      "bytes": 1469
+    },
+    {
+      "file": "resources/assets/shaders/sharpen.glsl",
+      "sha256": "471aaf5ce42f313181590917cdd97e36f501469a83635722e3d7dc4adfbd6eb1",
+      "uniforms": [
+        "uniform writeonly highp image2D outImage;",
+        "uniform ivec2 uSize;",
+        "uniform sampler2D uTexture;",
+        "uniform vec2 uTexelSize;",
+        "uniform float uStrength;",
+        "uniform float uRadius;",
+        "uniform float uDetail;",
+        "uniform float uMasking;"
+      ],
+      "bytes": 5242
+    },
+    {
+      "file": "resources/assets/shaders/sharpening/post_sharpen.glsl",
+      "sha256": "79a9cd8e8ba9401927ef44c642aebfd9b7307a05c1a03c948ade5e185276fa2d",
+      "uniforms": [
+        "uniform (单次编译).\n// ════════════════════════════════════════════════════════════════════════════\nprecision highp float;",
+        "uniform sampler2D InputBuffer;",
+        "uniform float size;",
+        "uniform float strength;",
+        "uniform ivec2 uInSize;",
+        "uniform float uSharpSize;",
+        "uniform float uSharpMin;",
+        "uniform float uSharpMax;",
+        "uniform float uNoiseS;",
+        "uniform float uNoiseO;",
+        "uniform float uIntense;"
+      ],
+      "bytes": 4432
+    },
+    {
+      "file": "resources/assets/shaders/tonecurve.glsl",
+      "sha256": "07bc7aa6519405cab791851fb3b7c5cd7daeb1ce61a771772c196b5c3368780d",
+      "uniforms": [
+        "uniform writeonly highp image2D outImage;",
+        "uniform ivec2 uSize;",
+        "uniform sampler2D uTexture;",
+        "uniform vec2 uTexelSize;",
+        "uniform float uBasePresetStrength;",
+        "uniform float uCurvePreset;",
+        "uniform float uCurveHighlights;",
+        "uniform float uCurveLights;",
+        "uniform float uCurveDarks;",
+        "uniform float uCurveShadows;",
+        "uniform float uCurveRed;",
+        "uniform float uCurveGreen;",
+        "uniform float uCurveBlue;"
+      ],
+      "bytes": 7672
+    },
+    {
+      "file": "resources/assets/shaders/tonemap.glsl",
+      "sha256": "d5130415c10b6be9a45f41c115147250b1174285e744e7725557b9af942bd281",
+      "uniforms": [
+        "uniform writeonly highp image2D outImage;",
+        "uniform ivec2 uSize;",
+        "uniform sampler2D uTexture;",
+        "uniform vec2 uTexelSize;",
+        "uniform float uContrast;",
+        "uniform float uExposure;",
+        "uniform float uHighlights;",
+        "uniform float uShadows;",
+        "uniform float uWhites;",
+        "uniform float uBlacks;",
+        "uniform vec3 uColorBalance;",
+        "uniform float uTemp;",
+        "uniform float uTint;",
+        "uniform float uVibrance;",
+        "uniform float uSaturation;",
+        "uniform across all pixels) ──\n    // 2026-05-25 feature add: LR Saturation slider 字节级算法等价 (luminance-mix)\n    // Pref.getSaturation() ∈ [-0.5, +0.5] → uSaturation 同款 range\n    // uSaturation = 0 → identity (mix factor 1.0)\n    // uSaturation = +0.5 → mix factor 1.5 → extrapolate beyond color → +50% saturation\n    // uSaturation = -0.5 → mix factor 0.5 → halfway lum/color → -50% saturation (toward gray)\n    // 跟 LR Saturation slider 算法字节级等价 (LR 用同款 luminance-mix 公式)。\n    // 注：Bright/Dark Sat (initial.glsl) 是 brightness-axis 加权;"
+      ],
+      "bytes": 5379
+    }
+  ],
+  "java_decompilation_failures": [
+    {
+      "file": "sources/com/agc/gcam/app/CameraActivity.java",
+      "unsupported_methods": 7,
+      "skipped_dumps": 6
+    },
+    {
+      "file": "sources/com/agc/gcam/camera/b.java",
+      "unsupported_methods": 8,
+      "skipped_dumps": 5
+    },
+    {
+      "file": "sources/com/agc/gcam/ui/AdjustmentsBottomSheet.java",
+      "unsupported_methods": 1,
+      "skipped_dumps": 0
+    },
+    {
+      "file": "sources/com/agc/gcam/ui/SettingsBottomSheet.java",
+      "unsupported_methods": 2,
+      "skipped_dumps": 2
+    },
+    {
+      "file": "sources/com/agc/gcam/ui/ZoomControlView.java",
+      "unsupported_methods": 2,
+      "skipped_dumps": 2
+    },
+    {
+      "file": "sources/com/agc/gcam/processing/gl/PostProcessPipeline.java",
+      "unsupported_methods": 5,
+      "skipped_dumps": 5
+    },
+    {
+      "file": "sources/com/agc/gcam/ui/composition/CompositionGuideView.java",
+      "unsupported_methods": 2,
+      "skipped_dumps": 1
+    },
+    {
+      "file": "sources/com/agc/gcam/ui/evcomp/EvCompView.java",
+      "unsupported_methods": 1,
+      "skipped_dumps": 1
+    }
+  ]
+}

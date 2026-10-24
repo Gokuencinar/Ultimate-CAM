@@ -17,7 +17,7 @@ struct CubeLUT: Codable, Equatable {
         }
         for i in 0..<3 {
             guard domainMin[i].isFinite, domainMax[i].isFinite,
-                  domainMax[i] - domainMin[i] > 0.00001 else { throw CameraFailure.message("Dominio LUT no válido.") }
+                  (domainMax[i] - domainMin[i]).isFinite, domainMax[i] - domainMin[i] > 0.00001 else { throw CameraFailure.message("Dominio LUT no válido.") }
         }
         // Do not bind potentially unaligned Data to Float.
         for index in stride(from: 0, to: rgba.count, by: 4) {
@@ -79,14 +79,22 @@ struct CubeLUT: Codable, Equatable {
         var output = [Float](); output.reserveCapacity(values.count)
         for b in 0..<n { for g in 0..<n { for r in 0..<n {
             let channels = [r,g,b]
-            let coord = (0..<3).map { c in min(Float(n-1), max(0, (Float(channels[c])/Float(n-1)-domainMin[c])/(domainMax[c]-domainMin[c])*Float(n-1))) }
+            var coord = [Float]()
+            for channel in 0..<3 {
+                let input = Float(channels[channel]) / Float(n - 1)
+                let position = (input - domainMin[channel]) / (domainMax[channel] - domainMin[channel])
+                coord.append(min(Float(n - 1), max(0, position * Float(n - 1))))
+            }
             let low = coord.map { Int(floor($0)) }, high = coord.map { min(n-1, Int(ceil($0))) }
             let t = (0..<3).map { coord[$0] - Float(low[$0]) }
             for c in 0..<3 {
                 var value: Float = 0
                 for z in 0...1 { for y in 0...1 { for x in 0...1 {
                     let ix = x == 0 ? low[0] : high[0], iy = y == 0 ? low[1] : high[1], iz = z == 0 ? low[2] : high[2]
-                    value += values[((iz*n+iy)*n+ix)*4+c] * (x == 0 ? 1-t[0] : t[0]) * (y == 0 ? 1-t[1] : t[1]) * (z == 0 ? 1-t[2] : t[2])
+                    let weightX = x == 0 ? 1 - t[0] : t[0]
+                    let weightY = y == 0 ? 1 - t[1] : t[1]
+                    let weightZ = z == 0 ? 1 - t[2] : t[2]
+                    value += values[((iz * n + iy) * n + ix) * 4 + c] * weightX * weightY * weightZ
                 } } }
                 output.append(value)
             }
@@ -97,6 +105,7 @@ struct CubeLUT: Codable, Equatable {
 
     func apply(to image: CIImage, intensity: Double) throws -> CIImage {
         _ = try validated()
+        guard intensity.isFinite, (0...1).contains(intensity) else { throw CameraFailure.message("Intensidad LUT no válida.") }
         // Resample DOMAIN in the cube's RGB coordinates, never in CI's linear
         // working image. Standard 0..1 cubes avoid this additional allocation.
         let table = resampledData()

@@ -690,7 +690,7 @@ final class CameraModel: NSObject, ObservableObject, AVCapturePhotoCaptureDelega
                         return result
                     } catch {
                         guard let first = captured.first else { throw error }
-                        CaptureTrace.record("night.processing.fallback", ["error": error.localizedDescription])
+                        CaptureTrace.record("capture.processing.fallback", ["error": error.localizedDescription])
                         return CaptureResult(jpeg: first, reference: first,
                             details: "Procesado no aplicado: se conserva la referencia. " + error.localizedDescription,
                             mergedFrames: 1, raw: rawBurst?.first ?? raw, source: "reference-fallback", statistics: ImageStatistics.measure(first))

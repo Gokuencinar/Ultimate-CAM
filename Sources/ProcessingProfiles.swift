@@ -91,6 +91,7 @@ final class ProcessingProfiles: ObservableObject {
     }
 
     func save(name: String, options: ProcessingOptions) throws {
+        guard !loadFailed else { throw CameraFailure.message("El archivo de perfiles no pudo leerse; se conserva sin sobrescribir.") }
         let name = name.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !name.isEmpty, name.count <= 60, archive.profiles.count < 24 else {
             throw CameraFailure.message("Escribe un nombre de hasta 60 caracteres; máximo 24 perfiles.")

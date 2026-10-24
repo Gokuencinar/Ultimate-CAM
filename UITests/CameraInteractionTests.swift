@@ -29,6 +29,20 @@ final class CameraInteractionTests: XCTestCase {
         app.buttons["Listo"].tap()
         XCTAssertTrue(app.staticTexts["Noche estática · JPEG"].waitForExistence(timeout: 3))
         XCTAssertTrue(app.buttons["camera.shutter"].exists)
+        app.buttons["camera.settings"].tap()
+        let tabs = app.scrollViews["settings.tabs"]
+        tabs.swipeLeft()
+        let profiles = app.buttons["settings.tab.Perfiles"]
+        XCTAssertTrue(profiles.waitForExistence(timeout: 3))
+        profiles.tap()
+        let name = app.textFields["profile.name"]
+        XCTAssertTrue(name.waitForExistence(timeout: 3))
+        name.tap(); name.typeText("UI test profile")
+        app.buttons["Guardar perfil actual"].tap()
+        XCTAssertTrue(app.buttons["UI test profile"].waitForExistence(timeout: 3))
+        app.buttons["UI test profile"].tap()
+        app.buttons["Listo"].tap()
+        XCTAssertTrue(app.staticTexts["Noche estática · JPEG"].waitForExistence(timeout: 3))
         let image = XCTAttachment(screenshot: app.screenshot())
         image.lifetime = .keepAlways
         add(image)

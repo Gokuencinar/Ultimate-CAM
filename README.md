@@ -4,11 +4,17 @@ Primer prototipo de cámara propia para el iPhone 11 Pro con iOS 18.7.1. Nombre 
 
 El objetivo es combinar captura nocturna por acumulación, como concepto de Lumi, con técnicas de fotografía computacional descritas por Google. Este proyecto contiene una primera pila de imágenes; no contiene Lumi, GCam ni sus modelos o bibliotecas.
 
+## Candidato 0.5: análisis de AGC y nuevas herramientas
+
+La versión candidata adapta controles observados en el APK AGC 1.8.6 mediante código propio de Core Image/Vision. Añade cinco paneles, recetas por lente, perfiles JSON con LUT opcional, importación `.cube`, ruido cromático, detalle fino/contraste local, exposición y color del JPEG, calidad/P3/recorte, guías e histograma del resultado. Incluye alineación local y rechazo adaptativo experimentales, desactivados por defecto, y un punto de partida “Estático avanzado”.
+
+La [matriz de portabilidad](docs/AGC-PORTABILIDAD.md) identifica qué se adapta, qué ya existía y qué queda pendiente: no es un port completo ni el motor de Google. No se incorporan bibliotecas, shaders, modelos ni recursos del APK al producto. El APK original y los archivos descompilados permanecen como material de análisis local. Las pruebas del iPhone y la instalación de 0.5 quedan aplazadas por petición del usuario; los resultados de build43 que siguen son históricos.
+
 ## Noche estática experimental (0.4)
 
 El selector **NOCHE** y el perfil **Noche estática** sustituyen al antiguo perfil Luz baja. El modo mide la exposición automática y distribuye el presupuesto entre 3 y 16 capturas consecutivas: hasta 1 segundo por exposición y un presupuesto de hasta 8 segundos de integración solicitada. El tiempo total incluye entrega del sensor, revelado y fusión y puede ser bastante mayor. Se necesita una escena inmóvil y el teléfono apoyado; no mide movimiento ni prolonga la exposición más allá de lo permitido por el formato.
 
-Por defecto fusiona JPEG de cámara para conservar el color del procesado de iOS. En las lentes con Bayer RAW se puede activar **Fusionar DNG** en Procesado: revela DNG mediante CIRAWFilter y los fusiona en RGB lineal, usando los JPEG para elegir la referencia. Esta ruta es experimental, más lenta y todavía necesita calibración de color y ruido en sombras profundas. Guarda el DNG original de la referencia, no un RAW fusionado. El mapeo tonal se aplica después de la acumulación: levanta sombras con ganancia limitada, conserva luces expuestas y comprime solo el extremo superior. No es horquillado HDR. Hay rechazo conservador de movimiento y alineación por traslación, sin alineación local ni rotación.
+Por defecto fusiona JPEG de cámara para conservar el color del procesado de iOS. En las lentes con Bayer RAW se puede activar **Fusionar DNG** en Procesado: revela DNG mediante CIRAWFilter y los fusiona en RGB lineal, usando los JPEG para elegir la referencia. Esta ruta es experimental, más lenta y todavía necesita calibración de color y ruido en sombras profundas. Guarda el DNG original de la referencia, no un RAW fusionado. El mapeo tonal se aplica después de la acumulación: levanta sombras con ganancia limitada, conserva luces expuestas y comprime solo el extremo superior. No es horquillado HDR. En 0.4 hay rechazo conservador de movimiento y alineación por traslación, sin alineación local ni rotación. El candidato 0.5 añade la malla residual opcional descrita arriba.
 
 La primera prueba física de build30 completó 8 exposiciones RAW de 0,5 s nominales a ISO400, fusionó 8/8 y generó un JPEG de 3008 × 3952. Tardó 28,45 s según el cliente de diagnóstico. La inspección visual detectó dominante magenta y ruido de color; también quedó alterada la cadencia del visor al volver a automático. Es evidencia de captura/fusión, no de calidad equivalente a Night Sight ni al modo Noche de Apple. Build37 confirmó la restauración de los límites de fotograma y de la exposición a 1/15 s; enfoque posterior, Foto y Pila 3 terminaron correctamente. La fusión DNG todavía tardó 27,73 s en total (21,02 s de procesado), con dominante de color. Se mantiene como opción experimental y no como ruta predeterminada.
 
@@ -46,7 +52,7 @@ Repositorio: [Gokuencinar/Ultimate-CAM](https://github.com/Gokuencinar/Ultimate-
 
 ## Interfaz
 
-Interfaz propia con visor a pantalla completa, controles superpuestos y botones grandes sobre degradados oscuros, retícula AF/AE, bloqueo por pulsación larga, formato/temporizador/cuadrícula rápidos y exposición visible. El zoom admite pellizco. Los ajustes se dividen en Captura, Manual y Procesado; la revisión mantiene Guardar siempre accesible y ofrece JPEG como alternativa al RAW. Conserva la referencia visual inicial de 26CAM sin incorporar su código o binarios.
+Interfaz propia con visor a pantalla completa, controles superpuestos y botones grandes sobre degradados oscuros, retícula AF/AE, bloqueo por pulsación larga, formato/temporizador/cuadrícula rápidos y exposición visible. El zoom admite pellizco. Los ajustes del candidato se dividen en Captura, Manual, Procesado, Color y Perfiles; la revisión mantiene Guardar siempre accesible y ofrece JPEG como alternativa al RAW. Conserva la referencia visual inicial de 26CAM sin incorporar su código o binarios.
 
 Los perfiles Natural y Detalle ajustan los controles de procesado existentes. Noche estática activa el modo nocturno descrito arriba; el antiguo perfil Luz baja, basado en siete JPEG y sombras, se ha retirado. Los atajos Cerca/Lejos cambian posiciones normalizadas de la lente, sin prometer distancias calibradas. Los controles se limitan a las capacidades de cada cámara.
 
@@ -70,7 +76,7 @@ Los perfiles Natural y Detalle ajustan los controles de procesado existentes. No
 
 ## Límites de esta primera versión
 
-PILA y NOCHE usan JPEG de cámara por defecto; NOCHE permite activar la ruta DNG experimental cuando la cámara la expone. Son capturas consecutivas, no una ráfaga de alta velocidad. Promediar imágenes no reproduce el procesamiento de Google. Solo se alinea por traslación: no rotación, paralaje ni flujo óptico. El rechazo por diferencias puede confundir ruido, iluminación y movimiento; todavía pueden aparecer artefactos. Se recomienda una escena inmóvil y trípode.
+PILA y NOCHE usan JPEG de cámara por defecto; NOCHE permite activar la ruta DNG experimental cuando la cámara la expone. Son capturas consecutivas, no una ráfaga de alta velocidad. Promediar imágenes no reproduce el procesamiento de Google. La ruta predeterminada alinea por traslación. La malla local opcional de 0.5 no es flujo óptico denso ni garantiza corregir rotación/paralaje. El rechazo por diferencias puede confundir ruido, iluminación y movimiento; todavía pueden aparecer artefactos. Se recomienda una escena inmóvil y trípode.
 
 No excede las exposiciones admitidas por la lente ni añade luz que el sensor no haya registrado. No incluye horquillado HDR, modelos neuronales de Google, superresolución, astrofotografía, retrato o Live Photos. La entrega de RAW+JPEG y su guardado por PhotoKit se comprobaron en la cámara principal; RAW en teleobjetivo y revisión visual del DNG siguen pendientes. Ultra gran angular y frontal no exponen RAW en este dispositivo. El resultado fusionado no copia los metadatos EXIF de exposición de la referencia porque describirían solo una parte de la pila.
 

@@ -55,6 +55,16 @@ import Darwin
             try check(try difference(lut.apply(to: image, intensity: 1), image) < 0.02, "Identity LUT changes color: \(n)")
             try check(try difference(lut.apply(to: image, intensity: 0), image) < 0.0001, "Zero LUT intensity changes image")
         }
+        let identity = try cube(2)
+        var swappedValues = [Float]()
+        for b in 0..<2 { for g in 0..<2 { for r in 0..<2 { swappedValues.append(contentsOf: [Float(b), Float(g), Float(r), 1]) } } }
+        let swap = CubeLUT(title: "Swap", dimension: 2, rgba: swappedValues.withUnsafeBufferPointer { Data(buffer: $0) }, domainMin: [0,0,0], domainMax: [1,1,1])
+        let red = CIImage(color: CIColor(red: 1,green:0,blue:0)).cropped(to:image.extent)
+        let blue = CIImage(color: CIColor(red:0,green:0,blue:1)).cropped(to:image.extent)
+        try check(try difference(swap.apply(to:red,intensity:1),blue) < 0.01, "LUT RGB indexing is reversed")
+        var broken = identity.rgba
+        broken.replaceSubrange(0..<4, with: withUnsafeBytes(of: Float.nan) { Data($0) })
+        try rejects({ _ = try CubeLUT(title:"Bad",dimension:2,rgba:broken,domainMin:[0,0,0],domainMax:[1,1,1]).validated() }, "Nonfinite LUT samples")
         let remapped = try cube(3, domain: "DOMAIN_MIN 0 0 0\nDOMAIN_MAX 2 2 2\n")
         let table = remapped.resampledData()
         let lastR = table.withUnsafeBytes { $0.loadUnaligned(fromByteOffset: table.count-16, as: Float.self) }
@@ -105,6 +115,13 @@ import Darwin
         try check(try ProfileDocumentData.decode(document).options == tuned, "Profile JSON round trip failed")
         try rejects({ _ = try ProfileDocumentData.decode(Data("{\"format\":\"Android\",\"version\":1,\"name\":\"x\",\"options\":{}}".utf8)) }, "Foreign profile schema")
         try rejects({ try profiles.save(name:"   ",options:base) }, "Empty profile name")
+        let corrupt = dir.appendingPathComponent("corrupt.json")
+        try Data("not JSON".utf8).write(to:corrupt)
+        let unreadable = ProcessingProfiles(file:corrupt)
+        unreadable.remember(base,lens:"wide")
+        try rejects({ try unreadable.save(name:"Do not overwrite",options:base) }, "Saving over corrupt archive")
+        Thread.sleep(forTimeInterval:0.5)
+        try check(try Data(contentsOf:corrupt) == Data("not JSON".utf8), "Corrupt profile archive was overwritten")
         try check(try BurstProcessor().process([png]).jpeg == png, "Untouched single-photo passthrough changed")
         print("Validated recipes, LUTs/domains, rendering kernels, residual mesh, adaptive rejection, crop/P3, histogram, profile persistence and legacy passthrough.")
     }
