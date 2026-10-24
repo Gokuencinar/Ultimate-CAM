@@ -1,5 +1,7 @@
 # Ultimate CAM
 
+La etapa [0.8 añade el complemento de Noche nativa](docs/NOCHE-NATIVA-0.8.md): en el iPhone 11 Pro con build 22H31 se confirmó la selección real de Noche máximo y la restauración al ajuste anterior, sin tomar fotos. La app build61 y el complemento build2 están instalados. La calidad fotográfica y el recorrido completo entre ambas apps siguen pendientes; el detalle anterior de versiones se conserva como historial.
+
 Cámara experimental independiente para el iPhone 11 Pro con iOS 18.7.1, distribuida como paquete `.deb` rootless. Nombre elegido por el usuario.
 
 El objetivo es combinar captura nocturna por acumulación, como concepto de Lumi, con técnicas de fotografía computacional descritas por Google. Este proyecto contiene una primera pila de imágenes; no contiene Lumi, GCam ni sus modelos o bibliotecas.
