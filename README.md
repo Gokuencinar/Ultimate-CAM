@@ -4,7 +4,19 @@ Cámara experimental independiente para el iPhone 11 Pro con iOS 18.7.1, distrib
 
 El objetivo es combinar captura nocturna por acumulación, como concepto de Lumi, con técnicas de fotografía computacional descritas por Google. Este proyecto contiene una primera pila de imágenes; no contiene Lumi, GCam ni sus modelos o bibliotecas.
 
-## Versión 0.6 / build54: instalada sin prueba funcional
+## Versión 0.7 / build58: calidad iOS y fusión nocturna ponderada
+
+La [etapa 0.7](docs/NOCHE-Y-PORT-0.7.md) añade prioridad de **Calidad iOS** para fotos individuales automáticas, fusión nocturna con pesos por píxel y controles de presupuesto/obturación. Permite importar una foto elegida en Fotos, incluida una tomada con el modo Noche de Cámara de Apple, y aplicar las recetas JPEG sin una nueva captura. Un JPEG sin ajustes se conserva sin recodificar; HEIF convertido o edición producen JPEG SDR. No se integra el motor privado del modo Noche ni se garantiza que `.quality` seleccione un algoritmo concreto.
+
+Build58 (`0.7.0+build.58.git.20cff29`, código `20cff29ce18d80973081112f6fc9d7d555aba970`) pasó [compilación y fixtures sintéticos](https://github.com/Gokuencinar/Ultimate-CAM/actions/runs/40104496103): política de calidad, fusión ponderada, presupuestos, importación/orientación, persistencia y regresiones anteriores. La prueba nocturna sintética redujo su RMSE de 10,2703 a 6,23894 frente a la referencia limpia; no es una medida de calidad óptica del iPhone ni una comparación con GCam.
+
+La [prueba de interfaz](https://github.com/Gokuencinar/Ultimate-CAM/actions/runs/40103731851), fuente `d6b6be54799a23be5de4eae8a705b84388fb0eab`, pasó un caso compuesto sin fallos en 97,259 s, incluido el preset iOS y el menú de importación. Después cambiaron el texto sobre SDR, la transferencia acotada de archivos, el mensaje de cancelación y la reutilización de búferes. Esa prueba no importó una imagen a través del proveedor de Fotos; ese recorrido sigue pendiente en el iPhone.
+
+El paquete build58 se instaló mediante jb-p1lot después de revisar y cerrar una instancia abierta de build54, sin solicitudes de captura o guardado en su registro. SHA-256 del DEB: `f228c387322325adc633435acf1d7295a35e7775286444d594d833fdec8162d9`. Hash del ejecutable y `dpkg --verify` correctos; firma con el único entitlement anterior de contenedor propio. No se abrió la nueva versión, no se enviaron capturas y no hubo respring.
+
+La [ficha del desarrollador de la referencia `com.agc.gcam`](https://play.google.com/store/apps/details?id=com.agc.gcam) la describe como una app independiente inspirada en HDR+, no afiliada a Google. La firma del APK entregado no se ha autenticado. Adaptar esa app no acredita portar el motor oficial de Google Camera. El objetivo global sigue sin completarse: faltan familias de procesamiento, modelos y modos, calibración y pruebas comparables de calidad. Los apartados que siguen son históricos.
+
+## Versión 0.6 / build54: instalación histórica
 
 La [segunda etapa](docs/AGC-PORTABILIDAD-0.6.md) añade horquillado HDR experimental, HSL de ocho bandas, curvas RGB, gradación por zonas y efectos. Reorganiza los controles según los layouts del APK y su paleta Material3 de respaldo. Son implementaciones propias y la salida HDR sigue siendo un JPEG SDR. No se presenta como el motor HDR+ de Google ni como un port completo.
 
