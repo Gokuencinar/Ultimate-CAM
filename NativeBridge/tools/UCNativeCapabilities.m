@@ -49,7 +49,34 @@ static NSDictionary *Code(NSString *className, NSString *selector) {
     kern_return_t status = vm_read_overwrite(mach_task_self(),(vm_address_t)address,1024,(vm_address_t)data.mutableBytes,&read);
     data.length = status == KERN_SUCCESS ? (NSUInteger)read : 0;
     Dl_info image = {0}; dladdr(address,&image);
-    return @{@"class":className,@"selector":selector,@"present":@YES,
+    NSMutableArray *calls = [NSMutableArray array];
+    const uint32_t *words = data.bytes;
+    for (NSUInteger i = 0; i < data.length/4; ++i) {
+        uint32_t instruction = words[i];
+        if ((instruction & 0xfc000000u) != 0x94000000u) continue;
+        int64_t displacement = (int64_t)(int32_t)(instruction << 6) >> 4;
+        uintptr_t target = (uintptr_t)address + i*4 + displacement;
+        uint32_t stub[8] = {0}; vm_size_t stubRead = 0;
+        if (vm_read_overwrite(mach_task_self(),target,sizeof(stub),(vm_address_t)stub,&stubRead) != KERN_SUCCESS) continue;
+        NSString *selectorName = @"";
+        for (unsigned j = 0; j+1 < stubRead/4; ++j) {
+            if ((stub[j] & 0x9f00001fu) != 0x90000001u) continue;
+            uint32_t load = stub[j+1];
+            if ((load & 0xffc003ffu) != 0xf9400021u) continue;
+            int64_t pages = (((stub[j] >> 5) & 0x7ffff) << 2) | ((stub[j] >> 29) & 3);
+            if (pages & (1 << 20)) pages -= 1 << 21;
+            uintptr_t slot = ((target+j*4) & ~(uintptr_t)0xfff) + pages*4096 + ((load >> 10) & 0xfff)*8;
+            uintptr_t stringAddress = 0; vm_size_t readPointer = 0;
+            if (vm_read_overwrite(mach_task_self(),slot,sizeof(stringAddress),(vm_address_t)&stringAddress,&readPointer) != KERN_SUCCESS) continue;
+            char text[256] = {0}; vm_size_t textRead = 0;
+            if (vm_read_overwrite(mach_task_self(),stringAddress,sizeof(text)-1,(vm_address_t)text,&textRead) != KERN_SUCCESS) continue;
+            selectorName = [NSString stringWithUTF8String:text] ?: @"";
+            break;
+        }
+        Dl_info targetInfo = {0}; dladdr((void *)target,&targetInfo);
+        [calls addObject:@{@"offset":@(i*4),@"target":@(target),@"symbol":targetInfo.dli_sname ? @(targetInfo.dli_sname) : @"",@"selector":selectorName}];
+    }
+    return @{@"class":className,@"selector":selector,@"present":@YES,@"calls":calls,
              @"encoding":@(method_getTypeEncoding(method)),@"address":@((uintptr_t)address),
              @"image_base":@((uintptr_t)image.dli_fbase),@"bytes_base64":[data base64EncodedStringWithOptions:0],@"read_status":@(status)};
 }
@@ -84,7 +111,7 @@ int main(void) {
             [classes addObject:Inspect(name)];
         }
         NSMutableArray *code = [NSMutableArray array];
-        for (NSString *selector in @[@"_handleUserChangedToNightMode:",@"_handleNightModeIndicator",@"_lowLightModeForMode:captureMode:device:isBurst:",@"_resolvedLowLightMode",@"_desiredLowLightControlMode",@"viewDidAppear:"]) {
+        for (NSString *selector in @[@"_handleUserChangedToNightMode:",@"_handleNightModeIndicator",@"_isExpectedLowLightDurationCancelable",@"_lowLightModeForMode:captureMode:device:isBurst:",@"_resolvedLowLightMode",@"_desiredLowLightControlMode",@"viewDidAppear:"]) {
             [code addObject:Code(@"CAMViewfinderViewController",selector)];
         }
         [code addObject:Code(@"CAMStillImageCaptureRequest",@"_configurePhotoSettings:shouldIgnoreInitiationSettingsProperties:context:")];

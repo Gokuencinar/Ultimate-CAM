@@ -1,0 +1,585 @@
+{
+  "schema": 1,
+  "hardware": "iPhone12,3",
+  "system_build": "22H31",
+  "loads": [
+    {
+      "error": "",
+      "loaded": 1,
+      "path": "/System/Library/Frameworks/AVFoundation.framework/AVFoundation"
+    },
+    {
+      "error": "",
+      "loaded": 1,
+      "path": "/System/Library/PrivateFrameworks/CameraUI.framework/CameraUI"
+    }
+  ],
+  "camera_objects_instantiated": 0,
+  "private_selectors_invoked": 0,
+  "capture_requests": 0,
+  "classes": [
+    {
+      "class": "AVCapturePhotoSettings",
+      "present": true,
+      "image": "/System/Library/PrivateFrameworks/AVFCapture.framework/AVFCapture",
+      "instance_methods": [],
+      "properties": []
+    },
+    {
+      "class": "AVCaptureResolvedPhotoSettings",
+      "present": true,
+      "image": "/System/Library/PrivateFrameworks/AVFCapture.framework/AVFCapture",
+      "instance_methods": [],
+      "properties": []
+    },
+    {
+      "class": "AVCapturePhotoOutput",
+      "present": true,
+      "image": "/System/Library/PrivateFrameworks/AVFCapture.framework/AVFCapture",
+      "instance_methods": [],
+      "properties": []
+    },
+    {
+      "class": "AVCaptureDevice",
+      "present": true,
+      "image": "/System/Library/PrivateFrameworks/AVFCapture.framework/AVFCapture",
+      "instance_methods": [
+        {
+          "arguments": 3,
+          "encoding": "v20@0:8B16",
+          "selector": "setLowLightVideoCaptureEnabled:"
+        },
+        {
+          "arguments": 2,
+          "encoding": "B16@0:8",
+          "selector": "isLowLightVideoCaptureEnabled"
+        },
+        {
+          "arguments": 2,
+          "encoding": "B16@0:8",
+          "selector": "automaticallyEnablesLowLightBoostWhenAvailable"
+        },
+        {
+          "arguments": 2,
+          "encoding": "B16@0:8",
+          "selector": "isLowLightBoostEnabled"
+        },
+        {
+          "arguments": 2,
+          "encoding": "B16@0:8",
+          "selector": "isLowLightBoostSupported"
+        },
+        {
+          "arguments": 3,
+          "encoding": "v20@0:8B16",
+          "selector": "setAutomaticallyEnablesLowLightBoostWhenAvailable:"
+        }
+      ],
+      "properties": []
+    },
+    {
+      "class": "CAMCaptureCapabilities",
+      "present": true,
+      "image": "/System/Library/PrivateFrameworks/CameraUI.framework/CameraUI",
+      "instance_methods": [
+        {
+          "arguments": 2,
+          "encoding": "B16@0:8",
+          "selector": "isFrontLowLightSupported"
+        },
+        {
+          "arguments": 5,
+          "encoding": "B40@0:8q16q24q32",
+          "selector": "isAutoLowLightVideoSupportedForMode:videoConfiguration:videoEncodingBehavior:"
+        },
+        {
+          "arguments": 6,
+          "encoding": "Q40@0:8q16B24B28d32",
+          "selector": "lowLightPreviewOverlayStyleForDevicePosition:sensitiveToChangingDisplayFeedback:sensitiveToInitialFeedback:duration:"
+        },
+        {
+          "arguments": 2,
+          "encoding": "B16@0:8",
+          "selector": "isLowLightSupported"
+        },
+        {
+          "arguments": 2,
+          "encoding": "B16@0:8",
+          "selector": "_backSuperWideTeleNightModeSupported"
+        },
+        {
+          "arguments": 2,
+          "encoding": "Q16@0:8",
+          "selector": "backLowLightPreviewOverlayStyle"
+        },
+        {
+          "arguments": 2,
+          "encoding": "B16@0:8",
+          "selector": "_wideDualPortraitLowLightSupported"
+        },
+        {
+          "arguments": 4,
+          "encoding": "B32@0:8q16q24",
+          "selector": "isNightModeWithDepthSupportedForMode:device:"
+        },
+        {
+          "arguments": 2,
+          "encoding": "B16@0:8",
+          "selector": "isBackLowLightSupported"
+        },
+        {
+          "arguments": 2,
+          "encoding": "B16@0:8",
+          "selector": "isAutoLowLightVideoSupported"
+        },
+        {
+          "arguments": 5,
+          "encoding": "B40@0:8q16q24d32",
+          "selector": "isLowLightSupportedForMode:device:zoomFactor:"
+        },
+        {
+          "arguments": 4,
+          "encoding": "B32@0:8q16q24",
+          "selector": "isLowLightSupportedForMode:device:"
+        },
+        {
+          "arguments": 2,
+          "encoding": "Q16@0:8",
+          "selector": "frontLowLightPreviewOverlayStyle"
+        },
+        {
+          "arguments": 2,
+          "encoding": "B16@0:8",
+          "selector": "_backPhotoModeNightModeDepthSupported"
+        }
+      ],
+      "properties": [
+        {
+          "attributes": "TB,R,N,V__wideDualPortraitLowLightSupported",
+          "name": "_wideDualPortraitLowLightSupported"
+        },
+        {
+          "attributes": "TB,R,N,V__backPhotoModeNightModeDepthSupported",
+          "name": "_backPhotoModeNightModeDepthSupported"
+        },
+        {
+          "attributes": "TB,R,N,V__backSuperWideTeleNightModeSupported",
+          "name": "_backSuperWideTeleNightModeSupported"
+        },
+        {
+          "attributes": "TB,R,N,GisAutoLowLightVideoSupported,V_autoLowLightVideoSupported",
+          "name": "autoLowLightVideoSupported"
+        },
+        {
+          "attributes": "TB,R,N,GisLowLightSupported",
+          "name": "lowLightSupported"
+        },
+        {
+          "attributes": "TB,R,N,GisBackLowLightSupported,V_backLowLightSupported",
+          "name": "backLowLightSupported"
+        },
+        {
+          "attributes": "TB,R,N,GisFrontLowLightSupported,V_frontLowLightSupported",
+          "name": "frontLowLightSupported"
+        },
+        {
+          "attributes": "TQ,R,N,V_backLowLightPreviewOverlayStyle",
+          "name": "backLowLightPreviewOverlayStyle"
+        },
+        {
+          "attributes": "TQ,R,N,V_frontLowLightPreviewOverlayStyle",
+          "name": "frontLowLightPreviewOverlayStyle"
+        }
+      ]
+    },
+    {
+      "class": "CAMCaptureController",
+      "present": false
+    },
+    {
+      "class": "CAMCaptureEngine",
+      "present": true,
+      "image": "/System/Library/PrivateFrameworks/CameraUI.framework/CameraUI",
+      "instance_methods": [],
+      "properties": []
+    },
+    {
+      "class": "CAMViewfinderViewController",
+      "present": true,
+      "image": "/System/Library/PrivateFrameworks/CameraUI.framework/CameraUI",
+      "instance_methods": [
+        {
+          "arguments": 2,
+          "encoding": "v16@0:8",
+          "selector": "_handleNightModeIndicator"
+        },
+        {
+          "arguments": 2,
+          "encoding": "Q16@0:8",
+          "selector": "_lowLightConflicts"
+        },
+        {
+          "arguments": 5,
+          "encoding": "B40@0:8q16q24d32",
+          "selector": "_isNightModePortraitAvailableForMode:device:zoomFactor:"
+        },
+        {
+          "arguments": 3,
+          "encoding": "v24@0:8Q16",
+          "selector": "_setDesiredLowLightControlMode:"
+        },
+        {
+          "arguments": 3,
+          "encoding": "v24@0:8@16",
+          "selector": "controlDrawerDidCreateLowLightSlider:"
+        },
+        {
+          "arguments": 3,
+          "encoding": "v24@0:8Q16",
+          "selector": "_setLowLightConflicts:"
+        },
+        {
+          "arguments": 2,
+          "encoding": "B16@0:8",
+          "selector": "_isExpectedLowLightDurationCancelable"
+        },
+        {
+          "arguments": 3,
+          "encoding": "v20@0:8B16",
+          "selector": "_updateLowLightControlsAnimated:"
+        },
+        {
+          "arguments": 3,
+          "encoding": "v24@0:8Q16",
+          "selector": "_handleUserChangedToNightMode:"
+        },
+        {
+          "arguments": 4,
+          "encoding": "v28@0:8Q16B24",
+          "selector": "_updateLowLightConflict:isConflicting:"
+        },
+        {
+          "arguments": 3,
+          "encoding": "v32@0:8{?=dd}16",
+          "selector": "_setLowLightDurationMapping:"
+        },
+        {
+          "arguments": 3,
+          "encoding": "v24@0:8q16",
+          "selector": "_setResolvedLowLightMode:"
+        },
+        {
+          "arguments": 3,
+          "encoding": "v20@0:8B16",
+          "selector": "_setCurrentLowLightCaptureCancelable:"
+        },
+        {
+          "arguments": 3,
+          "encoding": "v20@0:8B16",
+          "selector": "_updateResolvedLowLightModeAnimated:"
+        },
+        {
+          "arguments": 2,
+          "encoding": "v16@0:8",
+          "selector": "_updateLowLightSlider"
+        },
+        {
+          "arguments": 4,
+          "encoding": "v40@0:8@16{?=dd}24",
+          "selector": "captureController:didOutputLowLightModeDurationMapping:"
+        },
+        {
+          "arguments": 2,
+          "encoding": "v16@0:8",
+          "selector": "_updateShutterButtonForEndOfLowLightCapture"
+        },
+        {
+          "arguments": 3,
+          "encoding": "v24@0:8@16",
+          "selector": "_handleLowLightSliderDidChangeValue:"
+        },
+        {
+          "arguments": 2,
+          "encoding": "q16@0:8",
+          "selector": "_resolvedLowLightMode"
+        },
+        {
+          "arguments": 2,
+          "encoding": "{?=dd}16@0:8",
+          "selector": "_lowLightDurationMapping"
+        },
+        {
+          "arguments": 3,
+          "encoding": "v20@0:8B16",
+          "selector": "_resetLowLightDurationMappingAnimated:"
+        },
+        {
+          "arguments": 3,
+          "encoding": "B24@0:8@16",
+          "selector": "_shouldShowLowLightControlForGraphConfiguration:"
+        },
+        {
+          "arguments": 2,
+          "encoding": "Q16@0:8",
+          "selector": "_desiredLowLightControlMode"
+        },
+        {
+          "arguments": 6,
+          "encoding": "q44@0:8q16q24q32B40",
+          "selector": "_lowLightModeForMode:captureMode:device:isBurst:"
+        },
+        {
+          "arguments": 4,
+          "encoding": "v32@0:8@16q24",
+          "selector": "captureController:didOutputLowLightStatus:"
+        },
+        {
+          "arguments": 2,
+          "encoding": "B16@0:8",
+          "selector": "_isCurrentLowLightCaptureCancelable"
+        },
+        {
+          "arguments": 2,
+          "encoding": "B16@0:8",
+          "selector": "_isLowLightCaptureUIVisible"
+        },
+        {
+          "arguments": 2,
+          "encoding": "B16@0:8",
+          "selector": "_isLowLightActiveForCurrentSettings"
+        },
+        {
+          "arguments": 3,
+          "encoding": "B24@0:8@16",
+          "selector": "_shouldDisableDepthSuggestionForNightModeForConfiguration:"
+        },
+        {
+          "arguments": 3,
+          "encoding": "v20@0:8B16",
+          "selector": "_setLowLightCaptureUIVisible:"
+        }
+      ],
+      "properties": [
+        {
+          "attributes": "TQ,N,S_setDesiredLowLightControlMode:,V__desiredLowLightControlMode",
+          "name": "_desiredLowLightControlMode"
+        },
+        {
+          "attributes": "TQ,N,S_setResolvedLowLightControlMode:,V__resolvedLowLightControlMode",
+          "name": "_resolvedLowLightControlMode"
+        },
+        {
+          "attributes": "Tq,N,S_setResolvedLowLightMode:,V__resolvedLowLightMode",
+          "name": "_resolvedLowLightMode"
+        },
+        {
+          "attributes": "T{?=dd},N,S_setLowLightDurationMapping:,V__lowLightDurationMapping",
+          "name": "_lowLightDurationMapping"
+        },
+        {
+          "attributes": "TQ,N,S_setLowLightConflicts:,V__lowLightConflicts",
+          "name": "_lowLightConflicts"
+        },
+        {
+          "attributes": "TB,N,G_isLowLightCaptureUIVisible,S_setLowLightCaptureUIVisible:,V__lowLightCaptureUIVisible",
+          "name": "_lowLightCaptureUIVisible"
+        },
+        {
+          "attributes": "TB,N,G_isCurrentLowLightCaptureCancelable,S_setCurrentLowLightCaptureCancelable:,V__currentLowLightCaptureCancelable",
+          "name": "_currentLowLightCaptureCancelable"
+        },
+        {
+          "attributes": "TB,R,N,G_isLowLightCaptureCanceling",
+          "name": "_lowLightCaptureCanceling"
+        }
+      ]
+    },
+    {
+      "class": "CAMCaptureRequest",
+      "present": true,
+      "image": "/System/Library/PrivateFrameworks/CameraUI.framework/CameraUI",
+      "instance_methods": [],
+      "properties": []
+    },
+    {
+      "class": "CAMStillImageCaptureRequest",
+      "present": true,
+      "image": "/System/Library/PrivateFrameworks/CameraUI.framework/CameraUI",
+      "instance_methods": [
+        {
+          "arguments": 2,
+          "encoding": "q16@0:8",
+          "selector": "lowLightMode"
+        }
+      ],
+      "properties": [
+        {
+          "attributes": "Tq,R,N,V_lowLightMode",
+          "name": "lowLightMode"
+        }
+      ]
+    },
+    {
+      "class": "CAMMutableStillImageCaptureRequest",
+      "present": true,
+      "image": "/System/Library/PrivateFrameworks/CameraUI.framework/CameraUI",
+      "instance_methods": [
+        {
+          "arguments": 3,
+          "encoding": "v24@0:8q16",
+          "selector": "setLowLightMode:"
+        }
+      ],
+      "properties": [
+        {
+          "attributes": "Tq,D,N",
+          "name": "lowLightMode"
+        }
+      ]
+    },
+    {
+      "class": "CAMStillImageCaptureResolvedSettings",
+      "present": true,
+      "image": "/System/Library/PrivateFrameworks/CameraUI.framework/CameraUI",
+      "instance_methods": [
+        {
+          "arguments": 9,
+          "encoding": "@52@0:8B16B20d24^{CGColor=}32B40B44B48",
+          "selector": "initWithHDREnabled:portraitEffectEnabled:lowLightCaptureTime:lowLightPreviewColorEstimate:lowLightCaptureHasInitialPreviewFeedbackSensitivity:lowLightCaptureHasConstantPreviewFeedbackSensitivity:captureBeforeResolvingSettingsEnabled:"
+        },
+        {
+          "arguments": 2,
+          "encoding": "d16@0:8",
+          "selector": "lowLightCaptureTime"
+        },
+        {
+          "arguments": 2,
+          "encoding": "B16@0:8",
+          "selector": "lowLightCaptureHasConstantPreviewFeedbackSensitivity"
+        },
+        {
+          "arguments": 2,
+          "encoding": "^{CGColor=}16@0:8",
+          "selector": "lowLightPreviewColorEstimate"
+        },
+        {
+          "arguments": 2,
+          "encoding": "B16@0:8",
+          "selector": "lowLightCaptureHasInitialPreviewFeedbackSensitivity"
+        }
+      ],
+      "properties": [
+        {
+          "attributes": "Td,R,N,V_lowLightCaptureTime",
+          "name": "lowLightCaptureTime"
+        },
+        {
+          "attributes": "T^{CGColor=},R,N,V_lowLightPreviewColorEstimate",
+          "name": "lowLightPreviewColorEstimate"
+        },
+        {
+          "attributes": "TB,R,N,V_lowLightCaptureHasInitialPreviewFeedbackSensitivity",
+          "name": "lowLightCaptureHasInitialPreviewFeedbackSensitivity"
+        },
+        {
+          "attributes": "TB,R,N,V_lowLightCaptureHasConstantPreviewFeedbackSensitivity",
+          "name": "lowLightCaptureHasConstantPreviewFeedbackSensitivity"
+        }
+      ]
+    },
+    {
+      "class": "CAMStillImageCaptureResponse",
+      "present": true,
+      "image": "/System/Library/PrivateFrameworks/CameraUI.framework/CameraUI",
+      "instance_methods": [],
+      "properties": []
+    },
+    {
+      "class": "CAMLowLightSlider",
+      "present": true,
+      "image": "/System/Library/PrivateFrameworks/CameraUI.framework/CameraUI",
+      "instance_methods": [
+        {
+          "arguments": 2,
+          "encoding": "Q16@0:8",
+          "selector": "lowLightMode"
+        },
+        {
+          "arguments": 3,
+          "encoding": "v24@0:8Q16",
+          "selector": "setLowLightMode:"
+        },
+        {
+          "arguments": 2,
+          "encoding": "B16@0:8",
+          "selector": "isLowLightActive"
+        },
+        {
+          "arguments": 3,
+          "encoding": "v20@0:8B16",
+          "selector": "setLowLightActive:"
+        }
+      ],
+      "properties": [
+        {
+          "attributes": "TQ,N",
+          "name": "lowLightMode"
+        },
+        {
+          "attributes": "TB,N,GisLowLightActive,V_lowLightActive",
+          "name": "lowLightActive"
+        }
+      ]
+    },
+    {
+      "class": "CAMLowLightStatusIndicator",
+      "present": true,
+      "image": "/System/Library/PrivateFrameworks/CameraUI.framework/CameraUI",
+      "instance_methods": [
+        {
+          "arguments": 2,
+          "encoding": "q16@0:8",
+          "selector": "lowLightMode"
+        },
+        {
+          "arguments": 3,
+          "encoding": "v24@0:8q16",
+          "selector": "setLowLightMode:"
+        },
+        {
+          "arguments": 2,
+          "encoding": "B16@0:8",
+          "selector": "isLowLightDisabled"
+        },
+        {
+          "arguments": 3,
+          "encoding": "v20@0:8B16",
+          "selector": "setLowLightDisabled:"
+        },
+        {
+          "arguments": 4,
+          "encoding": "v24@0:8B16B20",
+          "selector": "setLowLightDisabled:animated:"
+        }
+      ],
+      "properties": [
+        {
+          "attributes": "Tq,N,V_lowLightMode",
+          "name": "lowLightMode"
+        },
+        {
+          "attributes": "TB,N,GisLowLightDisabled,V_lowLightDisabled",
+          "name": "lowLightDisabled"
+        }
+      ]
+    },
+    {
+      "class": "CAMNightModeSlider",
+      "present": false
+    },
+    {
+      "class": "CAMNightModeStatusIndicator",
+      "present": false
+    }
+  ]
+}
