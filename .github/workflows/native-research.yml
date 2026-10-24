@@ -1,0 +1,28 @@
+name: Native Camera · read-only ABI inspection
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  probe:
+    runs-on: macos-15
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - name: Compile read-only runtime inspector
+        run: |
+          set -euo pipefail
+          mkdir -p build/native-research
+          if ! command -v ldid >/dev/null 2>&1; then brew install ldid; fi
+          xcrun --sdk iphoneos clang -arch arm64 -miphoneos-version-min=18.0 -fobjc-arc -Wall -Wextra -Werror \
+            -framework Foundation NativeBridge/tools/UCNativeCapabilities.m -o build/native-research/UCNativeCapabilities
+          ldid -S build/native-research/UCNativeCapabilities
+          cd build/native-research
+          shasum -a 256 UCNativeCapabilities > SHA256SUMS.txt
+          printf '%s\n' "$GITHUB_SHA" > SOURCE-COMMIT.txt
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Ultimate-CAM-native-ABI-${{ github.run_id }}
+          path: build/native-research/
+          if-no-files-found: error
+          retention-days: 14
