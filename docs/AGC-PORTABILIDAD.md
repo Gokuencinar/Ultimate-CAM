@@ -1,6 +1,6 @@
 # AGC 1.8.6: auditoría y adaptación para Ultimate CAM 0.5
 
-Fecha: 24-10-2026. Petición: estudiar el APK y el Java descompilado, adaptar funciones y menús a iOS, sin pruebas ni instalación en el iPhone en esta fase.
+Fecha: 24-10-2026. Petición: estudiar el APK y el Java descompilado, adaptar funciones y menús a iOS, con las pruebas funcionales del iPhone aplazadas. El usuario autorizó posteriormente instalar el paquete por SSH sin abrir la app ni probar la cámara.
 
 ## Material y alcance de la evidencia
 
@@ -55,11 +55,19 @@ Las recetas validan límites y números finitos, identificadores UUID y tamaño 
 
 La persistencia de perfiles es propia de esta app. Las calibraciones y configuraciones de otros teléfonos no son intercambiables por compartir el nombre de una opción.
 
+## Preparación y consumo de memoria
+
+La revisión usa miniaturas orientadas de hasta 1600 px generadas fuera del hilo principal; JPEG y DNG originales se conservan para guardar. Se evita duplicar la miniatura cuando resultado y referencia son idénticos. El contexto de fusión desactiva la caché de intermedios y la libera al terminar; no se deduce de ello una mejora de tiempo o consumo medida en el iPhone.
+
+El procesado admite cancelación cooperativa entre fotogramas/etapas: botón para conservar el original, aviso de presión de memoria y límite de 90 s con 10 s adicionales para recuperar la referencia. Una llamada bloqueada de un framework/GPU no se puede interrumpir cooperativamente: si no vuelve, se bloquean nuevas capturas y se indica reabrir la app. Nunca se repite la captura. Se muestra progreso por fotograma procesado, sin inventar un porcentaje de calidad o tiempo restante.
+
+Se ha aplicado el método de [cerberus-re](https://github.com/OwenPawl/cerberus-re-skill) para separar estado observado, análisis estático y validación pendiente. El plugin proporciona instrucciones; no se encontró su CLI/Ghidra/LLDB/Frida instalado. No se han usado ni se atribuyen trazas de esas herramientas. La inspección emplea SSH/SFTP, manifiesto de paquete, Mach-O y código propio. No se realizan attach, inyección o pruebas funcionales en esta fase.
+
 ## Pruebas y límites de entrega
 
 La compilación iOS y las pruebas de Core Image/Vision se ejecutan en GitHub Actions. `Tests/PortChecks.swift` comprueba valores inválidos, LUT identidad y dominio, kernels, malla residual, máscara adaptativa, recorte y perfil P3, histograma, persistencia y passthrough. `Tests/ProcessorChecks.swift` conserva las regresiones de alineación, ruido y planificación nocturna. XCTest comprueba interacción de menús en simulador. Consultar el informe de candidato para el commit y resultados finales: no confundir que exista una prueba con que haya pasado.
 
-No se han instalado estos cambios ni se han hecho capturas por SSH durante esta fase. Build43/0.4 sigue siendo el último estado instalado documentado. Quedan pendientes calidad nocturna, tiempo/memoria/temperatura, alineación en escenas reales, importación mediante Archivos en iPhone y revisión en Fotos. Nada de esta auditoría demuestra calidad comparable a Google Camera o al modo Noche de Apple.
+La revisión de preparación por SSH confirmó build43/0.4 verificada, sin proceso activo ni informes de crash con el nombre de la app. Se leyeron trazas antiguas, sin enviar órdenes a la cámara. La instalación de la candidata se registra aparte; no constituye prueba funcional. Quedan pendientes calidad nocturna, tiempo/memoria/temperatura, alineación en escenas reales, importación mediante Archivos en iPhone y revisión en Fotos. Nada de esta auditoría demuestra calidad comparable a Google Camera o al modo Noche de Apple.
 
 ## Referencias de implementación
 

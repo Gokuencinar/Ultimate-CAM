@@ -103,6 +103,19 @@ import Darwin
         try check(PreviewDecoder.image(Data("bad image".utf8)) == nil, "Invalid review data accepted")
         let cancellation = ProcessingCancellation(); cancellation.cancel()
         try rejects({ _ = try BurstProcessor().process([png],cancellation:cancellation) }, "Cancelled processing")
+        let during = ProcessingCancellation()
+        try rejects({
+            _ = try BurstProcessor().process([png,png], options: ProcessingOptions(chooseSharpestReference:false), cancellation:during) { text in
+                if text.hasPrefix("Procesando fotograma") { during.cancel() }
+            }
+        }, "Cancellation after processing started")
+        let rotatedData = NSMutableData()
+        let rotatedDestination = CGImageDestinationCreateWithData(rotatedData,"public.jpeg" as CFString,1,nil)!
+        let rectangle = context.createCGImage(image,from:CGRect(x:0,y:0,width:96,height:48))!
+        CGImageDestinationAddImage(rotatedDestination,rectangle,[kCGImagePropertyOrientation:6] as CFDictionary)
+        try check(CGImageDestinationFinalize(rotatedDestination), "Could not encode orientation fixture")
+        let rotatedPreview = PreviewDecoder.image(rotatedData as Data)!
+        try check(rotatedPreview.width == 48 && rotatedPreview.height == 96, "Review preview ignored EXIF rotation")
         let source = CGImageSourceCreateWithData(result.jpeg as CFData,nil)!
         let cg = CGImageSourceCreateImageAtIndex(source,0,nil)!
         try check(cg.width == 96 && cg.height == 54, "16:9 output is not cropped correctly")
@@ -130,6 +143,6 @@ import Darwin
         unreadable.flush()
         try check(try Data(contentsOf:corrupt) == Data("not JSON".utf8), "Corrupt profile archive was overwritten")
         try check(try BurstProcessor().process([png]).jpeg == png, "Untouched single-photo passthrough changed")
-        print("Validated recipes, LUTs/domains, rendering kernels, residual mesh, adaptive rejection, crop/P3, histogram, profile persistence and legacy passthrough.")
+        print("Validated recipes, LUTs/domains, rendering kernels, residual mesh, adaptive rejection, crop/P3, histogram, profile persistence, bounded/oriented previews, cooperative cancellation and legacy passthrough.")
     }
 }

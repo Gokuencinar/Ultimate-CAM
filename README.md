@@ -6,9 +6,9 @@ El objetivo es combinar captura nocturna por acumulación, como concepto de Lumi
 
 ## Candidato 0.5: análisis de AGC y nuevas herramientas
 
-La versión candidata adapta controles observados en el APK AGC 1.8.6 mediante código propio de Core Image/Vision. Añade cinco paneles, recetas por lente, perfiles JSON con LUT opcional, importación `.cube`, ruido cromático, detalle fino/contraste local, exposición y color del JPEG, calidad/P3/recorte, guías e histograma del resultado. Incluye alineación local y rechazo adaptativo experimentales, desactivados por defecto, y un punto de partida “Estático avanzado”.
+La versión candidata adapta controles observados en el APK AGC 1.8.6 mediante código propio de Core Image/Vision. Añade cinco paneles, recetas por lente, perfiles JSON con LUT opcional, importación `.cube`, ruido cromático, detalle fino/contraste local, exposición y color del JPEG, calidad/P3/recorte, guías e histograma del resultado. Incluye alineación local y rechazo adaptativo experimentales, desactivados por defecto, y un punto de partida “Estático avanzado”. La revisión usa miniaturas limitadas a 1600 px, y el procesado ofrece progreso y cancelación cooperativa para conservar el original.
 
-La [matriz de portabilidad](docs/AGC-PORTABILIDAD.md) identifica qué se adapta, qué ya existía y qué queda pendiente: no es un port completo ni el motor de Google. No se incorporan bibliotecas, shaders, modelos ni recursos del APK al producto. El APK original y los archivos descompilados permanecen como material de análisis local. Las pruebas del iPhone y la instalación de 0.5 quedan aplazadas por petición del usuario; los resultados de build43 que siguen son históricos.
+La [matriz de portabilidad](docs/AGC-PORTABILIDAD.md) identifica qué se adapta, qué ya existía y qué queda pendiente: no es un port completo ni el motor de Google. No se incorporan bibliotecas, shaders, modelos ni recursos del APK al producto. El APK original y los archivos descompilados permanecen como material de análisis local. Las pruebas funcionales del iPhone quedan aplazadas por petición del usuario. Se autoriza instalar 0.5 por SSH sin abrir ni probar la app; el informe de entrega separa instalación y funcionamiento. Los resultados de build43 que siguen son históricos.
 
 ## Noche estática experimental (0.4)
 
