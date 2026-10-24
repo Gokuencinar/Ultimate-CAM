@@ -114,18 +114,19 @@ struct CameraView: View {
         }
         .background(Color.black).foregroundStyle(.white).preferredColorScheme(.dark)
         .onAppear { UIApplication.shared.isIdleTimerDisabled = true; camera.start(); loadProfile(profiles.options(for: lens.rawValue) ?? ProcessingOptions()) }
-        .onDisappear { UIApplication.shared.isIdleTimerDisabled = false; cancelCountdown() }
+        .onDisappear { UIApplication.shared.isIdleTimerDisabled = false; cancelCountdown(); profiles.flush() }
         .onChange(of: scenePhase) { _, phase in
             if phase == .active { UIApplication.shared.isIdleTimerDisabled = true; camera.start() }
             else if phase == .background {
                 UIApplication.shared.isIdleTimerDisabled = false
                 cancelCountdown()
+                profiles.flush()
                 camera.stop()
             }
         }
         .onChange(of: camera.selectedLens) { _, next in
             resetUIControls()
-            loadProfile(profiles.options(for: next.rawValue) ?? ProcessingOptions())
+            if !loadProfile(profiles.options(for: next.rawValue) ?? ProcessingOptions()) { options = ProcessingOptions() }
             if next != .front { lastBackLens = next }
         }
         .onChange(of: options) { _, value in profiles.remember(value, lens: lens.rawValue) }
@@ -345,7 +346,7 @@ struct CameraView: View {
                 let lut = try CubeLUT.parse(data, name: url.deletingPathExtension().lastPathComponent)
                 options.lutID = try ColorLUTStore.save(lut)
                 fileMessage = "LUT importada: " + lut.title
-            } else { loadProfile(try profiles.importDocument(data)); fileMessage = "Perfil importado." }
+            } else if loadProfile(try profiles.importDocument(data)) { fileMessage = "Perfil importado." }
         } catch { fileMessage = error.localizedDescription }
     }
 
@@ -539,7 +540,7 @@ struct CameraView: View {
                 if profiles.profiles.isEmpty { Text("Todavía no hay perfiles guardados.").foregroundStyle(.secondary) }
                 ForEach(profiles.profiles) { profile in
                     HStack {
-                        Button { loadProfile(profile.options); fileMessage = "Aplicado: " + profile.name } label: { Label(profile.name, systemImage: "slider.horizontal.3") }
+                        Button { if loadProfile(profile.options) { fileMessage = "Aplicado: " + profile.name } } label: { Label(profile.name, systemImage: "slider.horizontal.3") }
                         Spacer()
                         Button(role: .destructive) { profiles.remove(profile.id) } label: { Image(systemName: "trash") }.buttonStyle(.borderless).accessibilityLabel("Eliminar " + profile.name)
                     }
@@ -550,13 +551,15 @@ struct CameraView: View {
         }
     }
 
-    private func loadProfile(_ value: ProcessingOptions) {
+    @discardableResult
+    private func loadProfile(_ value: ProcessingOptions) -> Bool {
         do {
             _ = try value.validated()
             if let id = value.lutID { _ = try ColorLUTStore.load(id) }
             options = value
             if value.nightStatic { stack = true; rawEnabled = false; flash = .off; manualExposure = false; camera.setManualExposure(iso: nil) }
-        } catch { fileMessage = "No se aplicó el perfil: " + error.localizedDescription }
+            return true
+        } catch { fileMessage = "No se aplicó el perfil: " + error.localizedDescription; return false }
     }
 
     private func optionSlider(_ title: String, value: Binding<Double>, range: ClosedRange<Double>) -> some View {

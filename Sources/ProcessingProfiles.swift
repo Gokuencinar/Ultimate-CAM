@@ -103,7 +103,7 @@ final class ProcessingProfiles: ObservableObject {
     func remove(_ id: UUID) { archive.profiles.removeAll { $0.id == id }; profiles = archive.profiles; persist() }
 
     func importDocument(_ data: Data) throws -> ProcessingOptions {
-        guard archive.profiles.count < 24 else { throw CameraFailure.message("Máximo 24 perfiles.") }
+        guard !loadFailed, archive.profiles.count < 24 else { throw CameraFailure.message("Máximo 24 perfiles.") }
         let document = try ProfileDocumentData.decode(data)
         var options = document.options
         if let lut = document.lut { options.lutID = try ColorLUTStore.save(lut) }
@@ -119,7 +119,9 @@ final class ProcessingProfiles: ObservableObject {
         return try encoder.encode(value)
     }
 
-    private func persist() {
+    func flush() { persist(immediate: true) }
+
+    private func persist(immediate: Bool = false) {
         // Preserve an unreadable archive instead of overwriting user data.
         guard !loadFailed else { return }
         pending?.cancel()
@@ -131,6 +133,8 @@ final class ProcessingProfiles: ObservableObject {
                 try data.write(to: file, options: .atomic)
             } catch { DispatchQueue.main.async { self?.error = "No se pudieron guardar los perfiles: \(error.localizedDescription)" } }
         }
-        pending = item; io.asyncAfter(deadline: .now() + 0.4, execute: item)
+        pending = item
+        if immediate { io.sync(execute: item) }
+        else { io.asyncAfter(deadline: .now() + 0.4, execute: item) }
     }
 }
