@@ -241,7 +241,7 @@ final class BurstProcessor {
         // Only a single rendered capture can reuse its original HDR headroom.
         // A temporal stack needs its own radiometric HDR merge, so never borrow
         // the reference's map for pixels assembled from different frames.
-        let hdrSource = options.preserveHDR && frames.count == 1 && !isRAW ? AdaptiveHDR.expanded(first) : nil
+        let hdrSource = options.preserveHDR && frames.count == 1 && !isRAW && !options.nightStatic ? AdaptiveHDR.expanded(first) : nil
         let rendered = try JPEGRenderer.render(accumulator,extent:common,options:options,context:context,hdrSource:hdrSource)
         try cancellation?.check()
         let details: String

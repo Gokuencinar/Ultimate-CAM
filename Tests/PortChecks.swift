@@ -239,6 +239,9 @@ import Darwin
         try check(!ordinary.adaptiveHDR && !AdaptiveHDR.hasGainMap(ordinary.data),"SDR input was mislabeled HDR")
         let importedHDR=try ImportedPhotoProcessor.process(hdrFile.data,options:hdrOutput)
         try check(AdaptiveHDR.hasGainMap(importedHDR.jpeg) && importedHDR.mergedFrames==1,"HDR import discarded the auxiliary image")
+        var untouchedHDR=base;untouchedHDR.preserveHDR=true
+        try check(try ImportedPhotoProcessor.process(hdrFile.data,options:untouchedHDR).jpeg==hdrFile.data,
+                  "Unedited HDR JPEG was needlessly recompressed")
         var editedHDR=hdrOutput;editedHDR.postExposure = -0.5
         let singleHDR=try BurstProcessor().process([hdrFile.data],options:editedHDR)
         try check(AdaptiveHDR.hasGainMap(singleHDR.jpeg),"Single-photo edits discarded HDR")
