@@ -412,8 +412,8 @@ struct CameraView: View {
     private var manualSettings: some View {
         Group {
             Section("Exposición") {
-                if options.nightStatic {
-                    Text("Noche estática calcula ISO y exposición. El enfoque y el balance de blancos se pueden ajustar antes de capturar.")
+                if options.nightStatic || options.hdrBracketing {
+                    Text("Noche y HDR calculan ISO y exposición. El enfoque y el balance de blancos se pueden ajustar antes de capturar.")
                         .font(.footnote).foregroundStyle(.secondary)
                 }
                 Toggle("ISO y obturación manuales", isOn: Binding(get: { manualExposure }, set: { enabled in
@@ -421,7 +421,7 @@ struct CameraView: View {
                     iso = min(camera.isoRange.upperBound, max(camera.isoRange.lowerBound, iso))
                     shutterStops = min(log2(camera.shutterRange.upperBound), max(log2(camera.shutterRange.lowerBound), shutterStops))
                     applyExposure()
-                })).disabled(!camera.supportsManualExposure || options.nightStatic)
+                })).disabled(!camera.supportsManualExposure || options.nightStatic || options.hdrBracketing)
                 if manualExposure {
                     valueLabel("ISO", "\(Int(iso))")
                     Slider(value: $iso, in: camera.isoRange, step: 1).onChange(of: iso) { _, _ in applyExposure() }

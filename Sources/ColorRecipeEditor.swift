@@ -113,7 +113,7 @@ private struct GradeWheelView: View {
                     .offset(x:cos(wheel.hue/180 * .pi)*wheel.amount*37,y:sin(wheel.hue/180 * .pi)*wheel.amount*37)
             }.frame(width:82,height:82)
                 .gesture(DragGesture(minimumDistance:0).onChanged { value in
-                    let x=value.location.x-41,y=value.location.y-41
+                    let x=Double(value.location.x)-41,y=Double(value.location.y)-41
                     wheel.hue=(atan2(y,x)*180 / .pi+360).truncatingRemainder(dividingBy:360)
                     wheel.amount=min(1,hypot(x,y)/37)
                 })
@@ -135,14 +135,14 @@ private struct CurvePlot: View {
                 context.stroke(grid,with:.color(.white.opacity(0.12)),lineWidth:1)
                 var line=Path()
                 for (index,value) in points.enumerated() {
-                    let p=CGPoint(x:CGFloat(index)/4*size.width,y:(1-value)*size.height)
+                    let p=CGPoint(x:CGFloat(index)/4*size.width,y:CGFloat(1-value)*size.height)
                     if index==0 { line.move(to:p) } else { line.addLine(to:p) }
                     context.fill(Path(ellipseIn:CGRect(x:p.x-4,y:p.y-4,width:8,height:8)),with:.color(.white))
                 }
                 context.stroke(line,with:.color(CameraPalette.accent),lineWidth:2)
             }.gesture(DragGesture(minimumDistance:0).onChanged { value in
                 let index=min(4,max(0,Int((value.location.x/proxy.size.width*4).rounded())))
-                points[index]=min(1,max(0,1-value.location.y/proxy.size.height))
+                points[index]=min(1,max(0,1-Double(value.location.y/proxy.size.height)))
             })
         }.accessibilityLabel("Curva editable; los deslizadores permiten ajustar cada punto.")
     }

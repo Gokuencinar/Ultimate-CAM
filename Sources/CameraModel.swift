@@ -494,7 +494,7 @@ final class CameraModel: NSObject, ObservableObject, AVCapturePhotoCaptureDelega
             let night = options.nightStatic, hdr = options.hdrBracketing
             let burst = stack || night || hdr
             guard !raw || (!burst && !self.output.availableRawPhotoPixelFormatTypes.isEmpty) else {
-                self.message(burst ? "En Noche, RAW se selecciona automáticamente; en Pila se usa JPEG." : "Esta cámara no admite RAW.")
+                self.message(burst ? "HDR y Pila usan JPEG; RAW se activa en Foto o en Noche experimental." : "Esta cámara no admite RAW.")
                 CaptureTrace.record("capture.rejected", ["reason": "RAW unavailable in this configuration"])
                 return
             }
