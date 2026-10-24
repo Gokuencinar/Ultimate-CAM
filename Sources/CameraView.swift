@@ -529,7 +529,7 @@ struct CameraView: View {
                     }
                 }
                 DisclosureGroup("Usar una foto del modo Noche de Apple") {
-                    Text("Toma la foto con el modo Noche en Cámara de Apple y después impórtala desde el botón de galería. Ultimate CAM aplica sus ajustes al resultado renderizado sin volver a capturar. La salida de edición es JPEG SDR; no conserva un gain map HDR. No se integra ni se fuerza el motor privado de Cámara.")
+                    Text("Toma la foto con el modo Noche en Cámara de Apple y después impórtala desde el botón de galería. Un JPEG sin ajustes se conserva sin recodificar. Al editar o convertir HEIF se genera JPEG SDR sin gain map HDR. No se integra ni se fuerza el motor privado de Cámara.")
                         .font(.footnote).foregroundStyle(.secondary)
                     Button("Elegir foto de Fotos") { pendingPhotoImport = true; showControls = false }
                 }

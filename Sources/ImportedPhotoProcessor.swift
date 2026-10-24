@@ -26,7 +26,8 @@ enum ImportedPhotoProcessor {
         // Never capture or treat an imported image as a burst, HDR bracket or RAW.
         recipe.nightStatic = false; recipe.nightRAW = false; recipe.hdrBracketing = false
         let reference: Data
-        if UTType(type as String)?.conforms(to: .jpeg) == true { reference = data }
+        let isJPEG = UTType(type as String)?.conforms(to: .jpeg) == true
+        if isJPEG { reference = data }
         else {
             guard let image = CIImage(data: data, options: [.applyOrientationProperty: true]) else {
                 throw CameraFailure.message("No se pudo leer la foto seleccionada.")
@@ -38,8 +39,9 @@ enum ImportedPhotoProcessor {
         }
         try cancellation?.check()
         var result = try BurstProcessor().process([reference], options: recipe, cancellation: cancellation)
+        let encoding = isJPEG && result.jpeg == data ? "JPEG original sin recodificar; recursos HDR incorporados sin validar." : "Acabado JPEG SDR; no conserva un gain map HDR."
         result = CaptureResult(jpeg: result.jpeg, reference: reference,
-            details: "Foto importada · acabado JPEG SDR. Se aplican los ajustes de imagen, sin nueva captura. " + result.details,
+            details: "Foto importada · " + encoding + " Sin nueva captura. " + result.details,
             mergedFrames: 1, source: "imported-rendered-image", statistics: ImageStatistics.measure(result.jpeg))
         return result
     }
