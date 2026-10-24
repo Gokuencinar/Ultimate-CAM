@@ -239,6 +239,16 @@ final class CameraModel: NSObject, ObservableObject, AVCapturePhotoCaptureDelega
         }
     }
 
+    func prepareNativeHandoff(_ completion: @escaping (Bool) -> Void) {
+        queue.async {
+            guard !self.inFlight else { self.publish { completion(false) }; return }
+            self.active=false;self.focusToken=UUID()
+            if self.session.isRunning { self.session.stopRunning() }
+            CaptureTrace.record("nativeNight.handoff",["sessionStopped":!self.session.isRunning])
+            self.publish { self.ready=false;completion(!self.session.isRunning) }
+        }
+    }
+
     @objc private func sessionInterrupted() {
         queue.async {
             self.interrupted = true

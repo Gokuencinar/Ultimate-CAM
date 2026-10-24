@@ -21,7 +21,7 @@ PY
 codesign -d --verbose=2 "$bundle/UltimateCAM" 2>&1
 commit=$(git rev-parse HEAD)
 build_number=${GITHUB_RUN_NUMBER:-$(git rev-list --count HEAD)}
-version="0.7.0+build.${build_number}.git.${commit:0:7}"
+version="0.8.0+build.${build_number}.git.${commit:0:7}"
 cat > "$stage/DEBIAN/control" <<EOF
 Package: com.gokuencinar.ultimatecam
 Name: Ultimate CAM

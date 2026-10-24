@@ -42,6 +42,7 @@ private struct ViewfinderGrid: View {
 
 struct CameraView: View {
     @StateObject private var camera = CameraModel()
+    @StateObject private var nativeNight = NativeNightCoordinator()
     @StateObject private var profiles = ProcessingProfiles()
     @State private var guide = CompositionGuide.thirds
     @State private var profileName = ""
@@ -65,6 +66,7 @@ struct CameraView: View {
     @State private var showResult = false
     @State private var showPhotoPicker = false
     @State private var pendingPhotoImport = false
+    @State private var pendingNativeNight = false
     @State private var selectedPhoto: PhotosPickerItem?
     @State private var loadingPhoto = false
     @State private var showReference = false
@@ -90,7 +92,7 @@ struct CameraView: View {
     @State private var focusPosition: Double = 0.5
     private var zoom: Double { camera.zoomFactor }
     private var lens: CameraLens { camera.selectedLens }
-    private var controlsEnabled: Bool { !camera.busy && !loadingPhoto && countdown == 0 }
+    private var controlsEnabled: Bool { !camera.busy && !loadingPhoto && !nativeNight.opening && countdown == 0 }
 
     var body: some View {
         ZStack {
@@ -127,7 +129,7 @@ struct CameraView: View {
         .onAppear { UIApplication.shared.isIdleTimerDisabled = true; camera.start(); loadProfile(profiles.options(for: lens.rawValue) ?? ProcessingOptions()) }
         .onDisappear { UIApplication.shared.isIdleTimerDisabled = false; cancelCountdown(); profiles.flush() }
         .onChange(of: scenePhase) { _, phase in
-            if phase == .active { UIApplication.shared.isIdleTimerDisabled = true; camera.start() }
+            if phase == .active { UIApplication.shared.isIdleTimerDisabled = true; nativeNight.returnedToApp(); camera.start() }
             else if phase == .background {
                 UIApplication.shared.isIdleTimerDisabled = false
                 cancelCountdown()
@@ -146,6 +148,7 @@ struct CameraView: View {
         .onChange(of: rawEnabled) { _, value in if value { flash = .off } }
         .sheet(isPresented: $showControls, onDismiss: {
             if pendingPhotoImport { pendingPhotoImport = false; showPhotoPicker = true }
+            else if pendingNativeNight { pendingNativeNight = false; nativeNight.open(camera:camera) }
         }) { settings }
         .sheet(isPresented: $showResult) { review }
         .photosPicker(isPresented: $showPhotoPicker, selection: $selectedPhoto, matching: .images,
@@ -169,6 +172,9 @@ struct CameraView: View {
         .alert("No se pudo importar", isPresented: Binding(get: { camera.importFailure != nil }, set: { if !$0 { camera.clearImportError() } })) {
             Button("Aceptar") { camera.clearImportError() }
         } message: { Text(camera.importFailure ?? "") }
+        .alert("Noche nativa",isPresented:$nativeNight.showMessage) {
+            Button("Aceptar",role:.cancel) { }
+        } message: { Text(nativeNight.message) }
     }
 
     private var header: some View {
@@ -311,7 +317,7 @@ struct CameraView: View {
                         else if countdown > 0 { Image(systemName: "xmark").font(.title2.bold()).foregroundStyle(.black) }
                     }.frame(width: 72, height: 72)
                 }.accessibilityLabel(countdown > 0 ? "Cancelar temporizador" : (options.nightStatic ? "Capturar noche estática" : (stack ? "Capturar pila de \(stackCount) fotos" : "Tomar foto")))
-                    .accessibilityIdentifier("camera.shutter").disabled(camera.busy || loadingPhoto || (!camera.ready && countdown == 0))
+                    .accessibilityIdentifier("camera.shutter").disabled(camera.busy || loadingPhoto || nativeNight.opening || (!camera.ready && countdown == 0))
                 Spacer()
                 Button { camera.switchLens(lens == .front ? lastBackLens : .front) } label: {
                     Image(systemName: "arrow.triangle.2.circlepath.camera").font(.system(size: 23))
@@ -328,6 +334,7 @@ struct CameraView: View {
                         modeButton("Cámara",selected:!stack && !options.hdrBracketing) { options.nightStatic=false;options.hdrBracketing=false;stack=false }
                         modeButton("HDR",selected:options.hdrBracketing) { activateHDR() }.accessibilityIdentifier("camera.mode.hdr")
                         modeButton("Pila",selected:stack && !options.nightStatic && !options.hdrBracketing) { options.nightStatic=false;options.hdrBracketing=false;stack=true }
+                        modeButton("iOS",selected:false) { nativeNight.open(camera:camera) }.accessibilityIdentifier("camera.mode.nativeNight")
                     }
                 }
                 Button { panel = .color; showControls = true } label: { Image(systemName:"slider.horizontal.3").font(.system(size:19)).frame(width:40,height:44) }
@@ -519,6 +526,12 @@ struct CameraView: View {
 
     private var processingSettings: some View {
         Group {
+            Section("Noche nativa · complemento jailbreak") {
+                Button("Abrir Cámara con Noche máximo") { pendingNativeNight=true;showControls=false }
+                    .accessibilityIdentifier("processing.nativeNight")
+                Text("Abre Cámara de Apple y solicita Noche máximo mediante el complemento Ultimate CAM Native Night. Dispara allí y después importa el resultado. La solicitud caduca y respeta el soporte nativo del modo y de la lente. Esta ruta usa la interfaz de Apple.")
+                    .font(.footnote).foregroundStyle(.secondary)
+            }
             Section("Puntos de partida") {
                 Button("Foto con procesado de iOS") {
                     applyPreset("Natural"); options.singlePhotoQuality = .quality
