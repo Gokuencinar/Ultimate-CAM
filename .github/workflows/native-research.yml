@@ -14,7 +14,7 @@ jobs:
           set -euo pipefail
           mkdir -p build/native-research
           if ! command -v ldid >/dev/null 2>&1; then brew install ldid; fi
-          xcrun --sdk iphoneos clang -arch arm64 -miphoneos-version-min=18.0 -fobjc-arc -Wall -Wextra -Werror \
+          xcrun --sdk iphoneos clang -arch arm64 -arch arm64e -miphoneos-version-min=18.0 -fobjc-arc -Wall -Wextra -Werror \
             -framework Foundation NativeBridge/tools/UCNativeCapabilities.m -o build/native-research/UCNativeCapabilities
           ldid -S build/native-research/UCNativeCapabilities
           cd build/native-research
