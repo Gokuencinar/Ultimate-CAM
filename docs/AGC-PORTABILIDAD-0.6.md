@@ -36,7 +36,7 @@ El usuario autorizó expresamente configurar certificados, emparejar este ordena
 
 La consulta del puente TLS confirmó UID 0. Una lectura acotada confirmó iPhone12,3 / 22H31 y Ultimate CAM build51, sin proceso de Ultimate CAM activo en ese momento. El resultado `paired:true` de una dirección explícita, por sí solo, no se tomó como evidencia de emparejamiento: se exigió comunicación autenticada real.
 
-Las claves privadas del cliente/CA permanecen fuera del repositorio y no se incluyen en artefactos de cámara. Se aplica la disciplina de cerberus-re para separar análisis estático, conexión y comportamiento observado. No se han hecho attach de Frida/LLDB ni pruebas funcionales de cámara. La instalación de la nueva app, cuando se realice, debe constar aparte del estado del puente.
+Las claves privadas del cliente/CA permanecen fuera del repositorio y no se incluyen en artefactos de cámara. Se aplica la disciplina de cerberus-re para separar análisis estático, conexión y comportamiento observado. No se han hecho attach de Frida/LLDB ni pruebas funcionales de cámara. Build54 se instaló después mediante `file_transfer` y `package_manage`, con SHA-256 del paquete transferido y del ejecutable instalado comprobados y `dpkg --verify` limpio. Se usó instalación de paquete sin los ciclos que relanzan procesos; la app no estaba ejecutándose antes ni después, y no se abrió ni se envió ninguna petición de captura.
 
 ## Pendiente para completar el objetivo
 
@@ -53,6 +53,6 @@ Las claves privadas del cliente/CA permanecen fuera del repositorio y no se incl
 
 ## Verificación
 
-Se han añadido fixtures de planificación HDR, exposiciones inválidas, recuperación de radiancia no recortada, negros, pipeline completo de un bracket sintético, HSL selectivo/achromático, curvas, gradación, grano y persistencia. La interfaz en simulador comprueba nuevos menús y la selección del modo HDR sin pulsar el disparador. Consultar el informe de entrega para el commit y resultados exactos; esta lista describe pruebas implementadas, no resultados por anticipado.
+Pasaron la compilación iPhone y los fixtures de planificación HDR, exposiciones inválidas, recuperación de radiancia no recortada, negros, pipeline completo de un bracket sintético, HSL selectivo/acromático, curvas, gradación, grano y persistencia en [CI build54](https://github.com/Gokuencinar/Ultimate-CAM/actions/runs/40100390177), código `c17f82c460de01a3fd038c42dddcbb90dfe6ed41`. La [interfaz en simulador](https://github.com/Gokuencinar/Ultimate-CAM/actions/runs/40100725620), con los mismos fuentes de app y commit de pruebas `a88537f2207d09fdf6533bfa80d8988fc3c406a9`, pasó un caso compuesto de 62,213 segundos sin fallos. Comprueba nuevos menús y la selección del modo HDR sin pulsar el disparador; se revisaron sus capturas. Los resultados exactos y los hashes se conservan además en el informe local de entrega.
 
 Siguen aplazadas las capturas físicas, el guardado real de esta versión, calidad nocturna/HDR, memoria, temperatura y tiempos en el iPhone. No se declara port completo ni calidad equivalente antes de esas comprobaciones.

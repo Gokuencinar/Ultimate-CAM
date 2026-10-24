@@ -1,14 +1,18 @@
 # Ultimate CAM
 
-Primer prototipo de cámara propia para el iPhone 11 Pro con iOS 18.7.1. Nombre elegido por el usuario.
+Cámara experimental independiente para el iPhone 11 Pro con iOS 18.7.1, distribuida como paquete `.deb` rootless. Nombre elegido por el usuario.
 
 El objetivo es combinar captura nocturna por acumulación, como concepto de Lumi, con técnicas de fotografía computacional descritas por Google. Este proyecto contiene una primera pila de imágenes; no contiene Lumi, GCam ni sus modelos o bibliotecas.
 
-## Candidato 0.6: HDR y controles de AGC
+## Versión 0.6 / build54: instalada sin prueba funcional
 
 La [segunda etapa](docs/AGC-PORTABILIDAD-0.6.md) añade horquillado HDR experimental, HSL de ocho bandas, curvas RGB, gradación por zonas y efectos. Reorganiza los controles según los layouts del APK y su paleta Material3 de respaldo. Son implementaciones propias y la salida HDR sigue siendo un JPEG SDR. No se presenta como el motor HDR+ de Google ni como un port completo.
 
-jb-p1lot quedó emparejado tras autorización expresa, con conexión TLS y UID 0 confirmados. No se ha abierto Ultimate CAM ni se han enviado capturas en el iPhone. Los informes de build51 que siguen corresponden al estado anterior y se conservan como historial; la instalación y validación de cada candidato 0.6 se registran aparte.
+Build54 (`0.6.0+build.54.git.c17f82c`, código `c17f82c460de01a3fd038c42dddcbb90dfe6ed41`) está [compilada y comprobada con fixtures](https://github.com/Gokuencinar/Ultimate-CAM/actions/runs/40100390177) e instalada mediante jb-p1lot. SHA-256 del DEB: `7b3721a4b45acd327d2c166c32522372843d2bda7586883569224a0d78c31921`. El hash del ejecutable coincide, `dpkg --verify` no encuentra diferencias y la firma conserva el único entitlement anterior de contenedor propio. No se abrió la app ni se enviaron capturas en el iPhone; tampoco hubo respring.
+
+La [prueba de interfaz](https://github.com/Gokuencinar/Ultimate-CAM/actions/runs/40100725620), commit `a88537f2207d09fdf6533bfa80d8988fc3c406a9`, con los mismos fuentes de app que el paquete, completó un caso compuesto con cero fallos en 62,213 s: visor completo, gestos, temporizador, Noche, perfiles, HSL con ajuste de matiz, curvas, ruedas, grano y selección de HDR sin pulsar el disparador. Se revisaron las capturas del simulador. Los fixtures sintéticos verifican planificación y fusión HDR, recuperación de luces, color y persistencia; no acreditan el funcionamiento del sensor ni calidad óptica.
+
+jb-p1lot quedó emparejado tras autorización expresa, con conexión TLS y UID 0 confirmados. Las claves privadas permanecen fuera del repositorio y de los artefactos. Las pruebas físicas de 0.6 siguen aplazadas; los informes de build51 y build43 que siguen se conservan como historial. No se afirma un port completo ni calidad equivalente a GCam o al modo Noche de Apple.
 
 ## Versión 0.5 / build51: instalada sin prueba funcional
 
@@ -88,7 +92,7 @@ Los perfiles Natural y Detalle ajustan los controles de procesado existentes. No
 
 PILA y NOCHE usan JPEG de cámara por defecto; NOCHE permite activar la ruta DNG experimental cuando la cámara la expone. Son capturas consecutivas, no una ráfaga de alta velocidad. Promediar imágenes no reproduce el procesamiento de Google. La ruta predeterminada alinea por traslación. La malla local opcional de 0.5 no es flujo óptico denso ni garantiza corregir rotación/paralaje. El rechazo por diferencias puede confundir ruido, iluminación y movimiento; todavía pueden aparecer artefactos. Se recomienda una escena inmóvil y trípode.
 
-No excede las exposiciones admitidas por la lente ni añade luz que el sensor no haya registrado. No incluye horquillado HDR, modelos neuronales de Google, superresolución, astrofotografía, retrato o Live Photos. La entrega de RAW+JPEG y su guardado por PhotoKit se comprobaron en la cámara principal; RAW en teleobjetivo y revisión visual del DNG siguen pendientes. Ultra gran angular y frontal no exponen RAW en este dispositivo. El resultado fusionado no copia los metadatos EXIF de exposición de la referencia porque describirían solo una parte de la pila.
+No excede las exposiciones admitidas por la lente ni añade luz que el sensor no haya registrado. El horquillado HDR experimental de 0.6 usa tres JPEG y salida SDR; no incluye HDR+ de Google, HDRnet, Ultra HDR, modelos neuronales de Google, superresolución, astrofotografía, retrato o Live Photos. La entrega de RAW+JPEG y su guardado por PhotoKit se comprobaron en versiones anteriores en la cámara principal; RAW en teleobjetivo y revisión visual del DNG siguen pendientes. Ultra gran angular y frontal no exponen RAW en este dispositivo. El resultado fusionado no copia los metadatos EXIF de exposición de la referencia porque describirían solo una parte de la pila.
 
 El motor usa APIs públicas. La distribución actual es un `.deb` para jailbreak rootless convencional con arquitectura Debian `iphoneos-arm64` y raíz `/var/jb`. Instala una app independiente; no inyecta hooks ni modifica Cámara de Apple. No solicita acceso a toda la fototeca. La firma añade únicamente `com.apple.private.security.container-required` con el identificador de esta app para vincular su propio contenedor; no desactiva el sandbox ni omite los permisos de Cámara o Fotos. La forma de esta vinculación se contrasta con el [código de TrollStore](https://github.com/opa334/TrollStore/blob/main/RootHelper/main.m). El código no realiza solicitudes de red. Este paquete no es una variante específica para RootHide.
 
