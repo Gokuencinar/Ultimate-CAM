@@ -15,11 +15,18 @@ typedef long long (*ResolveMode)(id,SEL,long long,long long,long long,BOOL);
 static ViewAppeared originalAppeared;
 static UserChanged originalChanged;
 static ResolveMode originalResolve;
-static int intentToken, statusToken, ackToken, controlToken, resolvedToken;
+static int intentToken, statusToken, ackToken, controlToken, resolvedToken, confirmedToken, previousToken;
 static __weak id currentViewfinder;
 static uint64_t appliedRequest;
 static NSUInteger previousControl;
 static BOOL applying;
+
+static long long Snapshot(id viewfinder) {
+    long long resolved=((long long(*)(id,SEL))objc_msgSend)(viewfinder,sel_registerName("_resolvedLowLightMode"));
+    NSUInteger control=((NSUInteger(*)(id,SEL))objc_msgSend)(viewfinder,sel_registerName("_desiredLowLightControlMode"));
+    notify_set_state(controlToken,control); notify_set_state(resolvedToken,(uint64_t)resolved);
+    return resolved;
+}
 
 static uint64_t Intent(void) { uint64_t value=0; notify_get_state(intentToken,&value); return value; }
 static void Status(uint64_t request, enum UCNStatus status) {
@@ -40,7 +47,7 @@ static void Disarm(BOOL restore) {
     id viewfinder=currentViewfinder;
     if (restore && request && viewfinder && originalChanged) {
         applying=YES;
-        @try { originalChanged(viewfinder,sel_registerName("_handleUserChangedToNightMode:"),previousControl); }
+        @try { originalChanged(viewfinder,sel_registerName("_handleUserChangedToNightMode:"),previousControl); Snapshot(viewfinder); }
         @catch (NSException *exception) { NSLog(@"UltimateCAM NativeNight restore: %@",exception.name); }
         applying=NO;
     }
@@ -53,15 +60,17 @@ static void ApplyIntent(void) {
     id viewfinder=currentViewfinder;
     if (!viewfinder || appliedRequest==request) return;
     @try {
-        if (!appliedRequest) previousControl=((NSUInteger(*)(id,SEL))objc_msgSend)(viewfinder,sel_registerName("_desiredLowLightControlMode"));
+        if (!appliedRequest) {
+            previousControl=((NSUInteger(*)(id,SEL))objc_msgSend)(viewfinder,sel_registerName("_desiredLowLightControlMode"));
+            notify_set_state(previousToken,previousControl);
+        }
         appliedRequest=request; applying=YES;
         // Native control value 2 selects the second (maximum) duration. ABI and
         // this duration selection are recorded from CameraUI on build 22H31.
         originalChanged(viewfinder,sel_registerName("_handleUserChangedToNightMode:"),2);
         applying=NO;
-        long long resolved=((long long(*)(id,SEL))objc_msgSend)(viewfinder,sel_registerName("_resolvedLowLightMode"));
-        NSUInteger control=((NSUInteger(*)(id,SEL))objc_msgSend)(viewfinder,sel_registerName("_desiredLowLightControlMode"));
-        notify_set_state(controlToken,control); notify_set_state(resolvedToken,(uint64_t)resolved);
+        long long resolved=Snapshot(viewfinder);
+        if (resolved==2) notify_set_state(confirmedToken,request);
         Status(request,resolved==2 ? UCNStatusControlApplied : UCNStatusConflict);
         uint64_t remaining=(request>>16)-(uint64_t)time(NULL);
         dispatch_after(dispatch_time(DISPATCH_TIME_NOW,(int64_t)(MIN(remaining,(uint64_t)UCN_MAX_TTL)*NSEC_PER_SEC)),dispatch_get_main_queue(),^{
@@ -101,7 +110,9 @@ __attribute__((constructor)) static void Install(void) {
             notify_register_check(UCN_STATUS_NAME,&statusToken)!=NOTIFY_STATUS_OK ||
             notify_register_check(UCN_ACK_NAME,&ackToken)!=NOTIFY_STATUS_OK ||
             notify_register_check(UCN_CONTROL_NAME,&controlToken)!=NOTIFY_STATUS_OK ||
-            notify_register_check(UCN_RESOLVED_NAME,&resolvedToken)!=NOTIFY_STATUS_OK) return;
+            notify_register_check(UCN_RESOLVED_NAME,&resolvedToken)!=NOTIFY_STATUS_OK ||
+            notify_register_check(UCN_CONFIRMED_NAME,&confirmedToken)!=NOTIFY_STATUS_OK ||
+            notify_register_check(UCN_PREVIOUS_NAME,&previousToken)!=NOTIFY_STATUS_OK) return;
         if (!TargetMatches()) { Status(0,UCNStatusUnsupported); return; }
         Class cls=objc_lookUpClass("CAMViewfinderViewController");
         if (!cls || !Signature(cls,"viewDidAppear:","v20@0:8B16") ||

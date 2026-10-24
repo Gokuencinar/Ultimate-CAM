@@ -14,6 +14,7 @@ final class NativeNightCoordinator: ObservableObject {
     private let status = "com.gokuencinar.ultimatecam.native-night.status"
     private let ack = "com.gokuencinar.ultimatecam.native-night.ack"
     private let resolved = "com.gokuencinar.ultimatecam.native-night.resolved"
+    private let confirmed = "com.gokuencinar.ultimatecam.native-night.confirmed"
     private let changed = "com.gokuencinar.ultimatecam.native-night.changed"
 
     deinit { for token in tokens.values { notify_cancel(token) } }
@@ -62,10 +63,10 @@ final class NativeNightCoordinator: ObservableObject {
     func returnedToApp() {
         guard let expected=pendingRequest else { return }
         pendingRequest=nil
-        let reply=read(ack),code=read(status),nativeMode=read(resolved)
+        let reply=read(ack),code=read(status),nativeMode=read(resolved),lastConfirmed=read(confirmed)
         if let token=token(intent) { _ = notify_set_state(token,0);_ = notify_post(changed) }
         CaptureTrace.record("nativeNight.return",["ackMatches":reply==expected,"status":code,"nativeMode":nativeMode])
-        if reply==expected && nativeMode==2 && (code==4 || code==6) {
+        if lastConfirmed==expected || (reply==expected && nativeMode==2 && code==4) {
             report("El complemento confirmó el ajuste Noche máximo en Cámara de Apple. La foto y su calidad no se comprueban por esta señal. Puedes importar el resultado desde la galería.")
         } else if code==2 || code==3 {
             report("El complemento de Noche nativa no admite este dispositivo, sistema o firma de métodos.")

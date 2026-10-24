@@ -9,6 +9,8 @@
 #define UCN_CHANGED_NAME "com.gokuencinar.ultimatecam.native-night.changed"
 #define UCN_CONTROL_NAME "com.gokuencinar.ultimatecam.native-night.control"
 #define UCN_RESOLVED_NAME "com.gokuencinar.ultimatecam.native-night.resolved"
+#define UCN_CONFIRMED_NAME "com.gokuencinar.ultimatecam.native-night.confirmed"
+#define UCN_PREVIOUS_NAME "com.gokuencinar.ultimatecam.native-night.previous"
 #define UCN_MAX_TTL 180
 
 // These are our protocol values, not Apple's private low-light enum values.
