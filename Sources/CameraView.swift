@@ -129,7 +129,7 @@ struct CameraView: View {
         .onAppear { UIApplication.shared.isIdleTimerDisabled = true; camera.start(); loadProfile(profiles.options(for: lens.rawValue) ?? ProcessingOptions()) }
         .onDisappear { UIApplication.shared.isIdleTimerDisabled = false; cancelCountdown(); profiles.flush() }
         .onChange(of: scenePhase) { _, phase in
-            if phase == .active { UIApplication.shared.isIdleTimerDisabled = true; nativeNight.returnedToApp(); camera.start() }
+            if phase == .active { UIApplication.shared.isIdleTimerDisabled = true; if !nativeNight.opening { nativeNight.returnedToApp(); camera.start() } }
             else if phase == .background {
                 UIApplication.shared.isIdleTimerDisabled = false
                 cancelCountdown()
@@ -169,12 +169,11 @@ struct CameraView: View {
             catch { camera.reportImportError(error.localizedDescription) }
         }
         .onChange(of: camera.importedPhotoID) { _, value in if value != nil { showResult = true } }
-        .alert("No se pudo importar", isPresented: Binding(get: { camera.importFailure != nil }, set: { if !$0 { camera.clearImportError() } })) {
-            Button("Aceptar") { camera.clearImportError() }
-        } message: { Text(camera.importFailure ?? "") }
-        .alert("Noche nativa",isPresented:$nativeNight.showMessage) {
-            Button("Aceptar",role:.cancel) { }
-        } message: { Text(nativeNight.message) }
+        .alert(camera.importFailure != nil ? "No se pudo importar" : "Noche nativa", isPresented: Binding(
+            get: { camera.importFailure != nil || nativeNight.showMessage },
+            set: { if !$0 { camera.clearImportError();nativeNight.showMessage=false } })) {
+            Button("Aceptar",role:.cancel) { camera.clearImportError();nativeNight.showMessage=false }
+        } message: { Text(camera.importFailure ?? nativeNight.message) }
     }
 
     private var header: some View {

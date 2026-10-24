@@ -244,8 +244,9 @@ final class CameraModel: NSObject, ObservableObject, AVCapturePhotoCaptureDelega
             guard !self.inFlight else { self.publish { completion(false) }; return }
             self.active=false;self.focusToken=UUID()
             if self.session.isRunning { self.session.stopRunning() }
-            CaptureTrace.record("nativeNight.handoff",["sessionStopped":!self.session.isRunning])
-            self.publish { self.ready=false;completion(!self.session.isRunning) }
+            let stopped = !self.session.isRunning
+            CaptureTrace.record("nativeNight.handoff",["sessionStopped":stopped])
+            self.publish { self.ready=false;completion(stopped) }
         }
     }
 
