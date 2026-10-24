@@ -2,6 +2,7 @@ import AVFoundation
 import SwiftUI
 import UIKit
 import UniformTypeIdentifiers
+import PhotosUI
 
 private enum ControlPanel: String, CaseIterable, Identifiable {
     case capture = "Captura", manual = "Manual", processing = "Procesado", color = "Color", profiles = "Perfiles"
@@ -62,6 +63,10 @@ struct CameraView: View {
     @State private var tint: Double = 0
     @State private var grid = true
     @State private var showResult = false
+    @State private var showPhotoPicker = false
+    @State private var pendingPhotoImport = false
+    @State private var selectedPhoto: PhotosPickerItem?
+    @State private var loadingPhoto = false
     @State private var showReference = false
     @State private var includeReference = false
     @State private var stackCount = 3
@@ -85,7 +90,7 @@ struct CameraView: View {
     @State private var focusPosition: Double = 0.5
     private var zoom: Double { camera.zoomFactor }
     private var lens: CameraLens { camera.selectedLens }
-    private var controlsEnabled: Bool { !camera.busy && countdown == 0 }
+    private var controlsEnabled: Bool { !camera.busy && !loadingPhoto && countdown == 0 }
 
     var body: some View {
         ZStack {
@@ -139,8 +144,29 @@ struct CameraView: View {
         .onChange(of: bias) { _, value in camera.setBias(Float(value)) }
         .onChange(of: stack) { _, value in if value { rawEnabled = false; flash = .off } }
         .onChange(of: rawEnabled) { _, value in if value { flash = .off } }
-        .sheet(isPresented: $showControls) { settings }
+        .sheet(isPresented: $showControls, onDismiss: {
+            if pendingPhotoImport { pendingPhotoImport = false; showPhotoPicker = true }
+        }) { settings }
         .sheet(isPresented: $showResult) { review }
+        .photosPicker(isPresented: $showPhotoPicker, selection: $selectedPhoto, matching: .images,
+                      preferredItemEncoding: .current)
+        .task(id: selectedPhoto) {
+            guard let item = selectedPhoto else { return }
+            loadingPhoto = true
+            defer { loadingPhoto = false; selectedPhoto = nil }
+            do {
+                guard let data = try await item.loadTransferable(type: Data.self) else {
+                    throw CameraFailure.message("Fotos no devolvió la imagen seleccionada.")
+                }
+                try Task.checkCancellation()
+                camera.importPhoto(data, options: options)
+            } catch is CancellationError { }
+            catch { camera.reportImportError(error.localizedDescription) }
+        }
+        .onChange(of: camera.importedPhotoID) { _, value in if value != nil { showResult = true } }
+        .alert("No se pudo importar", isPresented: Binding(get: { camera.importFailure != nil }, set: { if !$0 { camera.clearImportError() } })) {
+            Button("Aceptar") { camera.clearImportError() }
+        } message: { Text(camera.importFailure ?? "") }
     }
 
     private var header: some View {
@@ -263,14 +289,17 @@ struct CameraView: View {
                     .accessibilityLabel("LUT y color")
             }.disabled(!controlsEnabled)
             HStack {
-                Button { showResult = true } label: {
+                Menu {
+                    Button("Revisar última captura") { showResult = true }.disabled(camera.preview == nil)
+                    Button("Importar desde Fotos") { showPhotoPicker = true }
+                } label: {
                     Group {
                         if let preview = camera.preview { Image(uiImage: preview).resizable().scaledToFill() }
                         else { Image(systemName: "photo.on.rectangle").font(.title3).foregroundStyle(.white.opacity(0.7)) }
                     }.frame(width: 50, height: 50).background(Color(white: 0.15))
                         .clipShape(Circle())
                         .overlay(Circle().stroke(.white.opacity(0.4),lineWidth:2))
-                }.accessibilityLabel("Revisar última captura").disabled(camera.preview == nil || !controlsEnabled)
+                }.accessibilityLabel("Galería e importación").accessibilityIdentifier("camera.gallery").disabled(!controlsEnabled)
                 Spacer()
                 Button { countdown > 0 ? cancelCountdown() : takePhoto() } label: {
                     ZStack {
@@ -280,7 +309,7 @@ struct CameraView: View {
                         else if countdown > 0 { Image(systemName: "xmark").font(.title2.bold()).foregroundStyle(.black) }
                     }.frame(width: 72, height: 72)
                 }.accessibilityLabel(countdown > 0 ? "Cancelar temporizador" : (options.nightStatic ? "Capturar noche estática" : (stack ? "Capturar pila de \(stackCount) fotos" : "Tomar foto")))
-                    .accessibilityIdentifier("camera.shutter").disabled(camera.busy || (!camera.ready && countdown == 0))
+                    .accessibilityIdentifier("camera.shutter").disabled(camera.busy || loadingPhoto || (!camera.ready && countdown == 0))
                 Spacer()
                 Button { camera.switchLens(lens == .front ? lastBackLens : .front) } label: {
                     Image(systemName: "arrow.triangle.2.circlepath.camera").font(.system(size: 23))
@@ -371,6 +400,11 @@ struct CameraView: View {
     private var captureSettings: some View {
         Group {
             Section("Captura") {
+                Picker("Procesado de foto individual", selection: $options.singlePhotoQuality) {
+                    ForEach(SinglePhotoQuality.allCases) { Text($0.label).tag($0) }
+                }.disabled(stack || rawEnabled || manualExposure || camera.isFocusLocked)
+                Text("Calidad iOS pide el mejor procesado disponible al sistema. No activa el modo Noche de Cámara. Con RAW, bloqueo AE, exposición manual o pilas se usa rapidez para respetar cada exposición.")
+                    .font(.footnote).foregroundStyle(.secondary)
                 Toggle("RAW + JPEG", isOn: $rawEnabled).disabled(!camera.supportsRAW || stack)
                 if !camera.supportsRAW { Text("RAW no disponible en la cámara actual.").font(.footnote).foregroundStyle(.secondary) }
                 if options.nightStatic {
@@ -385,6 +419,20 @@ struct CameraView: View {
                 Picker("Temporizador", selection: $timerSeconds) { Text("Desactivado").tag(0); Text("3 segundos").tag(3); Text("10 segundos").tag(10) }
                 Toggle("Cuadrícula", isOn: $grid)
                 if grid { Picker("Guía", selection: $guide) { ForEach(CompositionGuide.allCases) { Text($0.rawValue).tag($0) } } }
+            }
+            if options.nightStatic {
+                Section("Captura nocturna") {
+                    Picker("Presupuesto de integración", selection: $options.nightBudget) {
+                        ForEach([2.0,4,8,16], id: \.self) { Text("\(Int($0)) segundos").tag($0) }
+                    }.accessibilityIdentifier("night.budget")
+                    Picker("Exposición máxima por foto", selection: $options.nightShutterLimit) {
+                        Text("1/30 s").tag(1.0/30); Text("1/8 s").tag(0.125); Text("1/4 s").tag(0.25)
+                        Text("1/2 s").tag(0.5); Text("1 s").tag(1.0)
+                    }.accessibilityIdentifier("night.shutterLimit")
+                    Toggle("Fusión con pesos por píxel", isOn: $options.nightWeightedFusion)
+                    Text("Hasta 16 fotogramas, limitado por la medición y la lente. El tiempo total incluye entrega y procesado y será mayor. El límite de obturación es manual: aún no detecta movimiento de sujetos.")
+                        .font(.footnote).foregroundStyle(.secondary)
+                }
             }
             if options.hdrBracketing {
                 Section("HDR por horquillado") {
@@ -470,11 +518,20 @@ struct CameraView: View {
     private var processingSettings: some View {
         Group {
             Section("Puntos de partida") {
+                Button("Foto con procesado de iOS") {
+                    applyPreset("Natural"); options.singlePhotoQuality = .quality
+                    resetUIControls(); camera.switchLens(lens)
+                }.accessibilityIdentifier("processing.systemQuality")
                 HStack {
                     ForEach(["Natural", "Detalle", "Noche estática"], id: \.self) { name in
                         Button(name) { applyPreset(name) }.buttonStyle(.bordered)
                             .tint(preset == name ? CameraPalette.accent : .white)
                     }
+                }
+                DisclosureGroup("Usar una foto del modo Noche de Apple") {
+                    Text("Toma la foto con el modo Noche en Cámara de Apple y después impórtala desde el botón de galería. Ultimate CAM aplica sus ajustes al resultado renderizado sin volver a capturar. La salida de edición es JPEG SDR; no conserva un gain map HDR. No se integra ni se fuerza el motor privado de Cámara.")
+                        .font(.footnote).foregroundStyle(.secondary)
+                    Button("Elegir foto de Fotos") { pendingPhotoImport = true; showControls = false }
                 }
                 Button("Estático avanzado · experimental") {
                     applyPreset("Noche estática")

@@ -115,6 +115,7 @@ final class BurstProcessor {
         let referenceData = frames[referenceIndex]
         let reference = try decode(inputFrames[referenceIndex])
         var accumulator = reference
+        let temporal = options.nightStatic && options.nightWeightedFusion ? WeightedTemporalMerger(reference: reference, context: context) : nil
         var common = reference.extent
         // Register reduced images; retain full resolution for all fusion/render operations.
         let registrationScale = min(1, 1024 / max(reference.extent.width, reference.extent.height))
@@ -190,10 +191,10 @@ final class BurstProcessor {
                 if options.localAlignment {
                     aligned = try LocalAlignment.align(aligned, reference: reference, extent: overlap, context: context)
                 }
-                if options.rejectMotion && options.adaptiveMotionRejection {
+                if temporal == nil && options.rejectMotion && options.adaptiveMotionRejection {
                     let threshold = NoiseAwareMerger.threshold(aligned, reference: reference, extent: overlap, context: context, sigma: options.motionSigma)
                     aligned = try NoiseAwareMerger.blend(aligned, reference: reference, extent: overlap, threshold: threshold)
-                } else if options.rejectMotion {
+                } else if temporal == nil && options.rejectMotion {
                     let delta = aligned.cropped(to: overlap).applyingFilter("CIDifferenceBlendMode", parameters: [
                         kCIInputBackgroundImageKey: reference.cropped(to: overlap)
                     ])
@@ -211,11 +212,14 @@ final class BurstProcessor {
                 }
                 // Maintain a running mean, forcing evaluation after every merge so the
                 // filter graph does not retain a full burst of decoded images.
-                let count = CGFloat(accepted)
-                let mean = accumulator.cropped(to: overlap).applyingFilter("CIDissolveTransition", parameters: [
-                    kCIInputTargetImageKey: aligned.cropped(to: overlap),
-                    kCIInputTimeKey: 1 / (count + 1)
-                ]).cropped(to: overlap)
+                let mean: CIImage
+                if let temporal {
+                    mean = try temporal.append(aligned, extent: overlap, rejectMotion: options.rejectMotion, sigma: options.motionSigma)
+                } else {
+                    mean = accumulator.cropped(to: overlap).applyingFilter("CIDissolveTransition", parameters: [
+                        kCIInputTargetImageKey: aligned.cropped(to: overlap), kCIInputTimeKey: 1 / CGFloat(accepted + 1)
+                    ]).cropped(to: overlap)
+                }
                 guard let rendered = context.createCGImage(mean, from: overlap, format: .RGBAh,
                     colorSpace: CGColorSpace(name: CGColorSpace.extendedLinearSRGB)!) else { return }
                 accumulator = CIImage(cgImage: rendered).transformed(by:
@@ -241,7 +245,7 @@ final class BurstProcessor {
         } else {
             details = "Fusionadas \(accepted)/\(frames.count) fotos. Referencia \(referenceIndex + 1). \(rendered.width) × \(rendered.height) px. Rechazo de movimiento: \(options.rejectMotion ? "sí" : "no")."
         }
-        let prefix = options.nightStatic ? "Noche estática · \(isRAW ? "DNG revelados" : "JPEG") · " : ""
+        let prefix = options.nightStatic ? "Noche estática · \(isRAW ? "DNG revelados" : "JPEG") · \(temporal != nil ? "pesos por píxel" : "media") · " : ""
         return CaptureResult(jpeg: rendered.data, reference: referenceData,
             details: prefix + details, mergedFrames: accepted,
             raw: rawFrames?[referenceIndex], source: isRAW ? "developed-RAW" : "JPEG")

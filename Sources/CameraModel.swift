@@ -101,6 +101,8 @@ final class CameraModel: NSObject, ObservableObject, AVCapturePhotoCaptureDelega
     private var savedKinds = Set<String>()
     private var processingCancellation: ProcessingCancellation?
     @Published private(set) var processingInProgress = false
+    @Published private(set) var importFailure: String?
+    @Published private(set) var importedPhotoID: UUID?
 
     override init() {
         super.init()
@@ -177,6 +179,56 @@ final class CameraModel: NSObject, ObservableObject, AVCapturePhotoCaptureDelega
             self.message("Recuperando referencia…")
         }
     }
+
+    func importPhoto(_ data: Data, options: ProcessingOptions) {
+        queue.async {
+            guard !self.inFlight, !self.captureRecoveryRequired else { return }
+            self.inFlight = true; self.transaction = UUID(); self.captureStage = "importing"
+            let token = self.transaction, cancellation = ProcessingCancellation()
+            self.processingCancellation = cancellation
+            self.publish { self.busy = true; self.processingInProgress = true; self.status = "Procesando foto seleccionada…" }
+            self.queue.asyncAfter(deadline: .now() + 90) {
+                guard self.inFlight, self.transaction == token, self.captureStage == "importing" else { return }
+                cancellation.cancel("La importación superó 90 segundos.")
+                self.queue.asyncAfter(deadline: .now() + 10) {
+                    guard self.inFlight, self.transaction == token, self.captureStage == "importing" else { return }
+                    self.captureRecoveryRequired = true
+                    self.finishFailure(CameraFailure.message("El procesado de importación no respondió. Reabre Ultimate CAM."))
+                }
+            }
+            self.processing.async {
+                let outcome = Result { try autoreleasepool { try ImportedPhotoProcessor.process(data, options: options, cancellation: cancellation) } }
+                let previews: (UIImage?, UIImage?)
+                if case .success(let result) = outcome {
+                    let image = PreviewDecoder.image(result.jpeg).map { UIImage(cgImage: $0) }
+                    previews = (image, result.jpeg == result.reference ? image : PreviewDecoder.image(result.reference).map { UIImage(cgImage: $0) })
+                } else { previews = (nil, nil) }
+                self.queue.async {
+                    guard self.inFlight, self.transaction == token else { return }
+                    self.processingCancellation = nil
+                    switch outcome {
+                    case .failure(let error): self.finishFailure(error); self.reportImportError(error.localizedDescription)
+                    case .success(let result):
+                        self.result = result; self.savedKinds = []; self.exportedResult = nil
+                        self.inFlight = false; self.captureStage = "idle"
+                        CaptureTrace.record("import.success", ["bytes": result.jpeg.count, "source": result.source])
+                        self.publish {
+                            self.preview = previews.0; self.referencePreview = previews.1
+                            self.resultDetails = result.details; self.resultStatistics = result.statistics
+                            self.hasRAWResult = false; self.hasSeparateReference = result.jpeg != result.reference
+                            self.savedResult = false; self.savedJPEGOnly = false
+                            self.processingInProgress = false; self.busy = false
+                            self.importedPhotoID = UUID()
+                            self.status = "Foto importada preparada para revisar."
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    func reportImportError(_ text: String) { publish { self.importFailure = text; self.status = text } }
+    func clearImportError() { publish { self.importFailure = nil } }
 
     func stop() {
         queue.async {
@@ -532,7 +584,8 @@ final class CameraModel: NSObject, ObservableObject, AVCapturePhotoCaptureDelega
                     let plan = night ? try NightCapturePlan.make(iso: Double(device.iso), seconds: device.exposureDuration.seconds,
                         isoRange: Double(device.activeFormat.minISO)...Double(device.activeFormat.maxISO),
                         durationRange: device.activeFormat.minExposureDuration.seconds...device.activeFormat.maxExposureDuration.seconds,
-                        targetOffset: Double(device.exposureTargetOffset)) : nil
+                        targetOffset: Double(device.exposureTargetOffset), budget: options.nightBudget,
+                        shutterLimit: options.nightShutterLimit) : nil
                     let bracket = hdr ? try HDRCapturePlan.make(iso:Double(device.iso),seconds:device.exposureDuration.seconds,span:options.hdrSpan,
                         isoRange:Double(device.activeFormat.minISO)...Double(device.activeFormat.maxISO),
                         durationRange:device.activeFormat.minExposureDuration.seconds...device.activeFormat.maxExposureDuration.seconds) : nil
@@ -636,9 +689,14 @@ final class CameraModel: NSObject, ObservableObject, AVCapturePhotoCaptureDelega
         }
         settings.flashMode = requestedFlash.mode
         settings.maxPhotoDimensions = output.maxPhotoDimensions
-        // Use one sensor exposure per request; our own burst performs the merge.
-        // This also honors custom/locked ISO and shutter settings, per Apple's API contract.
-        settings.photoQualityPrioritization = .speed
+        let priority = PhotoCapturePolicy.priority(requested: processingOptions.singlePhotoQuality,
+            count: desiredCount, raw: rawRequested, customExposure: input?.device.exposureMode == .custom,
+            lockedExposure: input?.device.exposureMode == .locked)
+        switch priority {
+        case .speed: settings.photoQualityPrioritization = .speed
+        case .balanced: settings.photoQualityPrioritization = .balanced
+        case .quality: settings.photoQualityPrioritization = .quality
+        }
         let identifier = settings.uniqueID
         captureStage = "requested"
         CaptureTrace.record("capture.request", ["id": identifier,

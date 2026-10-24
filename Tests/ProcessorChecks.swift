@@ -112,6 +112,11 @@ struct ProcessorChecks {
             try require(message != "Invalid metering accepted", message)
         }
         log("NIGHT CAPTURE PLAN CHECKS PASSED · no hardware")
+        let extended = try NightCapturePlan.make(iso:3200,seconds:0.06,isoRange:25...3200,durationRange:0.00001...1,budget:16)
+        try require(extended.count == 16 && extended.seconds == 1,"Extended night budget was not applied")
+        let capped = try NightCapturePlan.make(iso:1600,seconds:1.0/30,isoRange:25...3200,durationRange:0.00001...1,budget:2,shutterLimit:0.125)
+        try require(capped.seconds <= 0.125 && Double(capped.count)*capped.seconds <= 2.0001,"Night exposure or integration limit exceeded")
+        try require(abs(capped.iso*capped.seconds-1600.0/30)<0.001,"Shutter cap failed to compensate ISO within range")
         let processor = BurstProcessor()
         let reference = try bitmap(png(seed: 1))
         let noisy = try [png(seed: 10, noise: 24), png(seed: 20, noise: 24), png(seed: 30, noise: 24)]

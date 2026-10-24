@@ -44,6 +44,14 @@ import Darwin
     }
     static func run() throws {
         let base = ProcessingOptions()
+        try check(PhotoCapturePolicy.priority(requested:.quality,count:1,raw:false,customExposure:false,lockedExposure:false) == .quality,"Automatic photo lost native quality request")
+        try check(PhotoCapturePolicy.priority(requested:.balanced,count:1,raw:false,customExposure:false,lockedExposure:false) == .balanced,"Balanced choice ignored")
+        for item in [(3,false,false,false),(1,true,false,false),(1,false,true,false),(1,false,false,true)] {
+            try check(PhotoCapturePolicy.priority(requested:.quality,count:item.0,raw:item.1,customExposure:item.2,lockedExposure:item.3) == .speed,"Burst/RAW/manual exposure requested ISP fusion")
+        }
+        var invalidNight = base; invalidNight.nightBudget = .infinity
+        try rejects({ _ = try invalidNight.validated() }, "Infinite night budget")
+        try rejects({ _ = try JSONDecoder().decode(ProcessingOptions.self,from:Data("{\"nightShutterLimit\":3}".utf8)) }, "Unsafe night shutter limit")
         try check(try JSONDecoder().decode(ProcessingOptions.self, from: Data("{}".utf8)) == base, "Old profile defaults changed")
         var invalid = base; invalid.gamma = .nan
         try rejects({ _ = try invalid.validated() }, "NaN recipe")
@@ -161,6 +169,30 @@ import Darwin
         try check(abs(radiance[0]-2)<0.01, "HDR did not recover unclipped short-exposure radiance")
         let black = try HDRProcessor.fuse(field(0),field(0),field(0),scales:CIVector(x:1,y:0.25,z:4),extent:bounds)
         try check(pixels(black).allSatisfy(\.isFinite), "HDR black fallback produced NaN")
+        let temporal = WeightedTemporalMerger(reference:field(0.1),context:context)
+        _ = try temporal.append(field(0.15),extent:bounds,rejectMotion:true,sigma:3)
+        _ = try temporal.append(field(0.95),extent:bounds,rejectMotion:true,sigma:3)
+        let temporalMean = try temporal.append(field(0.2),extent:bounds,rejectMotion:true,sigma:3)
+        var linearPixels = [Float](repeating:0,count:8*8*4)
+        linearPixels.withUnsafeMutableBytes { context.render(temporalMean,toBitmap:$0.baseAddress!,rowBytes:8*16,bounds:bounds,format:.RGBAf,colorSpace:linear) }
+        try check(abs(linearPixels[0]-0.15)<0.003,"Rejected temporal sample added reference weight or corrupted the running mean")
+        let unweighted = WeightedTemporalMerger(reference:field(0.1),context:context)
+        _ = try unweighted.append(field(0.15),extent:bounds,rejectMotion:false,sigma:3)
+        let simpleMean = try unweighted.append(field(0.95),extent:bounds,rejectMotion:false,sigma:3)
+        linearPixels.withUnsafeMutableBytes { context.render(simpleMean,toBitmap:$0.baseAddress!,rowBytes:8*16,bounds:bounds,format:.RGBAf,colorSpace:linear) }
+        try check(abs(linearPixels[0]-0.4)<0.003,"Temporal mean without rejection is not an arithmetic mean")
+        let imported = try ImportedPhotoProcessor.process(rotatedData as Data,options:base)
+        try check(imported.jpeg == rotatedData as Data && imported.mergedFrames == 1 && imported.source == "imported-rendered-image","Untouched imported JPEG was recoded or treated as a burst")
+        var importRecipe = base; importRecipe.nightStatic=true; importRecipe.hdrBracketing=false;importRecipe.postExposure=0.5
+        let importedEdit = try ImportedPhotoProcessor.process(rotatedData as Data,options:importRecipe)
+        let importedCG = PreviewDecoder.image(importedEdit.jpeg)!
+        try check(importedCG.width == 48 && importedCG.height == 96 && importedEdit.raw == nil,"Imported image orientation/RAW handling is wrong")
+        let importedPNG = try ImportedPhotoProcessor.process(png,options:base)
+        let importedType=CGImageSourceGetType(CGImageSourceCreateWithData(importedPNG.reference as CFData,nil)!)! as String
+        try check(importedType == "public.jpeg","Non-JPEG import was mislabeled as JPEG")
+        try rejects({ _ = try ImportedPhotoProcessor.process(Data("not an image".utf8),options:base) },"Invalid imported data")
+        try rejects({ _ = try ImportedPhotoProcessor.process(png,options:base,cancellation:cancellation) },"Cancelled import")
+        print("NATIVE POLICY / WEIGHTED TEMPORAL / IMPORT CHECKS PASSED · synthetic host fixtures only")
         let neutralRecipe = ColorRecipe()
         let neutralCube = try ColorRecipeLUT.make(neutralRecipe,dimension:9)
         try check(try difference(neutralCube.apply(to:image,intensity:1),image)<0.02, "Neutral color recipe changes color")

@@ -12,6 +12,10 @@ enum PhotoAspect: String, Codable, CaseIterable, Identifiable {
 }
 
 struct ProcessingOptions: Codable, Equatable {
+    var singlePhotoQuality: SinglePhotoQuality = .quality
+    var nightBudget: Double = 8
+    var nightShutterLimit: Double = 1
+    var nightWeightedFusion: Bool = true
     var hdrBracketing: Bool = false
     var hdrSpan: Double = 2
     var color = ColorRecipe()
@@ -50,6 +54,8 @@ struct ProcessingOptions: Codable, Equatable {
     }
 
     func validated() throws -> ProcessingOptions {
+        guard nightBudget.isFinite, (1...16).contains(nightBudget), nightShutterLimit.isFinite,
+              (1.0/30...1).contains(nightShutterLimit) else { throw CameraFailure.message("Presupuesto nocturno fuera de rango.") }
         _ = try color.validated()
         guard !(hdrBracketing && nightStatic), hdrSpan.isFinite, (1...3).contains(hdrSpan) else { throw CameraFailure.message("Configuración HDR incompatible o fuera de rango.") }
         guard maximumDimension.isFinite, (1024...4096).contains(maximumDimension) else { throw CameraFailure.message("Valor fuera de rango: maximumDimension.") }
@@ -81,11 +87,15 @@ struct ProcessingOptions: Codable, Equatable {
 // not silently clamped into a different recipe.
 extension ProcessingOptions {
     enum CodingKeys: String, CodingKey {
-        case hdrBracketing, hdrSpan, color, nightStatic, nightRAW, chooseSharpestReference, rejectMotion, maximumDimension, noiseReduction, sharpening, liftShadows, localAlignment, adaptiveMotionRejection, motionSigma, chromaDenoise, localContrast, fineDetail, contrast, saturation, vibrance, gamma, postExposure, highlightCompression, sharpenRadius, vignette, jpegQuality, outputColor, aspect, lutID, lutIntensity
+        case singlePhotoQuality, nightBudget, nightShutterLimit, nightWeightedFusion, hdrBracketing, hdrSpan, color, nightStatic, nightRAW, chooseSharpestReference, rejectMotion, maximumDimension, noiseReduction, sharpening, liftShadows, localAlignment, adaptiveMotionRejection, motionSigma, chromaDenoise, localContrast, fineDetail, contrast, saturation, vibrance, gamma, postExposure, highlightCompression, sharpenRadius, vignette, jpegQuality, outputColor, aspect, lutID, lutIntensity
     }
     init(from decoder: Decoder) throws {
         self.init()
         let c = try decoder.container(keyedBy: CodingKeys.self)
+        singlePhotoQuality = try c.decodeIfPresent(SinglePhotoQuality.self, forKey: .singlePhotoQuality) ?? singlePhotoQuality
+        nightBudget = try c.decodeIfPresent(Double.self, forKey: .nightBudget) ?? nightBudget
+        nightShutterLimit = try c.decodeIfPresent(Double.self, forKey: .nightShutterLimit) ?? nightShutterLimit
+        nightWeightedFusion = try c.decodeIfPresent(Bool.self, forKey: .nightWeightedFusion) ?? nightWeightedFusion
         hdrBracketing = try c.decodeIfPresent(Bool.self, forKey: .hdrBracketing) ?? hdrBracketing
         hdrSpan = try c.decodeIfPresent(Double.self, forKey: .hdrSpan) ?? hdrSpan
         color = try c.decodeIfPresent(ColorRecipe.self, forKey: .color) ?? color

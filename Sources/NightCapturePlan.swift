@@ -9,10 +9,12 @@ struct NightCapturePlan {
     let compensationEV: Double
 
     static func make(iso: Double, seconds: Double, isoRange: ClosedRange<Double>,
-                     durationRange: ClosedRange<Double>, targetOffset: Double = 0) throws -> NightCapturePlan {
+                     durationRange: ClosedRange<Double>, targetOffset: Double = 0,
+                     budget: Double = 8, shutterLimit: Double = 1) throws -> NightCapturePlan {
         let values = [iso, seconds, isoRange.lowerBound, isoRange.upperBound,
                       durationRange.lowerBound, durationRange.upperBound]
-        guard targetOffset.isFinite, values.allSatisfy({ $0.isFinite && $0 > 0 }),
+        guard budget.isFinite, (1...16).contains(budget), shutterLimit.isFinite, (1.0/30...1).contains(shutterLimit),
+              targetOffset.isFinite, values.allSatisfy({ $0.isFinite && $0 > 0 }),
               isoRange.contains(iso), durationRange.contains(seconds) else {
             throw CameraFailure.message("La medición nocturna no es válida. Vuelve a medir la escena.")
         }
@@ -24,7 +26,8 @@ struct NightCapturePlan {
         guard meteredProduct.isFinite, seconds <= 1 else {
             throw CameraFailure.message("La medición supera el presupuesto de captura nocturna.")
         }
-        let limit = min(1, durationRange.upperBound)
+        let limit = min(shutterLimit, durationRange.upperBound, budget/3)
+        guard limit >= durationRange.lowerBound else { throw CameraFailure.message("El formato no permite el límite nocturno elegido.") }
         // At minimum ISO, extending an already bright exposure would clip it.
         let desired = min(limit, meteredProduct / isoRange.lowerBound)
         // Avoid arbitrary long durations that this iPhone reports rounded in
@@ -32,9 +35,9 @@ struct NightCapturePlan {
         let shutters: [Double] = [1, 0.5, 0.25, 0.125, 1.0/15, 1.0/30, 1.0/60,
             1.0/125, 1.0/250, 1.0/500, 1.0/1000, 1.0/2000, 1.0/4000, 1.0/8000]
         let rounded = shutters.first(where: { $0 <= desired && $0 >= durationRange.lowerBound }) ?? desired
-        let duration = min(durationRange.upperBound, max(durationRange.lowerBound, max(seconds, rounded)))
+        let duration = min(limit, max(durationRange.lowerBound, max(min(seconds, limit), rounded)))
         let sensitivity = min(isoRange.upperBound, max(isoRange.lowerBound, meteredProduct / duration))
-        let frames = min(16, max(3, Int(floor(8 / duration))))
+        let frames = min(16, max(3, Int(floor(budget / duration))))
         return NightCapturePlan(seconds: duration, iso: sensitivity, count: frames, compensationEV: compensation)
     }
 }

@@ -25,6 +25,8 @@ final class CameraInteractionTests: XCTestCase {
         settings.tap()
         XCTAssertTrue(app.navigationBars["Ajustes"].waitForExistence(timeout: 3))
         app.buttons["Procesado"].tap()
+        XCTAssertTrue(app.buttons["processing.systemQuality"].waitForExistence(timeout:3))
+        app.buttons["processing.systemQuality"].tap()
         XCTAssertTrue(app.buttons["Noche estática"].waitForExistence(timeout: 3))
         app.buttons["Noche estática"].tap()
         app.buttons["Listo"].tap()
@@ -75,5 +77,8 @@ final class CameraInteractionTests: XCTestCase {
         let image = XCTAttachment(screenshot: app.screenshot())
         image.lifetime = .keepAlways
         add(image)
+        XCTAssertTrue(app.buttons["camera.gallery"].isHittable)
+        app.buttons["camera.gallery"].tap()
+        XCTAssertTrue(app.buttons["Importar desde Fotos"].waitForExistence(timeout:3))
     }
 }
