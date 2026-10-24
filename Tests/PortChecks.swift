@@ -235,6 +235,10 @@ import Darwin
         print("Adaptive HDR round trip: dim ratio=\(darkRatio), highlight ratio=\(brightRatio)")
         try check(abs(darkRatio-1)<0.15 && brightRatio>2.5, "Gain map lost spatial headroom on decoding")
         try check(hdrDecoded.extent.size==sdrDecoded.extent.size,"HDR and SDR decoded geometry differs")
+        var brightEdit=hdrOutput;brightEdit.postExposure=2
+        let brightFile=try JPEGRenderer.render(sdrBase,extent:hdrBounds,options:brightEdit,context:context,hdrSource:hdrOriginal)
+        try check(sampleLinear(AdaptiveHDR.expanded(brightFile.data)!,190)<=8.1,
+                  "Super-white edits bypassed bounded SDR base and inflated HDR headroom")
         let ordinary=try JPEGRenderer.render(sdrBase,extent:hdrBounds,options:hdrOutput,context:context)
         try check(!ordinary.adaptiveHDR && !AdaptiveHDR.hasGainMap(ordinary.data),"SDR input was mislabeled HDR")
         let importedHDR=try ImportedPhotoProcessor.process(hdrFile.data,options:hdrOutput)

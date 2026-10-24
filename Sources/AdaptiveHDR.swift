@@ -48,7 +48,7 @@ enum AdaptiveHDR {
             float sy = dot(max(sdr.rgb,vec3(0.0)),w);
             float hy = dot(max(hdr.rgb,vec3(0.0)),w);
             float gain = sy > 0.0001 ? clamp(hy/sy,1.0,8.0) : 1.0;
-            return vec4(max(edited.rgb,vec3(0.0))*gain,edited.a);
+            return vec4(edited.rgb*gain,edited.a);
         }
         """)
 }

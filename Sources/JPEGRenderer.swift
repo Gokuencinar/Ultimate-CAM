@@ -33,14 +33,18 @@ enum JPEGRenderer {
         image = try AdvancedProcessor.apply(image.cropped(to: extent), options: options)
         extent = AdvancedProcessor.crop(extent, aspect: options.aspect)
         let outputSpace = CGColorSpace(name: options.outputColor == .displayP3 ? CGColorSpace.displayP3 : CGColorSpace.sRGB)!
-        if options.preserveHDR, let hdrSource {
-            let data = try AdaptiveHDR.encode(base: image, originalSDR: input, originalHDR: hdrSource,
-                extent: extent, colorSpace: outputSpace, quality: options.jpegQuality ?? 0.95, context: context)
-            return RenderedJPEG(data: data, width: Int(extent.width), height: Int(extent.height), adaptiveHDR: true)
-        }
         guard let cg = context.createCGImage(image, from: extent,
                     format: .RGBA8, colorSpace: outputSpace) else {
             throw CameraFailure.message("No se pudo renderizar la pila.")
+        }
+        if options.preserveHDR, let hdrSource {
+            // Calculate the companion from the actual bounded SDR rendition.
+            // Exposure/curves may produce super-white floats before this step;
+            // treating them as an SDR base would change tone and inflate HDR.
+            let base = CIImage(cgImage: cg).transformed(by: CGAffineTransform(translationX: extent.minX, y: extent.minY))
+            let data = try AdaptiveHDR.encode(base: base, originalSDR: input, originalHDR: hdrSource,
+                extent: extent, colorSpace: outputSpace, quality: options.jpegQuality ?? 0.95, context: context)
+            return RenderedJPEG(data: data, width: Int(extent.width), height: Int(extent.height), adaptiveHDR: true)
         }
         let data = NSMutableData()
         guard let destination = CGImageDestinationCreateWithData(data, "public.jpeg" as CFString, 1, nil) else {
