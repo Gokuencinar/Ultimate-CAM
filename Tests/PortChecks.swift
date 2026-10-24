@@ -80,6 +80,42 @@ import Darwin
         try rejects({ _ = try CubeLUT.parse(Data("LUT_3D_SIZE 64\n0 0 0".utf8)) }, "Truncated LUT")
         try rejects({ _ = try CubeLUT.parse(Data("LUT_3D_SIZE 9999999".utf8)) }, "Huge LUT")
         try rejects({ _ = try CubeLUT.parse(Data("LUT_1D_SIZE 2\n0 0 0\n1 1 1".utf8)) }, "1D LUT")
+        func pngTable(edge:Int, layout:PNGLUTLayout?, swapped:Bool=false, transparent:Bool=false) throws -> Data {
+            let level=Int(Double(edge).squareRoot())
+            let width=layout == nil ? edge*edge : edge*level
+            let height=layout == nil ? edge : width
+            var bytes=[UInt8](repeating:255,count:width*height*4)
+            for y in 0..<height { for x in 0..<width {
+                let r:Int,g:Int,b:Int
+                if layout == nil { r=x%edge;g=y;b=x/edge }
+                else if layout == .agcTiles { r=x%edge;g=y%edge;b=(y/edge)*level+x/edge }
+                else { let index=y*width+x;r=index%edge;g=(index/edge)%edge;b=index/(edge*edge) }
+                let channels=swapped ? [b,g,r] : [r,g,b]
+                for c in 0..<3 { bytes[(y*width+x)*4+c]=UInt8((Double(channels[c])*255/Double(edge-1)).rounded()) }
+            } }
+            if transparent { bytes[3]=0 }
+            let provider=CGDataProvider(data:Data(bytes) as CFData)!
+            let cg=CGImage(width:width,height:height,bitsPerComponent:8,bitsPerPixel:32,bytesPerRow:width*4,
+                space:space,bitmapInfo:CGBitmapInfo(rawValue:CGBitmapInfo.byteOrder32Big.rawValue | CGImageAlphaInfo.premultipliedLast.rawValue),
+                provider:provider,decode:nil,shouldInterpolate:false,intent:.defaultIntent)!
+            let data=NSMutableData(),dest=CGImageDestinationCreateWithData(data,"public.png" as CFString,1,nil)!
+            CGImageDestinationAddImage(dest,cg,nil)
+            try check(CGImageDestinationFinalize(dest),"Cannot encode PNG LUT fixture")
+            return data as Data
+        }
+        for layout in PNGLUTLayout.allCases {
+            let lut=try PNGLUT.parse(pngTable(edge:9,layout:layout),layout:layout,name:"Synthetic identity")
+            try check(lut.dimension==9 && difference(lut.apply(to:image,intensity:1),image)<0.02,
+                      "PNG layout/profile/orientation corrupts identity: \(layout)")
+            let swapPNG=try PNGLUT.parse(pngTable(edge:4,layout:layout,swapped:true),layout:layout,name:"Swapped")
+            try check(difference(swapPNG.apply(to:red,intensity:1),blue)<0.01,"PNG LUT channel or slice indexing differs from .cube")
+        }
+        let stripLUT=try PNGLUT.parse(pngTable(edge:81,layout:nil),layout:.agcTiles,name:"Large strip")
+        try check(stripLUT.dimension==64 && difference(stripLUT.apply(to:image,intensity:1),image)<0.02,
+                  "PNG strip downsampling mixes unrelated blue slices")
+        try rejects({ _ = try PNGLUT.parse(pngTable(edge:4,layout:.agcTiles,transparent:true),layout:.agcTiles,name:"Bad") },"Transparent PNG LUT")
+        try rejects({ _ = try PNGLUT.parse(Data("not PNG".utf8),layout:.agcTiles,name:"Bad") },"Invalid PNG LUT")
+        print("PNG LUT checks: AGC tiles, standard Hald, channel swap, strip, 81-to-64 interpolation and invalid files")
         var tuned = base
         tuned.chromaDenoise = 0.5; tuned.localContrast = 0.3; tuned.fineDetail = 0.2
         tuned.highlightCompression = 0.2; tuned.vibrance = 0.2; tuned.gamma = 1.1; tuned.vignette = 0.2

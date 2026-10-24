@@ -9,6 +9,11 @@ private enum ControlPanel: String, CaseIterable, Identifiable {
     var id: String { rawValue }
 }
 
+private enum ImportedProcessingFile {
+    case lut(id: String, title: String)
+    case profile(Data)
+}
+
 private enum CompositionGuide: String, CaseIterable, Identifiable {
     case thirds = "Tercios", golden = "Áurea", center = "Centro", diagonal = "Diagonales"
     var id: String { rawValue }
@@ -48,6 +53,8 @@ struct CameraView: View {
     @State private var profileName = ""
     @State private var importFile = false
     @State private var importingLUT = false
+    @State private var importingDocument = false
+    @State private var pngLUTLayout = PNGLUTLayout.agcTiles
     @State private var exportFile = false
     @State private var exportData = ProfileFile(data: Data())
     @State private var fileMessage: String?
@@ -369,6 +376,7 @@ struct CameraView: View {
                         }
                     }.padding(.horizontal).padding(.vertical, 12)
                 }.accessibilityIdentifier("settings.tabs")
+                if importingDocument { ProgressView("Importando archivo…").padding() }
                 Form {
                     switch panel {
                     case .capture: captureSettings
@@ -377,13 +385,13 @@ struct CameraView: View {
                     case .color: colorSettings
                     case .profiles: profileSettings
                     }
-                }.disabled(camera.busy || countdown > 0)
+                }.disabled(camera.busy || countdown > 0 || importingDocument)
                     .scrollContentBackground(.hidden).background(CameraPalette.surface)
             }
             .navigationTitle("Ajustes").navigationBarTitleDisplayMode(.inline)
-            .toolbar { ToolbarItem(placement: .confirmationAction) { Button("Listo") { showControls = false } } }
+            .toolbar { ToolbarItem(placement: .confirmationAction) { Button("Listo") { showControls = false }.disabled(importingDocument) } }
             .tint(CameraPalette.accent)
-        }.presentationDetents([.large]).presentationDragIndicator(.visible)
+        }.presentationDetents([.large]).presentationDragIndicator(.visible).interactiveDismissDisabled(importingDocument)
             .fileImporter(isPresented: $importFile, allowedContentTypes: importingLUT ? [.data] : [.json], onCompletion: importDocument)
             .fileExporter(isPresented: $exportFile, document: exportData, contentType: .json, defaultFilename: "UltimateCAM-profile") { result in
                 switch result { case .success: fileMessage = "Perfil exportado."; case .failure(let error): fileMessage = error.localizedDescription }
@@ -391,18 +399,39 @@ struct CameraView: View {
     }
 
     private func importDocument(_ result: Result<URL, Error>) {
-        do {
-            let url = try result.get(), access = url.startAccessingSecurityScopedResource()
-            defer { if access { url.stopAccessingSecurityScopedResource() } }
-            let size = try url.resourceValues(forKeys: [.fileSizeKey]).fileSize ?? 0
-            guard size <= 16 * 1024 * 1024 else { throw CameraFailure.message("El archivo supera 16 MB.") }
-            let data = try Data(contentsOf: url)
-            if importingLUT {
-                let lut = try CubeLUT.parse(data, name: url.deletingPathExtension().lastPathComponent)
-                options.lutID = try ColorLUTStore.save(lut)
-                fileMessage = "LUT importada: " + lut.title
-            } else if loadProfile(try profiles.importDocument(data)) { fileMessage = "Perfil importado." }
-        } catch { fileMessage = error.localizedDescription }
+        guard !importingDocument else { return }
+        guard case let .success(url) = result else {
+            if case let .failure(error) = result { fileMessage = error.localizedDescription }; return
+        }
+        let access = url.startAccessingSecurityScopedResource()
+        let isLUT = importingLUT, layout = pngLUTLayout
+        importingDocument = true
+        Task { @MainActor in
+            defer { importingDocument = false; if access { url.stopAccessingSecurityScopedResource() } }
+            do {
+                let payload = try await Task.detached(priority: .userInitiated) { () throws -> ImportedProcessingFile in
+                    let info = try url.resourceValues(forKeys: [.isRegularFileKey, .fileSizeKey])
+                    guard info.isRegularFile == true, let size = info.fileSize, size > 0, size <= 16*1024*1024 else {
+                        throw CameraFailure.message("Selecciona un archivo de hasta 16 MB.")
+                    }
+                    let handle = try FileHandle(forReadingFrom: url)
+                    defer { try? handle.close() }
+                    let data = try handle.read(upToCount: 16*1024*1024+1) ?? Data()
+                    guard data.count == size else { throw CameraFailure.message("El archivo cambió o no se pudo leer completo.") }
+                    if isLUT {
+                        let name = url.deletingPathExtension().lastPathComponent
+                        let lut = data.starts(with: PNGLUT.signature) ?
+                            try PNGLUT.parse(data, layout: layout, name: name) : try CubeLUT.parse(data, name: name)
+                        return .lut(id: try ColorLUTStore.save(lut), title: lut.title)
+                    }
+                    return .profile(data)
+                }.value
+                switch payload {
+                case let .lut(id,title): options.lutID = id; fileMessage = "LUT importada: " + title
+                case let .profile(data): if loadProfile(try profiles.importDocument(data)) { fileMessage = "Perfil importado." }
+                }
+            } catch { fileMessage = error.localizedDescription }
+        }
     }
 
     private var captureSettings: some View {
@@ -602,13 +631,16 @@ struct CameraView: View {
             }
             } else { ColorRecipeEditor(panel:colorPanel,recipe:$options.color) }
             Section("LUT 3D") {
-                Button("Importar LUT .cube") { importingLUT = true; importFile = true }
+                Picker("Distribución PNG cuadrado", selection: $pngLUTLayout) {
+                    ForEach(PNGLUTLayout.allCases) { Text($0.label).tag($0) }
+                }
+                Button("Importar LUT .cube o .png") { importingLUT = true; importFile = true }
                 if options.lutID != nil {
                     Text("LUT personalizada activa").foregroundStyle(CameraPalette.accent)
                     optionSlider("Intensidad LUT", value: $options.lutIntensity, range: 0...1)
                     Button("Quitar LUT") { options.lutID = nil }
                 }
-                Text("Tablas .cube 3D de 2 a 64 puntos. Afectan al resultado JPEG, no al visor ni al DNG.").font(.footnote).foregroundStyle(.secondary)
+                Text(".cube de 2 a 64 puntos, PNG RGB de 8 bits en mosaico AGC, Hald estándar o tira horizontal. Las tiras se reconocen automáticamente; los cuadrados necesitan la distribución correcta. Hasta 16 MB/16 MP, remuestreo a un máximo de 64 puntos. Afectan al JPEG, no al visor ni al DNG.").font(.footnote).foregroundStyle(.secondary)
             }
             Section("Salida JPEG") {
                 Toggle("Conservar HDR cuando esté disponible", isOn: $options.preserveHDR)
