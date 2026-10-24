@@ -4,6 +4,12 @@ Primer prototipo de cámara propia para el iPhone 11 Pro con iOS 18.7.1. Nombre 
 
 El objetivo es combinar captura nocturna por acumulación, como concepto de Lumi, con técnicas de fotografía computacional descritas por Google. Este proyecto contiene una primera pila de imágenes; no contiene Lumi, GCam ni sus modelos o bibliotecas.
 
+## Candidato 0.6: HDR y controles de AGC
+
+La [segunda etapa](docs/AGC-PORTABILIDAD-0.6.md) añade horquillado HDR experimental, HSL de ocho bandas, curvas RGB, gradación por zonas y efectos. Reorganiza los controles según los layouts del APK y su paleta Material3 de respaldo. Son implementaciones propias y la salida HDR sigue siendo un JPEG SDR. No se presenta como el motor HDR+ de Google ni como un port completo.
+
+jb-p1lot quedó emparejado tras autorización expresa, con conexión TLS y UID 0 confirmados. No se ha abierto Ultimate CAM ni se han enviado capturas en el iPhone. Los informes de build51 que siguen corresponden al estado anterior y se conservan como historial; la instalación y validación de cada candidato 0.6 se registran aparte.
+
 ## Versión 0.5 / build51: instalada sin prueba funcional
 
 La versión 0.5 adapta controles observados en el APK AGC 1.8.6 mediante código propio de Core Image/Vision. Añade cinco paneles, recetas por lente, perfiles JSON con LUT opcional, importación `.cube`, ruido cromático, detalle fino/contraste local, exposición y color del JPEG, calidad/P3/recorte, guías e histograma del resultado. Incluye alineación local y rechazo adaptativo experimentales, desactivados por defecto, y un punto de partida “Estático avanzado”. La revisión usa miniaturas limitadas a 1600 px, y el procesado ofrece progreso y cancelación cooperativa para conservar el original.

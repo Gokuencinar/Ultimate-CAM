@@ -1,5 +1,7 @@
 # AGC 1.8.6: auditoría y adaptación para Ultimate CAM 0.5
 
+Estado histórico de 0.5. Véase [la siguiente etapa 0.6](AGC-PORTABILIDAD-0.6.md) para HDR, ajustes de color, interfaz y conexión jb-p1lot.
+
 Fecha: 24-10-2026. Petición: estudiar el APK y el Java descompilado, adaptar funciones y menús a iOS, con las pruebas funcionales del iPhone aplazadas. El usuario autorizó posteriormente instalar el paquete por SSH sin abrir la app ni probar la cámara.
 
 ## Material y alcance de la evidencia

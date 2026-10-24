@@ -6,10 +6,10 @@ enum ColorPanel: String, CaseIterable, Identifiable {
 }
 
 enum CameraPalette {
-    // A fixed Material-style palette; Android's dynamic system theme cannot be
-    // reproduced pixel-for-pixel from XML on a different operating system.
-    static let accent = Color(red:0.77,green:0.84,blue:0.99)
-    static let surface = Color(red:0.12,green:0.13,blue:0.15)
+    // Resolved fallback colors from AGC Material3 dark XML. Android dynamic
+    // color may override these on the original phone.
+    static let accent = Color(red:208.0/255,green:188.0/255,blue:1)
+    static let surface = Color(red:33.0/255,green:31.0/255,blue:38.0/255)
 }
 
 struct ColorRecipeEditor: View {

@@ -591,21 +591,22 @@ final class CameraModel: NSObject, ObservableObject, AVCapturePhotoCaptureDelega
               active, !interrupted, let device = input?.device else {
             finishFailure(CameraFailure.message("Secuencia HDR interrumpida.")); return
         }
-        let exposure = hdrPlan[frames.count], token = transaction
+        let index = frames.count
+        let exposure = hdrPlan[index], token = transaction
         captureStage = "hdr-setup"
         do {
             try device.lockForConfiguration()
             defer { device.unlockForConfiguration() }
             device.setExposureModeCustom(duration:CMTime(seconds:exposure.seconds,preferredTimescale:1_000_000_000),iso:Float(exposure.iso)) { _ in
                 self.queue.async {
-                    guard self.inFlight, self.transaction == token, self.captureStage == "hdr-setup" else { return }
+                    guard self.inFlight, self.transaction == token, self.captureStage == "hdr-setup", self.frames.count == index else { return }
                     CaptureTrace.record("hdr.exposure.applied",["index":self.frames.count,"seconds":device.exposureDuration.seconds,"iso":device.iso])
                     self.captureNext()
                 }
             }
         } catch { finishFailure(error); return }
         queue.asyncAfter(deadline:.now()+5) {
-            guard self.inFlight, self.transaction == token, self.captureStage == "hdr-setup" else { return }
+            guard self.inFlight, self.transaction == token, self.captureStage == "hdr-setup", self.frames.count == index else { return }
             self.captureRecoveryRequired = true
             self.publish { self.ready = false }
             self.finishFailure(CameraFailure.message("No se confirmó la exposición HDR. Reabre la app; no se repetirá la captura."))

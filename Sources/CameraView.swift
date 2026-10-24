@@ -341,6 +341,7 @@ struct CameraView: View {
                     case .profiles: profileSettings
                     }
                 }.disabled(camera.busy || countdown > 0)
+                    .scrollContentBackground(.hidden).background(CameraPalette.surface)
             }
             .navigationTitle("Ajustes").navigationBarTitleDisplayMode(.inline)
             .toolbar { ToolbarItem(placement: .confirmationAction) { Button("Listo") { showControls = false } } }

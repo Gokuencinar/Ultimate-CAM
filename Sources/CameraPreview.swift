@@ -22,7 +22,7 @@ final class PreviewSurface: UIView {
         addSubview(ring)
         caption.font = .monospacedSystemFont(ofSize: 11, weight: .semibold)
         caption.textColor = .black
-        caption.backgroundColor = UIColor(red:0.77,green:0.84,blue:0.99,alpha:1)
+        caption.backgroundColor = UIColor(red:208.0/255,green:188.0/255,blue:1,alpha:1)
         caption.textAlignment = .center
         caption.layer.cornerRadius = 5
         caption.clipsToBounds = true
