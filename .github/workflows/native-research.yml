@@ -19,7 +19,7 @@ jobs:
           ldid -S build/native-research/UCNativeCapabilities
           xcrun --sdk iphoneos clang -arch arm64 -arch arm64e -miphoneos-version-min=18.0 -fobjc-arc -Wall -Wextra -Werror \
             -framework Foundation NativeBridge/tools/UCNativeCameraLaunch.m -o build/native-research/UCNativeCameraLaunch
-          ldid -S build/native-research/UCNativeCameraLaunch
+          ldid -SNativeBridge/tools/camera-launch-entitlements.plist build/native-research/UCNativeCameraLaunch
           cd build/native-research
           shasum -a 256 UCNativeCapabilities UCNativeCameraLaunch > SHA256SUMS.txt
           printf '%s\n' "$GITHUB_SHA" > SOURCE-COMMIT.txt
