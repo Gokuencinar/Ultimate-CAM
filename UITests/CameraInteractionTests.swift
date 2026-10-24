@@ -32,6 +32,10 @@ final class CameraInteractionTests: XCTestCase {
         app.buttons["camera.settings"].tap()
         let tabs = app.scrollViews["settings.tabs"]
         tabs.swipeLeft()
+        app.buttons["settings.tab.Color"].tap()
+        XCTAssertTrue(app.staticTexts["Exposición del JPEG (EV)"].waitForExistence(timeout: 3))
+        let colorScreen = XCTAttachment(screenshot: app.screenshot())
+        colorScreen.name = "Color controls"; colorScreen.lifetime = .keepAlways; add(colorScreen)
         let profiles = app.buttons["settings.tab.Perfiles"]
         XCTAssertTrue(profiles.waitForExistence(timeout: 3))
         profiles.tap()
@@ -40,6 +44,8 @@ final class CameraInteractionTests: XCTestCase {
         name.tap(); name.typeText("UI test profile")
         app.buttons["Guardar perfil actual"].tap()
         XCTAssertTrue(app.buttons["UI test profile"].waitForExistence(timeout: 3))
+        let profileScreen = XCTAttachment(screenshot: app.screenshot())
+        profileScreen.name = "Saved processing profile"; profileScreen.lifetime = .keepAlways; add(profileScreen)
         app.buttons["UI test profile"].tap()
         app.buttons["Listo"].tap()
         XCTAssertTrue(app.staticTexts["Noche estática · JPEG"].waitForExistence(timeout: 3))

@@ -46,7 +46,7 @@ enum AdvancedProcessor {
 
     static func crop(_ extent: CGRect, aspect: PhotoAspect) -> CGRect {
         guard aspect != .original else { return extent }
-        let ratio: CGFloat = aspect == .square ? 1 : (extent.width > extent.height ? 16.0 / 9 : 9.0 / 16)
+        let ratio: CGFloat = aspect == .square ? 1 : (extent.width >= extent.height ? 16.0 / 9 : 9.0 / 16)
         let width = min(extent.width, extent.height * ratio), height = min(extent.height, extent.width / ratio)
         // Stay inside the input, with integer output pixels.
         return CGRect(x: ceil(extent.midX - width / 2), y: ceil(extent.midY - height / 2), width: floor(width), height: floor(height)).intersection(extent)

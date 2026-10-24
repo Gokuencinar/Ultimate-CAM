@@ -36,7 +36,7 @@ struct CubeLUT: Codable, Equatable {
         var lower: [Float] = [0,0,0], upper: [Float] = [1,1,1], values = [Float]()
         var started = false
         for raw in text.split(whereSeparator: \.isNewline) {
-            let line = raw.split(separator: "#", maxSplits: 1, omittingEmptySubsequences: false)[0]
+            let line = raw.trimmingCharacters(in: CharacterSet(charactersIn: "\u{FEFF}")).split(separator: "#", maxSplits: 1, omittingEmptySubsequences: false)[0]
                 .trimmingCharacters(in: .whitespacesAndNewlines)
             if line.isEmpty { continue }
             let parts = line.split(whereSeparator: \.isWhitespace).map(String.init)
