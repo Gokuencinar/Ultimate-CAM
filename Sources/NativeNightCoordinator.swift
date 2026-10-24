@@ -38,12 +38,22 @@ final class NativeNightCoordinator: ObservableObject {
         camera.prepareNativeHandoff { [weak self] accepted in
             guard let self else { return }
             guard accepted, let token=self.token(self.intent) else {
-                self.opening=false;self.report("No se pudo liberar la sesión para Cámara de Apple.");return
+                self.opening=false
+                if accepted { camera.start() }
+                self.report("No se pudo preparar la conexión con Cámara de Apple.");return
             }
             let now=UInt64(Date().timeIntervalSince1970)
-            let request=UCNMakeIntent(now,120,UInt8.random(in:0...255))
+            var nonce=UInt8.random(in:0...255)
+            var request=UCNMakeIntent(now,120,nonce)
+            let oldConfirmed=self.read(self.confirmed),oldAck=self.read(self.ack)
+            // Reopening within the same second must not reuse a historical
+            // acknowledgement, even if the random eight-bit nonce collides.
+            while request==oldConfirmed || request==oldAck {
+                nonce &+= 1;request=UCNMakeIntent(now,120,nonce)
+            }
             guard request != 0, notify_set_state(token,request)==0, notify_post(self.changed)==0,
                   let url=URL(string:"camera://") else {
+                _ = notify_set_state(token,0);_ = notify_post(self.changed)
                 self.opening=false;camera.start();self.report("No se pudo solicitar Noche nativa.");return
             }
             self.pendingRequest=request
@@ -66,7 +76,7 @@ final class NativeNightCoordinator: ObservableObject {
         let reply=read(ack),code=read(status),nativeMode=read(resolved),lastConfirmed=read(confirmed)
         if let token=token(intent) { _ = notify_set_state(token,0);_ = notify_post(changed) }
         CaptureTrace.record("nativeNight.return",["ackMatches":reply==expected,"status":code,"nativeMode":nativeMode])
-        if lastConfirmed==expected || (reply==expected && nativeMode==2 && code==4) {
+        if lastConfirmed==expected {
             report("El complemento confirmó el ajuste Noche máximo en Cámara de Apple. La foto y su calidad no se comprueban por esta señal. Puedes importar el resultado desde la galería.")
         } else if code==2 || code==3 {
             report("El complemento de Noche nativa no admite este dispositivo, sistema o firma de métodos.")
