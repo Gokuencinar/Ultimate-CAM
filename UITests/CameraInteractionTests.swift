@@ -39,6 +39,16 @@ final class CameraInteractionTests: XCTestCase {
         XCTAssertTrue(app.staticTexts["Exposición del JPEG (EV)"].waitForExistence(timeout: 3))
         let colorScreen = XCTAttachment(screenshot: app.screenshot())
         colorScreen.name = "Color controls"; colorScreen.lifetime = .keepAlways; add(colorScreen)
+        let hdrOutput = app.switches["output.preserveHDR"]
+        for _ in 0..<8 {
+            if hdrOutput.isHittable { break }
+            app.swipeUp()
+        }
+        XCTAssertTrue(hdrOutput.isHittable)
+        hdrOutput.tap()
+        XCTAssertEqual(hdrOutput.value as? String,"1")
+        let outputScreen = XCTAttachment(screenshot:app.screenshot())
+        outputScreen.name="Adaptive HDR output and PNG LUT import";outputScreen.lifetime = .keepAlways;add(outputScreen)
         let profiles = app.buttons["settings.tab.Perfiles"]
         XCTAssertTrue(profiles.waitForExistence(timeout: 3))
         profiles.tap()
