@@ -1,0 +1,19 @@
+name: Native Night · Camera companion
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  package:
+    runs-on: macos-15
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Compile, check protocol and package companion
+        run: bash NativeBridge/package_native.sh
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Ultimate-CAM-Native-Night-${{ github.run_id }}
+          path: build/native-night/
+          if-no-files-found: error
+          retention-days: 14
