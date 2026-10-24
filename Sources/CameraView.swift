@@ -70,7 +70,7 @@ struct CameraView: View {
     @State private var shutterStops = log2(1.0 / 60)
     @State private var options = ProcessingOptions()
     private var preset: String {
-        if options.nightStatic { return "Noche estática" }
+        if options.nightStatic { return options.localAlignment && options.adaptiveMotionRejection ? "Estático avanzado" : "Noche estática" }
         if options.advancedRendering { return "Personalizado" }
         if options.noiseReduction == 0 && options.sharpening == 0.25 && options.liftShadows == 0 { return "Detalle" }
         return options.noiseReduction == 0 && options.sharpening == 0 && options.liftShadows == 0 ? "Natural" : "Personalizado"
@@ -314,7 +314,7 @@ struct CameraView: View {
                     HStack(spacing: 8) {
                         ForEach(ControlPanel.allCases) { item in
                             Button(item.rawValue) { panel = item }
-                                .buttonStyle(.bordered).tint(panel == item ? .yellow : .gray)
+                                .buttonStyle(.bordered).tint(panel == item ? .yellow : .white)
                                 .accessibilityIdentifier("settings.tab." + item.rawValue)
                         }
                     }.padding(.horizontal).padding(.vertical, 12)
@@ -453,16 +453,19 @@ struct CameraView: View {
                 HStack {
                     ForEach(["Natural", "Detalle", "Noche estática"], id: \.self) { name in
                         Button(name) { applyPreset(name) }.buttonStyle(.bordered)
-                            .tint(preset == name ? .yellow : .gray)
+                            .tint(preset == name ? .yellow : .white)
                     }
                 }
                 Button("Estático avanzado · experimental") {
                     applyPreset("Noche estática")
                     options.localAlignment = true; options.adaptiveMotionRejection = true
                     options.chromaDenoise = 0.35; options.localContrast = 0.2; options.fineDetail = 0.12
-                }.buttonStyle(.bordered)
+                }.buttonStyle(.bordered).tint(preset == "Estático avanzado" ? .yellow : .white)
+                Text("Para escenas inmóviles y con el iPhone apoyado.").font(.footnote).foregroundStyle(.secondary)
+                DisclosureGroup("Cómo funciona Noche estática") {
                 Text("Noche estática necesita el iPhone apoyado y una escena inmóvil. Ajusta la exposición y fusiona JPEG de cámara. La opción DNG experimental puede introducir dominantes de color en sombras. Conserva la referencia. Es experimental y no equivale a Night Sight ni al modo Noche de Apple.")
                     .font(.footnote).foregroundStyle(.secondary)
+                }
             }
             if options.nightStatic && camera.supportsRAW {
                 Section("RAW nocturno experimental") {
