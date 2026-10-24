@@ -3,7 +3,6 @@
 #import <dlfcn.h>
 #import <sys/sysctl.h>
 #import <mach/mach.h>
-#import <mach/mach_vm.h>
 #if __has_feature(ptrauth_calls)
 #import <ptrauth.h>
 #endif
@@ -46,8 +45,8 @@ static NSDictionary *Code(NSString *className, NSString *selector) {
 #else
     void *address = (void *)implementation;
 #endif
-    NSMutableData *data = [NSMutableData dataWithLength:1024]; mach_vm_size_t read = 0;
-    kern_return_t status = mach_vm_read_overwrite(mach_task_self(),(mach_vm_address_t)address,1024,(mach_vm_address_t)data.mutableBytes,&read);
+    NSMutableData *data = [NSMutableData dataWithLength:1024]; vm_size_t read = 0;
+    kern_return_t status = vm_read_overwrite(mach_task_self(),(vm_address_t)address,1024,(vm_address_t)data.mutableBytes,&read);
     data.length = status == KERN_SUCCESS ? (NSUInteger)read : 0;
     Dl_info image = {0}; dladdr(address,&image);
     return @{@"class":className,@"selector":selector,@"present":@YES,
