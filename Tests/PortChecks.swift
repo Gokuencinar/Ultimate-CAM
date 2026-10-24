@@ -212,6 +212,7 @@ import Darwin
         let grainImage = try AdvancedProcessor.apply(neutral,options:grainOptions)
         try check(difference(grainImage,neutral)>0.001 && pixels(grainImage).allSatisfy(\.isFinite), "Grain kernel has no effect or produces nonfinite pixels")
         var fullColor=base;fullColor.color=grade;fullColor.color.redCurve=curveRecipe.redCurve
+        fullColor.nightBudget=16; fullColor.nightShutterLimit=0.125; fullColor.nightWeightedFusion=false; fullColor.singlePhotoQuality = .balanced
         let roundTrip=try JSONDecoder().decode(ProcessingOptions.self,from:JSONEncoder().encode(fullColor))
         try check(roundTrip == fullColor,"Color recipe did not survive profile serialization")
         print("Validated recipes, LUTs/domains, rendering kernels, residual mesh, adaptive rejection, crop/P3, histogram, profile persistence, bounded/oriented previews, cooperative cancellation and legacy passthrough.")

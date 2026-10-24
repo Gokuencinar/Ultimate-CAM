@@ -220,6 +220,18 @@ struct ProcessorChecks {
         try require(Double(screenAfter.pixels[0]) > Double(screenBefore.pixels[0]) * 1.3,
             "Highlight protection also prevented shadow recovery")
         log("Night highlight retention and simultaneous shadow lift passed")
+        let cleanNight = try bitmap(processor.process([cleanData],options:night).jpeg)
+        let noisyNight = try bitmap(processor.process([noisy[0]],options:night).jpeg)
+        let weightedNightResult = try processor.process(noisy,options:night)
+        let weightedNight = try bitmap(weightedNightResult.jpeg)
+        func nightError(_ image: (pixels:[UInt8],width:Int,height:Int)) -> Double {
+            var error = Double.infinity
+            for y in 0...3 { for x in 0...3 { error = min(error,rmse(image,against:cleanNight,offsetX:x,offsetY:y)) } }
+            return error
+        }
+        let singleNightError=nightError(noisyNight), weightedNightError=nightError(weightedNight)
+        try require(weightedNightResult.mergedFrames>=2 && weightedNightError<singleNightError*0.85,"Weighted night pipeline failed to reduce synthetic static noise")
+        log("WEIGHTED NIGHT PIPELINE CHECKS PASSED · synthetic RMSE \(singleNightError) -> \(weightedNightError), not optical quality")
         do {
             _ = try processor.process([cleanData], options: night, rawFrames: [])
             throw CameraFailure.message("Mismatched RAW/JPEG accepted")

@@ -174,7 +174,7 @@ final class CameraModel: NSObject, ObservableObject, AVCapturePhotoCaptureDelega
     func cancelProcessing() {
         queue.async {
             guard let cancellation = self.processingCancellation else { return }
-            cancellation.cancel()
+            cancellation.cancel(self.captureStage == "importing" ? "Importación cancelada. La foto de Fotos no se ha modificado." : "Procesado cancelado; se conserva la referencia.")
             self.publish { self.processingInProgress = false }
             self.message("Recuperando referencia…")
         }
