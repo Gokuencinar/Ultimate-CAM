@@ -25,10 +25,14 @@ enum CameraFailure: LocalizedError {
 final class BurstProcessor {
     private let context = CIContext(options: [
         .workingColorSpace: CGColorSpace(name: CGColorSpace.extendedLinearSRGB)!,
+        .cacheIntermediates: false,
         .outputColorSpace: CGColorSpace(name: CGColorSpace.sRGB)!
     ])
 
-    func process(_ frames: [Data], options: ProcessingOptions = ProcessingOptions(), rawFrames: [Data]? = nil) throws -> CaptureResult {
+    func process(_ frames: [Data], options: ProcessingOptions = ProcessingOptions(), rawFrames: [Data]? = nil, cancellation: ProcessingCancellation? = nil, progress: ((String) -> Void)? = nil) throws -> CaptureResult {
+        defer { context.clearCaches() }
+        try cancellation?.check()
+        progress?("Preparando imágenes…")
         let options = try options.validated()
         guard let first = frames.first else { throw CameraFailure.message("No hay imágenes.") }
         if let rawFrames, rawFrames.count != frames.count {
@@ -95,6 +99,7 @@ final class BurstProcessor {
         if options.chooseSharpestReference && frames.count > 1 {
             var best = -Double.infinity
             for (index, frame) in inputFrames.enumerated() {
+                try cancellation?.check()
                 let score = try autoreleasepool { () throws -> Double in
                     if isRAW {
                         guard let preview = CIImage(data: frames[index], options: [.applyOrientationProperty: true]) else {
@@ -122,8 +127,11 @@ final class BurstProcessor {
             return rendered
         }
         let registrationReference = try registrationImage(reference)
-        var accepted = 1
+        var accepted = 1, attempted = 1
         for (index, frame) in inputFrames.enumerated() where index != referenceIndex {
+            try cancellation?.check()
+            attempted += 1
+            progress?("Procesando fotograma \(attempted) de \(inputFrames.count)…")
             try autoreleasepool {
                 let image = try decode(frame)
                 guard abs(image.extent.width - reference.extent.width) < 1,
@@ -220,6 +228,8 @@ final class BurstProcessor {
             return CaptureResult(jpeg: referenceData, reference: referenceData,
                                  details: "No se pudo alinear la pila. Se conserva la referencia sin fusionar.", mergedFrames: 1)
         }
+        try cancellation?.check()
+        progress?("Aplicando ajustes…")
         if options.nightStatic { accumulator = try nightTone(accumulator.cropped(to: common), maximumGain: isRAW ? 32 : 8) }
         if options.noiseReduction > 0 {
             accumulator = accumulator.applyingFilter("CINoiseReduction", parameters: [
@@ -245,6 +255,7 @@ final class BurstProcessor {
                     format: .RGBA8, colorSpace: outputSpace) else {
             throw CameraFailure.message("No se pudo renderizar la pila.")
         }
+        try cancellation?.check()
         let data = NSMutableData()
         guard let destination = CGImageDestinationCreateWithData(data, "public.jpeg" as CFString, 1, nil) else {
             throw CameraFailure.message("No se pudo crear el JPEG.")

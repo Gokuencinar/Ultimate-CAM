@@ -104,6 +104,10 @@ struct CameraView: View {
         .overlay(alignment: .bottom) {
             VStack(spacing: 0) {
                 focusInfo.padding(.horizontal, 20).padding(.bottom, 8)
+                if camera.processingInProgress {
+                    Button("Detener procesado y conservar original") { camera.cancelProcessing() }
+                        .font(.footnote.bold()).buttonStyle(.bordered).tint(.yellow).padding(.bottom, 8)
+                }
                 bottomDock
             }
             .background {

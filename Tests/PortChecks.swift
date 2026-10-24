@@ -96,6 +96,13 @@ import Darwin
         let png = context.pngRepresentation(of:image,format:.RGBA8,colorSpace:space)!
         var output = base; output.aspect = .wide; output.outputColor = .displayP3; output.jpegQuality = 0.9
         let result = try BurstProcessor().process([png],options:output)
+        let large = image.transformed(by:CGAffineTransform(scaleX:32,y:32))
+        let largePNG = context.pngRepresentation(of:large,format:.RGBA8,colorSpace:space)!
+        let preview = PreviewDecoder.image(largePNG)!
+        try check(max(preview.width,preview.height) <= 1600, "Review preview exceeds memory bound")
+        try check(PreviewDecoder.image(Data("bad image".utf8)) == nil, "Invalid review data accepted")
+        let cancellation = ProcessingCancellation(); cancellation.cancel()
+        try rejects({ _ = try BurstProcessor().process([png],cancellation:cancellation) }, "Cancelled processing")
         let source = CGImageSourceCreateWithData(result.jpeg as CFData,nil)!
         let cg = CGImageSourceCreateImageAtIndex(source,0,nil)!
         try check(cg.width == 96 && cg.height == 54, "16:9 output is not cropped correctly")

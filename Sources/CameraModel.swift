@@ -96,6 +96,8 @@ final class CameraModel: NSObject, ObservableObject, AVCapturePhotoCaptureDelega
     private var captureRecoveryRequired = false
     private var focusToken = UUID()
     private var savedKinds = Set<String>()
+    private var processingCancellation: ProcessingCancellation?
+    @Published private(set) var processingInProgress = false
 
     override init() {
         super.init()
@@ -106,6 +108,8 @@ final class CameraModel: NSObject, ObservableObject, AVCapturePhotoCaptureDelega
             "processingDelegate": responds(to: NSSelectorFromString("captureOutput:didFinishProcessingPhoto:error:")),
             "completionDelegate": responds(to: NSSelectorFromString("captureOutput:didFinishCaptureForResolvedSettings:error:"))
         ])
+        NotificationCenter.default.addObserver(self, selector: #selector(memoryWarning),
+            name: UIApplication.didReceiveMemoryWarningNotification, object: nil)
         NotificationCenter.default.addObserver(self, selector: #selector(sessionInterrupted),
             name: AVCaptureSession.wasInterruptedNotification, object: session)
         NotificationCenter.default.addObserver(self, selector: #selector(interruptionEnded),
@@ -151,6 +155,24 @@ final class CameraModel: NSObject, ObservableObject, AVCapturePhotoCaptureDelega
             publish { self.ready = available }
             message("Lista. La pila es experimental y requiere una escena inmóvil.")
         } catch { message(error.localizedDescription) }
+    }
+
+    @objc private func memoryWarning() {
+        queue.async {
+            if self.processingCancellation != nil {
+                CaptureTrace.record("processing.memoryWarning")
+                self.processingCancellation?.cancel("Procesado detenido por presión de memoria; se conserva la referencia.")
+            }
+        }
+    }
+
+    func cancelProcessing() {
+        queue.async {
+            guard let cancellation = self.processingCancellation else { return }
+            cancellation.cancel()
+            self.publish { self.processingInProgress = false }
+            self.message("Recuperando referencia…")
+        }
     }
 
     func stop() {
@@ -671,20 +693,32 @@ final class CameraModel: NSObject, ObservableObject, AVCapturePhotoCaptureDelega
             self.rawData = nil
             self.frames = []
             self.captureStage = "processing"
+            let cancellation = ProcessingCancellation()
+            self.processingCancellation = cancellation
+            self.publish { self.processingInProgress = true }
             self.message("Procesando…")
-            if options.nightStatic {
-                self.queue.asyncAfter(deadline: .now() + 90) {
+            self.queue.asyncAfter(deadline: .now() + 90) {
+                guard self.inFlight, self.transaction == token, self.captureStage == "processing" else { return }
+                cancellation.cancel("El procesado superó 90 segundos; se conserva la referencia.")
+                self.message("Recuperando referencia…")
+                // A blocked framework/GPU call cannot be interrupted cooperatively.
+                self.queue.asyncAfter(deadline: .now() + 10) {
                     guard self.inFlight, self.transaction == token, self.captureStage == "processing" else { return }
                     self.captureRecoveryRequired = true
                     self.publish { self.ready = false }
-                    self.finishFailure(CameraFailure.message("El procesado nocturno no terminó en 90 segundos. Cierra y abre Ultimate CAM; no se repetirá la captura."))
+                    self.finishFailure(CameraFailure.message("El procesado no respondió a la cancelación. Cierra y abre Ultimate CAM; no se repetirá la captura."))
                 }
             }
             self.processing.async {
                 let processingStarted = ProcessInfo.processInfo.systemUptime
                 let processed = Result { try autoreleasepool {
                     do {
-                        var result = try BurstProcessor().process(captured, options: options, rawFrames: rawBurst)
+                        var result = try BurstProcessor().process(captured, options: options, rawFrames: rawBurst, cancellation: cancellation) { text in
+                            self.queue.async {
+                                guard self.transaction == token, self.inFlight, self.captureStage == "processing" else { return }
+                                self.message(text)
+                            }
+                        }
                         if !options.nightStatic { result.raw = raw }
                         result.statistics = ImageStatistics.measure(result.jpeg)
                         return result
@@ -696,8 +730,15 @@ final class CameraModel: NSObject, ObservableObject, AVCapturePhotoCaptureDelega
                             mergedFrames: 1, raw: rawBurst?.first ?? raw, source: "reference-fallback", statistics: ImageStatistics.measure(first))
                     }
                 } }
+                let reviewImages: (UIImage?, UIImage?)
+                if case .success(let result) = processed {
+                    let primary = PreviewDecoder.image(result.jpeg).map { UIImage(cgImage: $0) }
+                    let reference = result.reference == result.jpeg ? primary : PreviewDecoder.image(result.reference).map { UIImage(cgImage: $0) }
+                    reviewImages = (primary, reference)
+                } else { reviewImages = (nil, nil) }
                 self.queue.async {
                     guard self.transaction == token, self.inFlight else { return }
+                    self.processingCancellation = nil
                     switch processed {
                     case .success(let result):
                         CaptureTrace.record("capture.success", ["bytes": result.jpeg.count,
@@ -710,8 +751,9 @@ final class CameraModel: NSObject, ObservableObject, AVCapturePhotoCaptureDelega
                         self.savedKinds = []
                         self.exportedResult = nil
                         self.publish {
-                            self.preview = UIImage(data: result.jpeg)
-                            self.referencePreview = UIImage(data: result.reference)
+                            self.preview = reviewImages.0
+                            self.referencePreview = reviewImages.1
+                            self.processingInProgress = false
                             self.resultDetails = result.details
                             self.resultStatistics = result.statistics
                             self.hasRAWResult = result.raw != nil
@@ -768,11 +810,12 @@ final class CameraModel: NSObject, ObservableObject, AVCapturePhotoCaptureDelega
         captureID = nil
         captureStage = "idle"
         restoreDevice()
+        processingCancellation?.cancel(); processingCancellation = nil
         frames = []
         nightRawFrames = []
         rawData = nil
         inFlight = false
-        publish { self.busy = false; self.status = error.localizedDescription }
+        publish { self.busy = false; self.processingInProgress = false; self.status = error.localizedDescription }
     }
 
     func photoOutput(_ output: AVCapturePhotoOutput, willBeginCaptureFor resolvedSettings: AVCaptureResolvedPhotoSettings) {
