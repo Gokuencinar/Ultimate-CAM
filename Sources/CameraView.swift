@@ -445,7 +445,7 @@ struct CameraView: View {
             if options.hdrBracketing {
                 Section("HDR por horquillado") {
                     Picker("Separación respecto a la referencia",selection:$options.hdrSpan) { Text("±1 EV").tag(1.0);Text("±2 EV").tag(2.0);Text("±3 EV").tag(3.0) }
-                    Text("Tres exposiciones JPEG distintas con fusión de radiancia aproximada. Salida SDR. Es experimental; no es el motor HDR+ de Google.").font(.footnote).foregroundStyle(.secondary)
+                    Text("Tres exposiciones JPEG distintas con fusión de radiancia aproximada. Puedes conservar el rango ampliado activando el mapa HDR en Color · Salida JPEG. Es experimental; no es el motor HDR+ de Google.").font(.footnote).foregroundStyle(.secondary)
                 }
             }
             Section("Pila de imágenes") {
@@ -611,6 +611,8 @@ struct CameraView: View {
                 Text("Tablas .cube 3D de 2 a 64 puntos. Afectan al resultado JPEG, no al visor ni al DNG.").font(.footnote).foregroundStyle(.secondary)
             }
             Section("Salida JPEG") {
+                Toggle("Conservar HDR cuando esté disponible", isOn: $options.preserveHDR)
+                    .accessibilityIdentifier("output.preserveHDR")
                 Picker("Espacio de color", selection: $options.outputColor) { ForEach(OutputColor.allCases) { Text($0.label).tag($0) } }
                 Picker("Proporción", selection: $options.aspect) { ForEach(PhotoAspect.allCases) { Text($0.label).tag($0) } }
                 Toggle("Elegir calidad JPEG", isOn: Binding(get: { options.jpegQuality != nil }, set: { options.jpegQuality = $0 ? 0.95 : nil }))
@@ -618,7 +620,7 @@ struct CameraView: View {
                     Slider(value: Binding(get: { options.jpegQuality ?? 0.95 }, set: { options.jpegQuality = $0 }), in: 0.5...1)
                     Text("Calidad: \(Int((options.jpegQuality ?? 0.95) * 100)) %")
                 }
-                Text("Display P3 conserva un perfil de color amplio; la salida es SDR. El recorte afecta al archivo; el visor sigue llenando la pantalla.").font(.footnote).foregroundStyle(.secondary)
+                Text("El mapa HDR se genera en horquillado HDR o al editar una foto con HDR incorporado. Foto sin mapa, Pila y Noche propia producen SDR. La base JPEG se puede abrir en pantallas SDR. Display P3 amplía el color; no crea HDR por sí solo. El visor y la revisión muestran SDR.").font(.footnote).foregroundStyle(.secondary)
             }
             if let fileMessage { Section { Text(fileMessage).font(.footnote) } }
         }

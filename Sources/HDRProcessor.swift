@@ -3,7 +3,8 @@ import Vision
 
 /// Original RGB radiance fusion of a metered/short/long JPEG bracket. Camera
 /// JPEG tone processing means this is only an approximation to sensor radiance.
-/// It is not Google's RAW HDR+ / HDRnet pipeline or an Ultra HDR encoder.
+/// It is not Google's RAW HDR+ / HDRnet pipeline. Optional Adaptive HDR output
+/// uses the system encoder with the fused radiance and an SDR base.
 final class HDRProcessor {
     private let space = CGColorSpace(name: CGColorSpace.extendedLinearSRGB)!
     private lazy var context = CIContext(options:[.workingColorSpace:space,.cacheIntermediates:false])
@@ -60,10 +61,10 @@ final class HDRProcessor {
         guard let merged = Self.mergeKernel?.apply(extent:extent,arguments:[images[0],images[1],images[2],
             CIVector(x:scales[0],y:scales[1],z:scales[2]),CIVector(x:valid[0],y:valid[1],z:valid[2]),options.rejectMotion ? 1.0 : 0.0]),
               let mapped = Self.toneKernel?.apply(extent:extent,arguments:[merged]) else { throw CameraFailure.message("No se pudo ejecutar la fusión HDR.") }
-        let rendered = try JPEGRenderer.render(mapped,extent:extent,options:options,context:context)
+        let rendered = try JPEGRenderer.render(mapped,extent:extent,options:options,context:context,hdrSource:merged)
         try cancellation?.check()
         return CaptureResult(jpeg:rendered.data,reference:frames[0],
-            details:"HDR experimental · \(accepted)/3 exposiciones · \(String(format:"%.1f",log2(scales.max()!/scales.min()!))) EV recibidos · \(rendered.width) × \(rendered.height) px. JPEG SDR.",
+            details:"HDR experimental · \(accepted)/3 exposiciones · \(String(format:"%.1f",log2(scales.max()!/scales.min()!))) EV recibidos · \(rendered.width) × \(rendered.height) px. \(rendered.encodingDescription)",
             mergedFrames:accepted,source:"HDR-JPEG-radiance")
     }
 

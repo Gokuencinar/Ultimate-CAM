@@ -25,6 +25,20 @@ enum ImportedPhotoProcessor {
         var recipe = try options.validated()
         // Never capture or treat an imported image as a burst, HDR bracket or RAW.
         recipe.nightStatic = false; recipe.nightRAW = false; recipe.hdrBracketing = false
+        if recipe.preserveHDR, let hdr = AdaptiveHDR.expanded(data),
+           let sdr = CIImage(data: data, options: [.applyOrientationProperty: true]) {
+            let context = CIContext(options: [.workingColorSpace: CGColorSpace(name: CGColorSpace.extendedLinearSRGB)!,
+                                              .cacheIntermediates: false])
+            defer { context.clearCaches() }
+            let reference = UTType(type as String)?.conforms(to: .jpeg) == true ? data :
+                try JPEGRenderer.render(sdr, extent: sdr.extent, options: ProcessingOptions(), context: context).data
+            try cancellation?.check()
+            let rendered = try JPEGRenderer.render(sdr, extent: sdr.extent, options: recipe, context: context, hdrSource: hdr)
+            try cancellation?.check()
+            return CaptureResult(jpeg: rendered.data, reference: reference,
+                details: "Foto importada · \(rendered.width) × \(rendered.height) px. \(rendered.encodingDescription) Sin nueva captura.",
+                mergedFrames: 1, source: "imported-rendered-image", statistics: ImageStatistics.measure(rendered.data))
+        }
         let reference: Data
         let isJPEG = UTType(type as String)?.conforms(to: .jpeg) == true
         if isJPEG { reference = data }

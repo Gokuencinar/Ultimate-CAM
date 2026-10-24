@@ -43,6 +43,7 @@ struct ProcessingOptions: Codable, Equatable {
     var vignette: Double = 0
     var jpegQuality: Double? = nil
     var outputColor: OutputColor = OutputColor.sRGB
+    var preserveHDR: Bool = false
     var aspect: PhotoAspect = PhotoAspect.original
     var lutID: String? = nil
     var lutIntensity: Double = 1
@@ -87,7 +88,7 @@ struct ProcessingOptions: Codable, Equatable {
 // not silently clamped into a different recipe.
 extension ProcessingOptions {
     enum CodingKeys: String, CodingKey {
-        case singlePhotoQuality, nightBudget, nightShutterLimit, nightWeightedFusion, hdrBracketing, hdrSpan, color, nightStatic, nightRAW, chooseSharpestReference, rejectMotion, maximumDimension, noiseReduction, sharpening, liftShadows, localAlignment, adaptiveMotionRejection, motionSigma, chromaDenoise, localContrast, fineDetail, contrast, saturation, vibrance, gamma, postExposure, highlightCompression, sharpenRadius, vignette, jpegQuality, outputColor, aspect, lutID, lutIntensity
+        case singlePhotoQuality, nightBudget, nightShutterLimit, nightWeightedFusion, hdrBracketing, hdrSpan, color, nightStatic, nightRAW, chooseSharpestReference, rejectMotion, maximumDimension, noiseReduction, sharpening, liftShadows, localAlignment, adaptiveMotionRejection, motionSigma, chromaDenoise, localContrast, fineDetail, contrast, saturation, vibrance, gamma, postExposure, highlightCompression, sharpenRadius, vignette, jpegQuality, outputColor, preserveHDR, aspect, lutID, lutIntensity
     }
     init(from decoder: Decoder) throws {
         self.init()
@@ -123,6 +124,7 @@ extension ProcessingOptions {
         vignette = try c.decodeIfPresent(Double.self, forKey: .vignette) ?? vignette
         jpegQuality = try c.decodeIfPresent(Double.self, forKey: .jpegQuality)
         outputColor = try c.decodeIfPresent(OutputColor.self, forKey: .outputColor) ?? outputColor
+        preserveHDR = try c.decodeIfPresent(Bool.self, forKey: .preserveHDR) ?? preserveHDR
         aspect = try c.decodeIfPresent(PhotoAspect.self, forKey: .aspect) ?? aspect
         lutID = try c.decodeIfPresent(String.self, forKey: .lutID)
         lutIntensity = try c.decodeIfPresent(Double.self, forKey: .lutIntensity) ?? lutIntensity

@@ -167,6 +167,49 @@ import Darwin
         var radiance = [Float](repeating:0,count:8*8*4)
         radiance.withUnsafeMutableBytes { context.render(recovered,toBitmap:$0.baseAddress!,rowBytes:8*16,bounds:bounds,format:.RGBAf,colorSpace:linear) }
         try check(abs(radiance[0]-2)<0.01, "HDR did not recover unclipped short-exposure radiance")
+        // Exercise real file encoding and re-expansion, not just a toggle or
+        // an XMP string. The two halves have identical SDR pixels but distinct
+        // HDR headroom; a flat gain map cannot satisfy these checks.
+        let hdrBounds = CGRect(x:0,y:0,width:256,height:128)
+        var hdrSamples = [Float](repeating:1,count:256*128*4)
+        var sdrSamples = hdrSamples
+        for y in 0..<128 { for x in 0..<256 { for c in 0..<3 {
+            sdrSamples[(y*256+x)*4+c] = 0.5
+            hdrSamples[(y*256+x)*4+c] = x < 128 ? 0.5 : 2
+        } } }
+        func hdrFixture(_ values: [Float]) -> CIImage {
+            CIImage(bitmapData:values.withUnsafeBufferPointer { Data(buffer:$0) },bytesPerRow:256*16,
+                    size:hdrBounds.size,format:.RGBAf,colorSpace:linear)
+        }
+        let sdrBase=hdrFixture(sdrSamples), hdrOriginal=hdrFixture(hdrSamples)
+        var hdrOutput=base;hdrOutput.preserveHDR=true;hdrOutput.aspect = .wide
+        let hdrFile=try JPEGRenderer.render(sdrBase,extent:hdrBounds,options:hdrOutput,context:context,hdrSource:hdrOriginal)
+        try check(hdrFile.adaptiveHDR && AdaptiveHDR.hasGainMap(hdrFile.data), "Encoded JPEG has no real HDR auxiliary image")
+        try check(hdrFile.width==227 && hdrFile.height==128, "HDR aspect crop differs from SDR")
+        let hdrDecoded=AdaptiveHDR.expanded(hdrFile.data)!
+        let sdrDecoded=CIImage(data:hdrFile.data)!
+        func sampleLinear(_ image:CIImage,_ x:Int) -> Float {
+            var pixel=[Float](repeating:0,count:4)
+            pixel.withUnsafeMutableBytes { context.render(image,toBitmap:$0.baseAddress!,rowBytes:16,
+                bounds:CGRect(x:x,y:64,width:1,height:1),format:.RGBAf,colorSpace:linear) }
+            return pixel[0]
+        }
+        let darkRatio=sampleLinear(hdrDecoded,32)/sampleLinear(sdrDecoded,32)
+        let brightRatio=sampleLinear(hdrDecoded,190)/sampleLinear(sdrDecoded,190)
+        print("Adaptive HDR round trip: dim ratio=\(darkRatio), highlight ratio=\(brightRatio)")
+        try check(abs(darkRatio-1)<0.15 && brightRatio>2.5, "Gain map lost spatial headroom on decoding")
+        try check(hdrDecoded.extent.size==sdrDecoded.extent.size,"HDR and SDR decoded geometry differs")
+        let ordinary=try JPEGRenderer.render(sdrBase,extent:hdrBounds,options:hdrOutput,context:context)
+        try check(!ordinary.adaptiveHDR && !AdaptiveHDR.hasGainMap(ordinary.data),"SDR input was mislabeled HDR")
+        let importedHDR=try ImportedPhotoProcessor.process(hdrFile.data,options:hdrOutput)
+        try check(AdaptiveHDR.hasGainMap(importedHDR.jpeg) && importedHDR.mergedFrames==1,"HDR import discarded the auxiliary image")
+        var editedHDR=hdrOutput;editedHDR.postExposure = -0.5
+        let singleHDR=try BurstProcessor().process([hdrFile.data],options:editedHDR)
+        try check(AdaptiveHDR.hasGainMap(singleHDR.jpeg),"Single-photo edits discarded HDR")
+        try rejects({ _ = try AdaptiveHDR.companion(base:sdrBase,originalSDR:sdrBase,
+            originalHDR:hdrOriginal.cropped(to:bounds),extent:hdrBounds) },"Mismatched HDR geometry")
+        try check(try JSONDecoder().decode(ProcessingOptions.self,from:JSONEncoder().encode(hdrOutput)).preserveHDR,
+                  "HDR option did not survive a profile round trip")
         let black = try HDRProcessor.fuse(field(0),field(0),field(0),scales:CIVector(x:1,y:0.25,z:4),extent:bounds)
         try check(pixels(black).allSatisfy(\.isFinite), "HDR black fallback produced NaN")
         let temporal = WeightedTemporalMerger(reference:field(0.1),context:context)

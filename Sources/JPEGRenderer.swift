@@ -1,11 +1,16 @@
 import CoreImage
 import ImageIO
 
-struct RenderedJPEG { let data: Data; let width: Int; let height: Int }
+struct RenderedJPEG {
+    let data: Data; let width: Int; let height: Int
+    var adaptiveHDR = false
+    var encodingDescription: String { adaptiveHDR ? "JPEG con mapa HDR adaptativo." : "JPEG SDR." }
+}
 
 /// Shared finishing path for a single frame, a temporal stack, and HDR.
 enum JPEGRenderer {
-    static func render(_ input: CIImage, extent inputExtent: CGRect, options: ProcessingOptions, context: CIContext) throws -> RenderedJPEG {
+    static func render(_ input: CIImage, extent inputExtent: CGRect, options: ProcessingOptions, context: CIContext,
+                       hdrSource: CIImage? = nil) throws -> RenderedJPEG {
         var image = input
         var extent = inputExtent
         if options.noiseReduction > 0 {
@@ -28,6 +33,11 @@ enum JPEGRenderer {
         image = try AdvancedProcessor.apply(image.cropped(to: extent), options: options)
         extent = AdvancedProcessor.crop(extent, aspect: options.aspect)
         let outputSpace = CGColorSpace(name: options.outputColor == .displayP3 ? CGColorSpace.displayP3 : CGColorSpace.sRGB)!
+        if options.preserveHDR, let hdrSource {
+            let data = try AdaptiveHDR.encode(base: image, originalSDR: input, originalHDR: hdrSource,
+                extent: extent, colorSpace: outputSpace, quality: options.jpegQuality ?? 0.95, context: context)
+            return RenderedJPEG(data: data, width: Int(extent.width), height: Int(extent.height), adaptiveHDR: true)
+        }
         guard let cg = context.createCGImage(image, from: extent,
                     format: .RGBA8, colorSpace: outputSpace) else {
             throw CameraFailure.message("No se pudo renderizar la pila.")

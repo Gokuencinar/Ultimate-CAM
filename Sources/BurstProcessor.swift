@@ -238,11 +238,15 @@ final class BurstProcessor {
         try cancellation?.check()
         progress?("Aplicando ajustes…")
         if options.nightStatic { accumulator = try nightTone(accumulator.cropped(to: common), maximumGain: isRAW ? 32 : 8) }
-        let rendered = try JPEGRenderer.render(accumulator,extent:common,options:options,context:context)
+        // Only a single rendered capture can reuse its original HDR headroom.
+        // A temporal stack needs its own radiometric HDR merge, so never borrow
+        // the reference's map for pixels assembled from different frames.
+        let hdrSource = options.preserveHDR && frames.count == 1 && !isRAW ? AdaptiveHDR.expanded(first) : nil
+        let rendered = try JPEGRenderer.render(accumulator,extent:common,options:options,context:context,hdrSource:hdrSource)
         try cancellation?.check()
         let details: String
         if frames.count == 1 {
-            details = "Foto individual con ajustes. \(rendered.width) × \(rendered.height) px."
+            details = "Foto individual con ajustes. \(rendered.width) × \(rendered.height) px. \(rendered.encodingDescription)"
         } else if accepted == 1 {
             details = "No se pudo alinear la pila. Referencia \(referenceIndex + 1) con ajustes, sin fusión. \(rendered.width) × \(rendered.height) px."
         } else {
