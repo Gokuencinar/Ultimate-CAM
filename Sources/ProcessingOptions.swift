@@ -44,6 +44,7 @@ struct ProcessingOptions: Codable, Equatable {
     var jpegQuality: Double? = nil
     var outputColor: OutputColor = OutputColor.sRGB
     var preserveHDR: Bool = false
+    var portraitAmount: Double = 0
     var aspect: PhotoAspect = PhotoAspect.original
     var lutID: String? = nil
     var lutIntensity: Double = 1
@@ -51,13 +52,14 @@ struct ProcessingOptions: Codable, Equatable {
     var advancedRendering: Bool {
         color.isActive || chromaDenoise > 0 || localContrast > 0 || fineDetail > 0 || contrast != 1 || saturation != 1 ||
         vibrance != 0 || gamma != 1 || postExposure != 0 || highlightCompression > 0 || vignette > 0 ||
-        jpegQuality != nil || outputColor != .sRGB || aspect != .original || (lutID != nil && lutIntensity > 0)
+        jpegQuality != nil || portraitAmount > 0 || outputColor != .sRGB || aspect != .original || (lutID != nil && lutIntensity > 0)
     }
 
     func validated() throws -> ProcessingOptions {
         guard nightBudget.isFinite, (1...16).contains(nightBudget), nightShutterLimit.isFinite,
               (1.0/30...1).contains(nightShutterLimit) else { throw CameraFailure.message("Presupuesto nocturno fuera de rango.") }
         _ = try color.validated()
+        guard portraitAmount.isFinite,(0...1).contains(portraitAmount) else { throw CameraFailure.message("Desenfoque de retrato fuera de rango.") }
         guard !(hdrBracketing && nightStatic), hdrSpan.isFinite, (1...3).contains(hdrSpan) else { throw CameraFailure.message("Configuración HDR incompatible o fuera de rango.") }
         guard maximumDimension.isFinite, (1024...4096).contains(maximumDimension) else { throw CameraFailure.message("Valor fuera de rango: maximumDimension.") }
         guard noiseReduction.isFinite, (0...0.08).contains(noiseReduction) else { throw CameraFailure.message("Valor fuera de rango: noiseReduction.") }
@@ -88,7 +90,7 @@ struct ProcessingOptions: Codable, Equatable {
 // not silently clamped into a different recipe.
 extension ProcessingOptions {
     enum CodingKeys: String, CodingKey {
-        case singlePhotoQuality, nightBudget, nightShutterLimit, nightWeightedFusion, hdrBracketing, hdrSpan, color, nightStatic, nightRAW, chooseSharpestReference, rejectMotion, maximumDimension, noiseReduction, sharpening, liftShadows, localAlignment, adaptiveMotionRejection, motionSigma, chromaDenoise, localContrast, fineDetail, contrast, saturation, vibrance, gamma, postExposure, highlightCompression, sharpenRadius, vignette, jpegQuality, outputColor, preserveHDR, aspect, lutID, lutIntensity
+        case singlePhotoQuality, nightBudget, nightShutterLimit, nightWeightedFusion, hdrBracketing, hdrSpan, color, nightStatic, nightRAW, chooseSharpestReference, rejectMotion, maximumDimension, noiseReduction, sharpening, liftShadows, localAlignment, adaptiveMotionRejection, motionSigma, chromaDenoise, localContrast, fineDetail, contrast, saturation, vibrance, gamma, postExposure, highlightCompression, sharpenRadius, vignette, jpegQuality, outputColor, preserveHDR, portraitAmount, aspect, lutID, lutIntensity
     }
     init(from decoder: Decoder) throws {
         self.init()
@@ -125,6 +127,7 @@ extension ProcessingOptions {
         jpegQuality = try c.decodeIfPresent(Double.self, forKey: .jpegQuality)
         outputColor = try c.decodeIfPresent(OutputColor.self, forKey: .outputColor) ?? outputColor
         preserveHDR = try c.decodeIfPresent(Bool.self, forKey: .preserveHDR) ?? preserveHDR
+        portraitAmount = try c.decodeIfPresent(Double.self, forKey: .portraitAmount) ?? portraitAmount
         aspect = try c.decodeIfPresent(PhotoAspect.self, forKey: .aspect) ?? aspect
         lutID = try c.decodeIfPresent(String.self, forKey: .lutID)
         lutIntensity = try c.decodeIfPresent(Double.self, forKey: .lutIntensity) ?? lutIntensity

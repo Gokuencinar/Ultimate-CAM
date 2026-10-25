@@ -74,6 +74,31 @@ import Darwin
         try rejects({ _ = try invalid.validated() }, "NaN recipe")
         try rejects({ _ = try JSONDecoder().decode(ProcessingOptions.self, from: Data("{\"gamma\":8}".utf8)) }, "Out of range recipe")
         let image = fixture()
+        let portraitBounds=CGRect(x:0,y:0,width:256,height:128)
+        var portraitBytes=[UInt8](repeating:255,count:256*128*4)
+        for y in 0..<128 { for x in 0..<256 {
+            let i=(y*256+x)*4,person=(80..<176).contains(x)
+            portraitBytes[i]=person ? 255:0;portraitBytes[i+1]=0
+            portraitBytes[i+2]=person ? 0:(((x+y)%2==0) ? 255:40)
+        } }
+        let portraitInput=CIImage(bitmapData:Data(portraitBytes),bytesPerRow:256*4,size:portraitBounds.size,format:.RGBA8,colorSpace:space)
+        let portraitMask=CIImage(color:.white).cropped(to:CGRect(x:80,y:0,width:96,height:128))
+            .composited(over:CIImage(color:.black).cropped(to:portraitBounds))
+        let bokeh=try PortraitProcessor.apply(portraitInput,mask:portraitMask,extent:portraitBounds,amount:1)
+        let portraitPixels=pixels(bokeh)
+        try check(portraitPixels[(64*256+128)*4]>0.99 && portraitPixels[(64*256+128)*4+2]<0.01,
+                  "Portrait blurred foreground interior")
+        try check(portraitPixels[(64*256+77)*4]<0.02,"Portrait blur leaked foreground red into background")
+        try check(difference(bokeh.cropped(to:CGRect(x:5,y:5,width:40,height:40)),portraitInput.cropped(to:CGRect(x:5,y:5,width:40,height:40)))>0.03,
+                  "Portrait did not blur the textured background")
+        try check(try difference(PortraitProcessor.apply(portraitInput,mask:portraitMask,extent:portraitBounds,amount:0),portraitInput)<0.0001,
+                  "Disabled portrait altered pixels")
+        var portraitOptions=base;portraitOptions.portraitAmount=0.7
+        try check(try JSONDecoder().decode(ProcessingOptions.self,from:JSONEncoder().encode(portraitOptions))==portraitOptions,
+                  "Portrait strength did not survive profile serialization")
+        portraitOptions.portraitAmount = .nan
+        try rejects({ _=try portraitOptions.validated() },"Nonfinite portrait strength")
+        print("PORTRAIT COMPOSITING CHECKS PASSED · synthetic matte, not person model quality")
         try check(try difference(AdvancedProcessor.apply(image, options: base), image) < 0.0001, "Neutral processing modifies image")
         for n in [2,3] {
             let lut = try cube(n)

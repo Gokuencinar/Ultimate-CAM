@@ -11,16 +11,22 @@ struct RenderedJPEG {
 enum JPEGRenderer {
     static func render(_ input: CIImage, extent inputExtent: CGRect, options: ProcessingOptions, context: CIContext,
                        hdrSource: CIImage? = nil) throws -> RenderedJPEG {
-        let image = try finish(input.cropped(to:inputExtent),options:options)
+        var baseInput=input.cropped(to:inputExtent),hdrInput=hdrSource
+        if options.portraitAmount>0 {
+            let mask=try PortraitProcessor.personMask(baseInput,extent:inputExtent,context:context)
+            baseInput=try PortraitProcessor.apply(baseInput,mask:mask,extent:inputExtent,amount:options.portraitAmount)
+            if let hdrSource { hdrInput=try PortraitProcessor.apply(hdrSource,mask:mask,extent:inputExtent,amount:options.portraitAmount) }
+        }
+        let image = try finish(baseInput,options:options)
         let extent = AdvancedProcessor.crop(inputExtent, aspect: options.aspect)
         let outputSpace = CGColorSpace(name: options.outputColor == .displayP3 ? CGColorSpace.displayP3 : CGColorSpace.sRGB)!
         guard let cg = context.createCGImage(image, from: extent,
                     format: .RGBA8, colorSpace: outputSpace) else {
             throw CameraFailure.message("No se pudo renderizar la pila.")
         }
-        if options.preserveHDR, let hdrSource {
+        if options.preserveHDR, let hdrSource=hdrInput {
             let base = CIImage(cgImage: cg).transformed(by: CGAffineTransform(translationX: extent.minX, y: extent.minY))
-            let data = try AdaptiveHDR.encode(base: base, originalSDR: input, originalHDR: hdrSource,
+            let data = try AdaptiveHDR.encode(base: base, originalSDR: baseInput, originalHDR: hdrSource,
                 extent: extent, colorSpace: outputSpace, quality: options.jpegQuality ?? 0.95, context: context)
             return RenderedJPEG(data: data, width: Int(extent.width), height: Int(extent.height), adaptiveHDR: true)
         }

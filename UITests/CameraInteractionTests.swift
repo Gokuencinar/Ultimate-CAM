@@ -4,11 +4,7 @@ final class CameraInteractionTests: XCTestCase {
     func testVideoSettingsAndReturnWithoutRecording() {
         continueAfterFailure=false
         let app=XCUIApplication();app.launch()
-        let video=app.buttons["camera.mode.video"]
-        for _ in 0..<3 {
-            if video.isHittable { break }
-            app.scrollViews.element(boundBy:0).swipeLeft()
-        }
+        let video=revealMode(app,"camera.mode.video")
         XCTAssertTrue(video.isHittable);video.tap()
         XCTAssertTrue(app.buttons["video.settings"].waitForExistence(timeout:8))
         app.buttons["video.settings"].tap()
@@ -99,7 +95,7 @@ final class CameraInteractionTests: XCTestCase {
         app.segmentedControls.buttons["Efectos"].tap()
         XCTAssertTrue(app.sliders["Grano"].waitForExistence(timeout:3))
         app.buttons["Listo"].tap()
-        let hdr = app.buttons["camera.mode.hdr"]
+        let hdr = revealMode(app,"camera.mode.hdr")
         XCTAssertTrue(hdr.isHittable)
         hdr.tap()
         XCTAssertTrue(app.staticTexts["HDR · 3 exposiciones"].waitForExistence(timeout:3))
@@ -109,5 +105,11 @@ final class CameraInteractionTests: XCTestCase {
         XCTAssertTrue(app.buttons["camera.gallery"].isHittable)
         app.buttons["camera.gallery"].tap()
         XCTAssertTrue(app.buttons["Importar desde Fotos"].waitForExistence(timeout:3))
+    }
+    private func revealMode(_ app:XCUIApplication,_ identifier:String) -> XCUIElement {
+        let button=app.buttons[identifier],modes=app.scrollViews["camera.modes"]
+        if !button.isHittable { modes.swipeRight() }
+        for _ in 0..<4 { if button.isHittable { break };modes.swipeLeft() }
+        return button
     }
 }

@@ -199,7 +199,7 @@ struct CameraView: View {
             }.accessibilityLabel("Ajustes rápidos").accessibilityIdentifier("camera.quickSettings")
             Spacer(minLength:0)
             Text(options.hdrBracketing ? "HDR · 3 exposiciones" : (options.nightStatic ? "Noche estática · \((options.nightRAW && camera.supportsRAW) ? "RAW experimental" : "JPEG")" :
-                (stack ? "Pila de \(stackCount)" : (rawEnabled ? "RAW + JPEG" : "Cámara"))))
+                (stack ? "Pila de \(stackCount)" : (options.portraitAmount>0 ? "Retrato · personas" : (rawEnabled ? "RAW + JPEG" : "Cámara")))))
                 .font(.system(size:12,weight:.medium)).foregroundStyle(.white.opacity(0.8))
             Spacer(minLength:0)
             Menu {
@@ -367,7 +367,10 @@ struct CameraView: View {
                 ScrollView(.horizontal,showsIndicators:false) {
                     HStack(spacing:4) {
                         modeButton("Noche",selected:options.nightStatic) { applyPreset("Noche estática") }
-                        modeButton("Cámara",selected:!stack && !options.hdrBracketing) { options.nightStatic=false;options.hdrBracketing=false;stack=false }
+                        modeButton("Cámara",selected:!stack && !options.hdrBracketing && options.portraitAmount==0) { options.nightStatic=false;options.hdrBracketing=false;options.portraitAmount=0;stack=false }
+                        modeButton("Retrato",selected:!stack && !options.hdrBracketing && options.portraitAmount>0) {
+                            options.nightStatic=false;options.hdrBracketing=false;options.portraitAmount=0.5;stack=false
+                        }.accessibilityIdentifier("camera.mode.portrait")
                         modeButton("HDR",selected:options.hdrBracketing) { activateHDR() }.accessibilityIdentifier("camera.mode.hdr")
                         modeButton("Pila",selected:stack && !options.nightStatic && !options.hdrBracketing) { options.nightStatic=false;options.hdrBracketing=false;stack=true }
                         modeButton("Vídeo",selected:false) {
@@ -376,7 +379,7 @@ struct CameraView: View {
                         }.accessibilityIdentifier("camera.mode.video")
                         modeButton("iOS",selected:false) { nativeNight.open(camera:camera) }.accessibilityIdentifier("camera.mode.nativeNight")
                     }
-                }
+                }.accessibilityIdentifier("camera.modes")
                 Button { panel = .color; showControls = true } label: { Image(systemName:"slider.horizontal.3").font(.system(size:19)).frame(width:40,height:44) }
                     .accessibilityLabel("Ajustes de imagen")
             }.disabled(!controlsEnabled)
@@ -628,6 +631,11 @@ struct CameraView: View {
                     Text("Más lento y con color aún sin calibrar en sombras profundas. Desactivado conserva el color del JPEG de cámara. El DNG guardado es una referencia original, no un RAW fusionado.")
                         .font(.footnote).foregroundStyle(.secondary)
                 }
+            }
+            Section("Retrato de personas") {
+                Toggle("Desenfocar fondo",isOn:Binding(get:{options.portraitAmount>0},set:{options.portraitAmount=$0 ? 0.5:0}))
+                if options.portraitAmount>0 { optionSlider("Intensidad del retrato",value:$options.portraitAmount,range:0.05...1) }
+                Text("Separa personas con Vision y desenfoca el fondo después de capturar. No genera un mapa de profundidad y no se previsualiza en directo. Si no identifica una persona, conserva la referencia sin simular un retrato. El DNG original no cambia.").font(.footnote).foregroundStyle(.secondary)
             }
             Section("Detalle y textura") {
                 optionSlider("Ruido de color", value: $options.chromaDenoise, range: 0...1)
