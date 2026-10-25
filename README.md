@@ -4,6 +4,8 @@ Cámara experimental para iPhone con una interfaz inspirada en GCam y procesamie
 
 La versión 0.10 añade vídeo, retrato de personas, panorama guiado, esfera de 360°, histograma/peaking/cebras y vista de color/LUT en directo. Mantiene foto JPEG/DNG, controles manuales, pilas temporales, Noche estática, horquillado HDR, JPEG adaptativo con mapa HDR, importación de fotos, LUT y perfiles por lente.
 
+El [candidato build81](docs/VALIDACION-0.10.md) tiene compilación, cinco suites de fixtures, empaquetado y tres casos de interfaz correctos en el mismo commit de código. Se conservan sus DEB rootless/RootHide, hashes y fuentes. No está instalado ni probado en el teléfono.
+
 La [descripción de funciones y límites](docs/FUNCIONES-0.10.md) diferencia adaptación, calibración pendiente y funciones ausentes. La compilación, los fixtures y las pruebas de interfaz se realizan fuera del iPhone. Las pruebas físicas se han aplazado por petición del usuario; ningún paquete nuevo se considera instalado por haber compilado.
 
 ## Uso
