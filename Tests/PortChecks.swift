@@ -44,6 +44,23 @@ import Darwin
     }
     static func run() throws {
         let base = ProcessingOptions()
+        var meterOptions=PreviewAnalysisOptions();meterOptions.peaking=true;meterOptions.zebras=true
+        var luma=[UInt8](repeating:91,count:12*8)
+        for y in 0..<8 { for x in 0..<8 { luma[y*12+x] = x<4 ? 0:255 } }
+        let meter=luma.withUnsafeBufferPointer { PreviewLumaAnalyzer.measure($0,width:8,height:8,rowBytes:12,videoRange:false,options:meterOptions) }!
+        try check(abs(meter.histogram.reduce(0,+)-1)<0.0001 && meter.shadows==0.5 && meter.highlights==0.5 && meter.mean==0.5,
+                  "Preview histogram included row padding or used wrong range")
+        try check(meter.overlayRGBA[(3*8+3)*4+1]>0,"Peaking missed the synthetic focus edge")
+        try check(meter.overlayRGBA[(3*8+1)*4+3]==0,"Peaking painted a flat dark region")
+        var limited=[UInt8](repeating:16,count:64)
+        for i in 32..<64 { limited[i]=235 }
+        let legal=limited.withUnsafeBufferPointer { PreviewLumaAnalyzer.measure($0,width:8,height:8,rowBytes:8,videoRange:true,options:PreviewAnalysisOptions()) }!
+        try check(legal.shadows==0.5 && legal.highlights==0.5 && legal.overlayRGBA.allSatisfy {$0==0},"Video range or disabled overlay incorrect")
+        try check(luma.withUnsafeBufferPointer { PreviewLumaAnalyzer.measure($0,width:8,height:8,rowBytes:7,videoRange:false,options:meterOptions) } == nil,
+                  "Unsafe preview stride accepted")
+        let largeLuma=[UInt8](repeating:128,count:640*480)
+        let bounded=largeLuma.withUnsafeBufferPointer { PreviewLumaAnalyzer.measure($0,width:640,height:480,rowBytes:640,videoRange:false,options:meterOptions) }!
+        try check(bounded.width<=160 && bounded.height<=160 && bounded.overlayRGBA.count<=160*160*4,"Preview analysis exceeded its memory bound")
         try check(PhotoCapturePolicy.priority(requested:.quality,count:1,raw:false,customExposure:false,lockedExposure:false) == .quality,"Automatic photo lost native quality request")
         try check(PhotoCapturePolicy.priority(requested:.balanced,count:1,raw:false,customExposure:false,lockedExposure:false) == .balanced,"Balanced choice ignored")
         for item in [(3,false,false,false),(1,true,false,false),(1,false,true,false),(1,false,false,true)] {

@@ -76,6 +76,7 @@ struct CameraView: View {
     @State private var pendingNativeNight = false
     @State private var showingVideo = false
     @State private var openingVideo = false
+    @State private var previewTools = PreviewAnalysisOptions()
     @State private var selectedPhoto: PhotosPickerItem?
     @State private var loadingPhoto = false
     @State private var showReference = false
@@ -152,6 +153,9 @@ struct CameraView: View {
             if next != .front { lastBackLens = next }
         }
         .onChange(of: options) { _, value in profiles.remember(value, lens: lens.rawValue) }
+        .onChange(of: options) { _, value in camera.setPreviewTools(previewTools,processing:value) }
+        .onChange(of: previewTools) { _, value in camera.setPreviewTools(value,processing:options) }
+        .onChange(of: camera.busy) { _, value in if !value { camera.setPreviewTools(previewTools,processing:options) } }
         .onChange(of: bias) { _, value in camera.setBias(Float(value)) }
         .onChange(of: stack) { _, value in if value { rawEnabled = false; flash = .off } }
         .onChange(of: rawEnabled) { _, value in if value { flash = .off } }
@@ -201,8 +205,13 @@ struct CameraView: View {
             Menu {
                 Toggle("Cuadrícula",isOn:$grid)
                 Picker("Composición",selection:$guide) { ForEach(CompositionGuide.allCases) { Text($0.rawValue).tag($0) } }
+                Divider()
+                Toggle("Histograma del visor",isOn:$previewTools.histogram)
+                Toggle("Resaltar enfoque",isOn:$previewTools.peaking)
+                Toggle("Cebras de luces",isOn:$previewTools.zebras)
+                Toggle("Vista de color y LUT · 5 FPS",isOn:$previewTools.colorLook)
             } label: { Image(systemName:"viewfinder").font(.system(size:19)).frame(width:44,height:44).background(.black.opacity(0.55),in:Circle()) }
-                .accessibilityLabel("Guías de composición")
+                .accessibilityLabel("Guías y herramientas del visor").accessibilityIdentifier("camera.previewTools").disabled(!controlsEnabled)
         }
     }
 
@@ -213,7 +222,25 @@ struct CameraView: View {
                 camera.focus(at: point, lock: locked)
             }, changeZoom: { value in camera.setZoom(value) })
                 .allowsHitTesting(controlsEnabled)
+            GeometryReader { geometry in
+                if let frame=camera.previewAnalysisFrame {
+                    if let color=frame.color {
+                        Image(decorative:color,scale:1).resizable().scaledToFill()
+                            .frame(width:geometry.size.width,height:geometry.size.height).clipped()
+                    }
+                    if let overlay=frame.overlay {
+                        Image(decorative:overlay,scale:1).resizable().interpolation(.none).scaledToFill()
+                            .frame(width:geometry.size.width,height:geometry.size.height).clipped()
+                    }
+                }
+            }.allowsHitTesting(false)
             if grid { ViewfinderGrid(guide: guide) }
+            if previewTools.histogram,let frame=camera.previewAnalysisFrame {
+                VStack { HStack { Spacer();PreviewMeterView(metrics:frame.metrics) };Spacer() }.padding(.top,110).padding(.trailing,18)
+            }
+            if let notice=camera.previewAnalysisFrame?.notice {
+                VStack { Spacer();Text(notice).font(.caption).padding(8).background(.black.opacity(0.8)).padding(.bottom,230) }.allowsHitTesting(false)
+            }
             if countdown > 0 {
                 Text("\(countdown)").font(.system(size: 80, weight: .light, design: .rounded))
                     .shadow(color: .black, radius: 10).allowsHitTesting(false)

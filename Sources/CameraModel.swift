@@ -103,6 +103,9 @@ final class CameraModel: NSObject, ObservableObject, AVCapturePhotoCaptureDelega
     @Published private(set) var processingInProgress = false
     @Published private(set) var importFailure: String?
     @Published private(set) var importedPhotoID: UUID?
+    @Published private(set) var previewAnalysisFrame: PreviewAnalysisFrame?
+    private var previewTools = PreviewAnalysisOptions()
+    private lazy var previewAnalyzer = PreviewAnalysisController { [weak self] frame in self?.previewAnalysisFrame=frame }
 
     override init() {
         super.init()
@@ -156,6 +159,7 @@ final class CameraModel: NSObject, ObservableObject, AVCapturePhotoCaptureDelega
             let rawAvailable = !output.availableRawPhotoPixelFormatTypes.isEmpty
             publish { self.supportsRAW = rawAvailable }
             let available = self.session.isRunning && !self.interrupted
+            previewAnalyzer.setActive(available && previewTools.enabled)
             CaptureTrace.record("session.ready", ["running": available, "inputs": session.inputs.count, "outputs": session.outputs.count])
             publish { self.ready = available }
             message("Lista. La pila es experimental y requiere una escena inmóvil.")
@@ -233,6 +237,7 @@ final class CameraModel: NSObject, ObservableObject, AVCapturePhotoCaptureDelega
     func stop() {
         queue.async {
             self.active = false
+            self.previewAnalyzer.setActive(false)
             self.focusToken = UUID()
             self.publish { self.ready = false }
             if self.session.isRunning { self.session.stopRunning() }
@@ -243,6 +248,7 @@ final class CameraModel: NSObject, ObservableObject, AVCapturePhotoCaptureDelega
         queue.async {
             guard !self.inFlight else { self.publish { completion(false) }; return }
             self.active=false;self.focusToken=UUID()
+            self.previewAnalyzer.setActive(false)
             if self.session.isRunning { self.session.stopRunning() }
             let stopped = !self.session.isRunning
             CaptureTrace.record("nativeNight.handoff",["sessionStopped":stopped])
@@ -342,6 +348,7 @@ final class CameraModel: NSObject, ObservableObject, AVCapturePhotoCaptureDelega
                 connection.isVideoMirrored = false
             }
         }
+        configurePreviewOutput()
         session.commitConfiguration()
         committed = true
         let rawAvailable = !output.availableRawPhotoPixelFormatTypes.isEmpty
@@ -364,6 +371,30 @@ final class CameraModel: NSObject, ObservableObject, AVCapturePhotoCaptureDelega
             "tapFocus": device.isFocusPointOfInterestSupported,
             "manualWB": device.isLockingWhiteBalanceWithCustomDeviceGainsSupported,
             "flash": device.hasFlash && output.supportedFlashModes.contains(.on)])
+    }
+
+    func setPreviewTools(_ tools:PreviewAnalysisOptions,processing:ProcessingOptions) {
+        queue.async {
+            let graphChanged=self.session.outputs.contains(where:{$0===self.previewAnalyzer.output}) != tools.enabled
+            self.previewTools=tools;self.previewAnalyzer.configure(tools,processing:processing)
+            guard self.configured,!self.inFlight else { return }
+            if graphChanged { self.session.beginConfiguration();self.configurePreviewOutput();self.session.commitConfiguration() }
+            self.previewAnalyzer.setActive(self.active && tools.enabled)
+        }
+    }
+    private func configurePreviewOutput() {
+        let data=previewAnalyzer.output
+        if previewTools.enabled {
+            if !session.outputs.contains(where:{$0===data}),session.canAddOutput(data) { session.addOutput(data) }
+            if let connection=data.connection(with:.video) {
+                if connection.isVideoRotationAngleSupported(90) { connection.videoRotationAngle=90 }
+                if connection.isVideoMirroringSupported {
+                    connection.automaticallyAdjustsVideoMirroring=false
+                    connection.isVideoMirrored=input?.device.position == .front
+                }
+            }
+        } else if session.outputs.contains(where:{$0===data}) { session.removeOutput(data) }
+        previewAnalyzer.setActive(active && previewTools.enabled)
     }
 
     func setBias(_ bias: Float) {

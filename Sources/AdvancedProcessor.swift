@@ -3,7 +3,8 @@ import CoreImage
 /// Original RGB-domain adaptations of the controls identified in AGC's shader
 /// pipeline. This is not the Android Bayer merge/demosaic implementation.
 enum AdvancedProcessor {
-    static func apply(_ image: CIImage, options o: ProcessingOptions) throws -> CIImage {
+    static func apply(_ image: CIImage, options o: ProcessingOptions,
+                      colorTable: CubeLUT? = nil, customTable: CubeLUT? = nil) throws -> CIImage {
         let extent = image.extent
         var result = image
         if o.postExposure != 0 { result = result.applyingFilter("CIExposureAdjust", parameters: [kCIInputEVKey: o.postExposure]) }
@@ -33,14 +34,14 @@ enum AdvancedProcessor {
         }
         if o.vibrance != 0 { result = result.applyingFilter("CIVibrance", parameters: ["inputAmount": o.vibrance]) }
         if o.gamma != 1 { result = result.applyingFilter("CIGammaAdjust", parameters: ["inputPower": 1 / o.gamma]) }
-        if o.color.needsCube { result = try ColorRecipeLUT.make(o.color).apply(to:result,intensity:1) }
+        if o.color.needsCube { result = try (colorTable ?? ColorRecipeLUT.make(o.color)).apply(to:result,intensity:1) }
         if o.color.grain > 0 {
             guard let output = grainKernel?.apply(extent:extent,arguments:[result,o.color.grain,o.color.grainSize]) else {
                 throw CameraFailure.message("No se pudo aplicar el grano.")
             }
             result = output
         }
-        if let id = o.lutID, o.lutIntensity > 0 { result = try ColorLUTStore.load(id).apply(to: result, intensity: o.lutIntensity) }
+        if let id = o.lutID, o.lutIntensity > 0 { result = try (customTable ?? ColorLUTStore.load(id)).apply(to: result, intensity: o.lutIntensity) }
         if o.vignette > 0 {
             result = result.applyingFilter("CIVignetteEffect", parameters: [
                 kCIInputCenterKey: CIVector(x: extent.midX, y: extent.midY),
