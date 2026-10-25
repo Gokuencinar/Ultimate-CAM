@@ -25,6 +25,8 @@ import simd
         let second=scene.cropped(to:CGRect(x:128,y:0,width:512,height:256)).transformed(by:CGAffineTransform(translationX:-128,y:0))
         func encode(_ image:CIImage)->Data { context.pngRepresentation(of:image,format:.RGBA8,colorSpace:space)! }
         let a=encode(first),b=encode(second)
+        let alignment=try PanoramaProcessor().registration(reference:first,floating:second)
+        try check(abs(alignment[2].x-128)<3 && abs(alignment[2].y)<3,"Panorama translation sign or pixel coordinates differ from source crops")
         let result=try PanoramaProcessor().process([a,b],options:ProcessingOptions())
         let rendered=PreviewDecoder.image(result.jpeg,maximumDimension:4096)!
         print("Panorama fixture dimensions: \(rendered.width) × \(rendered.height)")

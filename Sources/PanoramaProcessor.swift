@@ -43,17 +43,7 @@ final class PanoramaProcessor {
             try cancellation?.check();progress?("Uniendo panorama \(index+1) de \(frames.count)…")
             let next=try decode(frames[index])
             guard abs(next.extent.width-previous.extent.width)<1,abs(next.extent.height-previous.extent.height)<1 else { throw CameraFailure.message("Mantén la misma lente, orientación y zoom durante el panorama.") }
-            let scale=min(1,1024/max(previous.extent.width,previous.extent.height))
-            func low(_ image:CIImage) throws -> CGImage {
-                let small=image.transformed(by:CGAffineTransform(scaleX:scale,y:scale))
-                guard let cg=context.createCGImage(small,from:small.extent,format:.RGBA8,colorSpace:CGColorSpace(name:CGColorSpace.sRGB)!) else { throw CameraFailure.message("No se pudo preparar el registro panorámico.") }
-                return cg
-            }
-            let request=VNHomographicImageRegistrationRequest(targetedCGImage:try low(next))
-            try VNImageRequestHandler(cgImage:try low(previous)).perform([request])
-            guard let result=request.results?.first,result.confidence>=0.5 else { throw CameraFailure.message("No se encontró suficiente detalle común. Conserva un 40–60 % de solapamiento.") }
-            let s=simd_float3x3(diagonal:SIMD3(Float(scale),Float(scale),1))
-            let pair=s.inverse*result.warpTransform*s
+            let pair=try registration(reference:previous,floating:next)
             let transform=previousTransform*pair
             let warped=try Self.warp(next,matrix:transform)
             let warpedWeight=try Self.warp(feather(next.extent),matrix:transform)
@@ -88,6 +78,30 @@ final class PanoramaProcessor {
         let rendered=try JPEGRenderer.render(mean,extent:crop,options:outputOptions,context:context)
         try cancellation?.check()
         return CaptureResult(jpeg:rendered.data,reference:frames[0],details:"Panorama guiado · \(frames.count) fotos · \(rendered.width) × \(rendered.height). JPEG SDR; sin profundidad ni corrección de paralaje.",mergedFrames:frames.count,source:"guided-projective-panorama")
+    }
+    func registration(reference:CIImage,floating:CIImage) throws -> simd_float3x3 {
+        let scale=min(1,1024/max(reference.extent.width,reference.extent.height))
+        func low(_ image:CIImage) throws -> CGImage {
+            let small=image.transformed(by:CGAffineTransform(scaleX:scale,y:scale))
+            guard let cg=context.createCGImage(small,from:small.extent,format:.RGBA8,colorSpace:CGColorSpace(name:CGColorSpace.sRGB)!) else { throw CameraFailure.message("No se pudo preparar el registro panorámico.") };return cg
+        }
+        // Dense homography starts near identity and can miss large panorama
+        // displacements. First estimate translation; refine perspective only
+        // on the common, already aligned region.
+        let rough=VNTranslationalImageRegistrationRequest(targetedCGImage:try low(floating))
+        try VNImageRequestHandler(cgImage:try low(reference)).perform([rough])
+        guard let observed=rough.results?.first,observed.confidence>=0.5 else { throw CameraFailure.message("No se encontró suficiente detalle común. Conserva un 40–60 % de solapamiento.") }
+        let dx=observed.alignmentTransform.tx/scale,dy=observed.alignmentTransform.ty/scale
+        let translation=simd_float3x3(columns:(SIMD3(1,0,0),SIMD3(0,1,0),SIMD3(Float(dx),Float(dy),1)))
+        let shifted=floating.transformed(by:CGAffineTransform(translationX:dx,y:dy))
+        let overlap=reference.extent.intersection(shifted.extent).integral.intersection(reference.extent).intersection(shifted.extent)
+        guard overlap.width*overlap.height>reference.extent.width*reference.extent.height*0.2 else { throw CameraFailure.message("Falta solapamiento para registrar el panorama.") }
+        let refine=VNHomographicImageRegistrationRequest(targetedCGImage:try low(shifted.cropped(to:overlap)))
+        try VNImageRequestHandler(cgImage:try low(reference.cropped(to:overlap))).perform([refine])
+        guard let result=refine.results?.first,result.confidence>=0.5 else { return translation }
+        let s=simd_float3x3(diagonal:SIMD3(Float(scale),Float(scale),1))
+        let origin=simd_float3x3(columns:(SIMD3(1,0,0),SIMD3(0,1,0),SIMD3(Float(overlap.minX),Float(overlap.minY),1)))
+        return origin*s.inverse*result.warpTransform*s*origin.inverse*translation
     }
     static func warp(_ image:CIImage,matrix:simd_float3x3) throws -> CIImage {
         let e=image.extent
