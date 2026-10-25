@@ -16,6 +16,8 @@ struct ProcessingOptions: Codable, Equatable {
     var nightBudget: Double = 8
     var nightShutterLimit: Double = 1
     var nightWeightedFusion: Bool = true
+    var nightSpectralFusion: Bool = false
+    var nightSpectralStrength: Double = 1
     var hdrBracketing: Bool = false
     var hdrSpan: Double = 2
     var color = ColorRecipe()
@@ -56,6 +58,8 @@ struct ProcessingOptions: Codable, Equatable {
     }
 
     func validated() throws -> ProcessingOptions {
+        guard nightSpectralStrength.isFinite,(0.25...4).contains(nightSpectralStrength),
+              !(nightStatic && nightSpectralFusion && !rejectMotion) else { throw CameraFailure.message("La fusión espectral necesita rechazo de movimiento y una intensidad entre 0,25 y 4.") }
         guard nightBudget.isFinite, (1...16).contains(nightBudget), nightShutterLimit.isFinite,
               (1.0/30...1).contains(nightShutterLimit) else { throw CameraFailure.message("Presupuesto nocturno fuera de rango.") }
         _ = try color.validated()
@@ -90,7 +94,7 @@ struct ProcessingOptions: Codable, Equatable {
 // not silently clamped into a different recipe.
 extension ProcessingOptions {
     enum CodingKeys: String, CodingKey {
-        case singlePhotoQuality, nightBudget, nightShutterLimit, nightWeightedFusion, hdrBracketing, hdrSpan, color, nightStatic, nightRAW, chooseSharpestReference, rejectMotion, maximumDimension, noiseReduction, sharpening, liftShadows, localAlignment, adaptiveMotionRejection, motionSigma, chromaDenoise, localContrast, fineDetail, contrast, saturation, vibrance, gamma, postExposure, highlightCompression, sharpenRadius, vignette, jpegQuality, outputColor, preserveHDR, portraitAmount, aspect, lutID, lutIntensity
+        case singlePhotoQuality, nightBudget, nightShutterLimit, nightWeightedFusion, nightSpectralFusion, nightSpectralStrength, hdrBracketing, hdrSpan, color, nightStatic, nightRAW, chooseSharpestReference, rejectMotion, maximumDimension, noiseReduction, sharpening, liftShadows, localAlignment, adaptiveMotionRejection, motionSigma, chromaDenoise, localContrast, fineDetail, contrast, saturation, vibrance, gamma, postExposure, highlightCompression, sharpenRadius, vignette, jpegQuality, outputColor, preserveHDR, portraitAmount, aspect, lutID, lutIntensity
     }
     init(from decoder: Decoder) throws {
         self.init()
@@ -99,6 +103,8 @@ extension ProcessingOptions {
         nightBudget = try c.decodeIfPresent(Double.self, forKey: .nightBudget) ?? nightBudget
         nightShutterLimit = try c.decodeIfPresent(Double.self, forKey: .nightShutterLimit) ?? nightShutterLimit
         nightWeightedFusion = try c.decodeIfPresent(Bool.self, forKey: .nightWeightedFusion) ?? nightWeightedFusion
+        nightSpectralFusion = try c.decodeIfPresent(Bool.self,forKey:.nightSpectralFusion) ?? nightSpectralFusion
+        nightSpectralStrength = try c.decodeIfPresent(Double.self,forKey:.nightSpectralStrength) ?? nightSpectralStrength
         hdrBracketing = try c.decodeIfPresent(Bool.self, forKey: .hdrBracketing) ?? hdrBracketing
         hdrSpan = try c.decodeIfPresent(Double.self, forKey: .hdrSpan) ?? hdrSpan
         color = try c.decodeIfPresent(ColorRecipe.self, forKey: .color) ?? color

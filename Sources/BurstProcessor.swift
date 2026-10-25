@@ -21,7 +21,8 @@ enum CameraFailure: LocalizedError {
 }
 
 /// RAW / JPEG burst processing with a noise-aware reference selection, translational
-/// alignment and conservative rejection of changed areas. No Google code.
+/// alignment and conservative rejection of changed areas. The optional spectral
+/// stage adapts Apache-licensed Google research; no proprietary Camera binaries.
 final class BurstProcessor {
     private let context = CIContext(options: [
         .workingColorSpace: CGColorSpace(name: CGColorSpace.extendedLinearSRGB)!,
@@ -40,6 +41,7 @@ final class BurstProcessor {
         }
         let inputFrames = rawFrames ?? frames
         let isRAW = rawFrames != nil
+        let useSpectral = options.nightStatic && options.nightSpectralFusion && frames.count>1
         let adjustments = options.nightStatic || options.noiseReduction > 0 || options.sharpening > 0 || options.liftShadows > 0 || options.advancedRendering
         if frames.count == 1 && !adjustments && !isRAW {
             return CaptureResult(jpeg: first, reference: first, details: "Foto individual, procesada por el sistema.", mergedFrames: 1)
@@ -79,17 +81,17 @@ final class BurstProcessor {
             // The selectable limit belongs to a multi-frame stack. Editing a
             // single photo must not silently downsample the full-resolution JPEG.
             let limit = frames.count == 1 ? max(image.extent.width, image.extent.height)
-                : CGFloat(min(4096, max(1024, options.maximumDimension)))
+                : CGFloat(min(useSpectral ? 2048:4096, max(1024, options.maximumDimension)))
             let factor = min(1, limit / max(image.extent.width, image.extent.height))
             let scaled = image.transformed(by: CGAffineTransform(scaleX: factor, y: factor))
             let normalized = scaled.transformed(by: CGAffineTransform(translationX: -scaled.extent.minX,
                                                            y: -scaled.extent.minY))
-            if isRAW {
+            if isRAW || useSpectral {
                 // Decode each DNG once. Registration, rejection and averaging
                 // reuse this linear buffer instead of evaluating a RAW graph repeatedly.
                 guard let rendered = context.createCGImage(normalized, from: normalized.extent, format: .RGBAh,
                     colorSpace: CGColorSpace(name: CGColorSpace.extendedLinearSRGB)!) else {
-                    throw CameraFailure.message("No se pudo materializar el revelado RAW.")
+                    throw CameraFailure.message("No se pudo materializar el fotograma lineal.")
                 }
                 return CIImage(cgImage: rendered)
             }
@@ -115,7 +117,8 @@ final class BurstProcessor {
         let referenceData = frames[referenceIndex]
         let reference = try decode(inputFrames[referenceIndex])
         var accumulator = reference
-        let temporal = options.nightStatic && options.nightWeightedFusion ? WeightedTemporalMerger(reference: reference, context: context) : nil
+        let temporal = options.nightStatic && (options.nightWeightedFusion || useSpectral) ? WeightedTemporalMerger(reference: reference, context: context) : nil
+        let spectral = useSpectral ? try ResearchWienerFilter(reference:reference,context:context):nil
         var common = reference.extent
         // Register reduced images; retain full resolution for all fusion/render operations.
         let registrationScale = min(1, 1024 / max(reference.extent.width, reference.extent.height))
@@ -191,6 +194,10 @@ final class BurstProcessor {
                 if options.localAlignment {
                     aligned = try LocalAlignment.align(aligned, reference: reference, extent: overlap, context: context)
                 }
+                if let spectral {
+                    progress?("Fusión espectral \(attempted) de \(inputFrames.count)…")
+                    aligned=try spectral.filter(aligned,extent:overlap,strength:options.nightSpectralStrength,cancellation:cancellation)
+                }
                 if temporal == nil && options.rejectMotion && options.adaptiveMotionRejection {
                     let threshold = NoiseAwareMerger.threshold(aligned, reference: reference, extent: overlap, context: context, sigma: options.motionSigma)
                     aligned = try NoiseAwareMerger.blend(aligned, reference: reference, extent: overlap, threshold: threshold)
@@ -214,7 +221,7 @@ final class BurstProcessor {
                 // filter graph does not retain a full burst of decoded images.
                 let mean: CIImage
                 if let temporal {
-                    mean = try temporal.append(aligned, extent: overlap, rejectMotion: options.rejectMotion, sigma: options.motionSigma)
+                    mean = try temporal.append(aligned, extent: overlap, rejectMotion: spectral == nil && options.rejectMotion, sigma: options.motionSigma)
                 } else {
                     mean = accumulator.cropped(to: overlap).applyingFilter("CIDissolveTransition", parameters: [
                         kCIInputTargetImageKey: aligned.cropped(to: overlap), kCIInputTimeKey: 1 / CGFloat(accepted + 1)
@@ -252,7 +259,7 @@ final class BurstProcessor {
         } else {
             details = "Fusionadas \(accepted)/\(frames.count) fotos. Referencia \(referenceIndex + 1). \(rendered.width) × \(rendered.height) px. Rechazo de movimiento: \(options.rejectMotion ? "sí" : "no")."
         }
-        let prefix = options.nightStatic ? "Noche estática · \(isRAW ? "DNG revelados" : "JPEG") · \(temporal != nil ? "pesos por píxel" : "media") · " : ""
+        let prefix = options.nightStatic ? "Noche estática · \(isRAW ? "DNG revelados" : "JPEG") · \(spectral != nil ? "FFT de investigación" : (temporal != nil ? "pesos por píxel" : "media")) · " : ""
         return CaptureResult(jpeg: rendered.data, reference: referenceData,
             details: prefix + details, mergedFrames: accepted,
             raw: rawFrames?[referenceIndex], source: isRAW ? "developed-RAW" : "JPEG")

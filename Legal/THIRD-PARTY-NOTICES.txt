@@ -1,0 +1,8 @@
+Ultimate CAM research spectral fusion
+
+Adapted from google/burst-denoising, py_image.py (rcwindow, hdrplus_merge).
+Copyright 2018 Google LLC. Apache License 2.0; see Google-Burst-Denoising.txt.
+Source revision: 7ff07e009568778ff337c259e192d1d81aedbea6
+https://github.com/google/burst-denoising
+
+Modifications for Ultimate CAM (2026): Swift/Accelerate implementation, streaming RGB pairs, clamped overlap boundaries, empirical RGB noise estimation and bounded memory. This research adaptation is not the proprietary Google Camera engine or a calibrated Bayer pipeline.

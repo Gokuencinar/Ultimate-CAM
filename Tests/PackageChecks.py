@@ -23,6 +23,9 @@ for scheme,prefix,architecture in [('rootless','var/jb/','iphoneos-arm64'),('roo
             digest,name=line.split('  ',1);assert hashlib.md5(archive.extractfile(files[name]).read()).hexdigest()==digest
         info=plistlib.loads(archive.extractfile(files[prefix+'Applications/UltimateCAM.app/Info.plist']).read())
         assert info['CFBundleIdentifier']=='com.gokuencinar.ultimatecam' and info['NSMicrophoneUsageDescription']
+        legal=prefix+'Applications/UltimateCAM.app/Legal/'
+        assert b'Apache License' in archive.extractfile(files[legal+'Google-Burst-Denoising.txt']).read()
+        assert b'Copyright 2018 Google LLC' in archive.extractfile(files[legal+'THIRD-PARTY-NOTICES.txt']).read()
     expected=(directory/'SHA256SUMS.txt').read_text().split()[0]
     assert hashlib.sha256(package.read_bytes()).hexdigest()==expected
     print('PACKAGE CHECK PASSED:',scheme,architecture)

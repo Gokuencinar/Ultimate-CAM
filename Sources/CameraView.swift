@@ -111,6 +111,7 @@ struct CameraView: View {
     private var zoom: Double { camera.zoomFactor }
     private var lens: CameraLens { camera.selectedLens }
     private var controlsEnabled: Bool { !camera.busy && !loadingPhoto && !nativeNight.opening && !openingVideo && countdown == 0 }
+    private var intrinsicAdaptiveFusion:Bool { options.nightStatic && (options.nightWeightedFusion || options.nightSpectralFusion) }
     private var hardwareCaptureReady:Bool {
         hardwareButtons && camera.ready && !camera.busy && !loadingPhoto && !nativeNight.opening && !openingVideo &&
         scenePhase == .active && auxiliaryMode==nil && !showControls && !showResult && !showPhotoPicker &&
@@ -542,7 +543,15 @@ struct CameraView: View {
                         Text("1/30 s").tag(1.0/30); Text("1/8 s").tag(0.125); Text("1/4 s").tag(0.25)
                         Text("1/2 s").tag(0.5); Text("1 s").tag(1.0)
                     }.accessibilityIdentifier("night.shutterLimit")
-                    Toggle("Fusión con pesos por píxel", isOn: $options.nightWeightedFusion)
+                    Toggle("Fusión espectral experimental",isOn:Binding(get:{options.nightSpectralFusion},set:{ value in
+                        options.nightSpectralFusion=value;if value { options.rejectMotion=true }
+                    })).accessibilityIdentifier("night.spectralFusion")
+                    if options.nightSpectralFusion {
+                        optionSlider("Mezcla espectral",value:$options.nightSpectralStrength,range:0.25...4)
+                        Text("Mayor mezcla favorece el promedio; menor conserva más la referencia.").font(.caption).foregroundStyle(.secondary)
+                        Text("Adaptación RGB de una referencia de investigación. Conserva frecuencias de la referencia cuando cambian entre fotos. Limita el lado largo a 2048 px y puede tardar más; necesita comparación real de ruido y detalle.").font(.footnote).foregroundStyle(.secondary)
+                    }
+                    Toggle("Fusión con pesos por píxel", isOn: $options.nightWeightedFusion).disabled(options.nightSpectralFusion)
                     Text("Hasta 16 fotogramas, limitado por la medición y la lente. El tiempo total incluye entrega y procesado y será mayor. El límite de obturación es manual: aún no detecta movimiento de sujetos.")
                         .font(.footnote).foregroundStyle(.secondary)
                 }
@@ -559,10 +568,11 @@ struct CameraView: View {
                     Text("2048 px · ligera").tag(2048.0); Text("2560 px · equilibrada").tag(2560.0); Text("4096 px · más memoria").tag(4096.0)
                 }
                 Toggle("Referencia más nítida", isOn: $options.chooseSharpestReference)
-                Toggle("Rechazo de movimiento", isOn: $options.rejectMotion)
+                Toggle("Rechazo de movimiento", isOn: $options.rejectMotion).disabled(options.nightStatic && options.nightSpectralFusion)
                 Toggle("Alineación local experimental", isOn: $options.localAlignment)
-                Toggle("Rechazo adaptativo experimental", isOn: $options.adaptiveMotionRejection).disabled(!options.rejectMotion)
-                if options.adaptiveMotionRejection && options.rejectMotion {
+                Toggle("Rechazo adaptativo experimental",isOn:Binding(get:{options.rejectMotion && (intrinsicAdaptiveFusion || options.adaptiveMotionRejection)},set:{options.adaptiveMotionRejection=$0}))
+                    .disabled(!options.rejectMotion || intrinsicAdaptiveFusion)
+                if options.rejectMotion && !(options.nightStatic && options.nightSpectralFusion) && (options.adaptiveMotionRejection || intrinsicAdaptiveFusion) {
                     optionSlider("Tolerancia al movimiento", value: $options.motionSigma, range: 1.5...6)
                 }
                 Text("La alineación local consume más tiempo. El rechazo adaptativo estima diferencias RGB; necesita una escena mayoritariamente inmóvil.").font(.footnote).foregroundStyle(.secondary)

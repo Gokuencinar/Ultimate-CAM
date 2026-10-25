@@ -7,7 +7,11 @@ targets:
   UltimateCAM:
     type: application
     platform: iOS
-    sources: [Sources]
+    sources:
+      - path: Sources
+      - path: Legal
+        type: folder
+        buildPhase: resources
     info:
       path: Info.plist
       properties:
@@ -23,7 +27,7 @@ targets:
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.gokuencinar.ultimatecam
-        MARKETING_VERSION: '0.11.0'
+        MARKETING_VERSION: '0.12.0'
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
         CURRENT_PROJECT_VERSION: '1'
         SWIFT_VERSION: '5.0'
