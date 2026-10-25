@@ -17,11 +17,12 @@ targets:
         UILaunchScreen: {}
         UISupportedInterfaceOrientations: [UIInterfaceOrientationPortrait]
         NSCameraUsageDescription: UltimateCAM necesita la cámara para tomar fotografías.
+        NSMicrophoneUsageDescription: Ultimate CAM usa el micrófono solo cuando eliges grabar vídeo con audio.
         NSPhotoLibraryAddUsageDescription: UltimateCAM guarda las fotos que elijas y su referencia original.
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.gokuencinar.ultimatecam
-        MARKETING_VERSION: '0.9.0'
+        MARKETING_VERSION: '0.10.0'
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
         CURRENT_PROJECT_VERSION: '1'
         SWIFT_VERSION: '5.0'

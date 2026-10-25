@@ -74,6 +74,8 @@ struct CameraView: View {
     @State private var showPhotoPicker = false
     @State private var pendingPhotoImport = false
     @State private var pendingNativeNight = false
+    @State private var showingVideo = false
+    @State private var openingVideo = false
     @State private var selectedPhoto: PhotosPickerItem?
     @State private var loadingPhoto = false
     @State private var showReference = false
@@ -99,7 +101,7 @@ struct CameraView: View {
     @State private var focusPosition: Double = 0.5
     private var zoom: Double { camera.zoomFactor }
     private var lens: CameraLens { camera.selectedLens }
-    private var controlsEnabled: Bool { !camera.busy && !loadingPhoto && !nativeNight.opening && countdown == 0 }
+    private var controlsEnabled: Bool { !camera.busy && !loadingPhoto && !nativeNight.opening && !openingVideo && countdown == 0 }
 
     var body: some View {
         ZStack {
@@ -133,10 +135,10 @@ struct CameraView: View {
             }
         }
         .background(Color.black).foregroundStyle(.white).preferredColorScheme(.dark)
-        .onAppear { UIApplication.shared.isIdleTimerDisabled = true; camera.start(); loadProfile(profiles.options(for: lens.rawValue) ?? ProcessingOptions()) }
+        .onAppear { UIApplication.shared.isIdleTimerDisabled = true; if !showingVideo && !openingVideo { camera.start() }; loadProfile(profiles.options(for: lens.rawValue) ?? ProcessingOptions()) }
         .onDisappear { UIApplication.shared.isIdleTimerDisabled = false; cancelCountdown(); profiles.flush() }
         .onChange(of: scenePhase) { _, phase in
-            if phase == .active { UIApplication.shared.isIdleTimerDisabled = true; if !nativeNight.opening { nativeNight.returnedToApp(); camera.start() } }
+            if phase == .active { UIApplication.shared.isIdleTimerDisabled = true; if !nativeNight.opening && !showingVideo && !openingVideo { nativeNight.returnedToApp(); camera.start() } }
             else if phase == .background {
                 UIApplication.shared.isIdleTimerDisabled = false
                 cancelCountdown()
@@ -158,6 +160,7 @@ struct CameraView: View {
             else if pendingNativeNight { pendingNativeNight = false; nativeNight.open(camera:camera) }
         }) { settings }
         .sheet(isPresented: $showResult) { review }
+        .fullScreenCover(isPresented:$showingVideo,onDismiss:{ camera.start() }) { MovieCameraView() }
         .photosPicker(isPresented: $showPhotoPicker, selection: $selectedPhoto, matching: .images,
                       preferredItemEncoding: .current)
         .task(id: selectedPhoto) {
@@ -340,6 +343,10 @@ struct CameraView: View {
                         modeButton("Cámara",selected:!stack && !options.hdrBracketing) { options.nightStatic=false;options.hdrBracketing=false;stack=false }
                         modeButton("HDR",selected:options.hdrBracketing) { activateHDR() }.accessibilityIdentifier("camera.mode.hdr")
                         modeButton("Pila",selected:stack && !options.nightStatic && !options.hdrBracketing) { options.nightStatic=false;options.hdrBracketing=false;stack=true }
+                        modeButton("Vídeo",selected:false) {
+                            openingVideo=true
+                            camera.prepareNativeHandoff { accepted in openingVideo=false;if accepted { showingVideo=true } }
+                        }.accessibilityIdentifier("camera.mode.video")
                         modeButton("iOS",selected:false) { nativeNight.open(camera:camera) }.accessibilityIdentifier("camera.mode.nativeNight")
                     }
                 }

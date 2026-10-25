@@ -1,6 +1,23 @@
 import XCTest
 
 final class CameraInteractionTests: XCTestCase {
+    func testVideoSettingsAndReturnWithoutRecording() {
+        continueAfterFailure=false
+        let app=XCUIApplication();app.launch()
+        let video=app.buttons["camera.mode.video"]
+        for _ in 0..<3 {
+            if video.isHittable { break }
+            app.scrollViews.element(boundBy:0).swipeLeft()
+        }
+        XCTAssertTrue(video.isHittable);video.tap()
+        XCTAssertTrue(app.buttons["video.settings"].waitForExistence(timeout:8))
+        app.buttons["video.settings"].tap()
+        XCTAssertTrue(app.navigationBars["Vídeo"].waitForExistence(timeout:3))
+        XCTAssertTrue(app.otherElements["video.resolution"].exists || app.buttons["video.resolution"].exists)
+        let image=XCTAttachment(screenshot:app.screenshot());image.name="Video configuration";image.lifetime = .keepAlways;add(image)
+        app.buttons["Listo"].tap();app.buttons["video.close"].tap()
+        XCTAssertTrue(app.buttons["camera.shutter"].waitForExistence(timeout:5))
+    }
     func testViewfinderAndSettings() {
         continueAfterFailure = false
         let app = XCUIApplication()

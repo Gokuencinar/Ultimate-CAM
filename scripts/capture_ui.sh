@@ -12,6 +12,7 @@ xcrun simctl bootstatus "$device" -b
 xcrun simctl status_bar "$device" override --time '9:41' --batteryState charged --batteryLevel 100
 xcrun simctl install "$device" build/Simulator/Build/Products/Debug-iphonesimulator/UltimateCAM.app
 xcrun simctl privacy "$device" grant camera com.gokuencinar.ultimatecam
+xcrun simctl privacy "$device" grant microphone com.gokuencinar.ultimatecam
 xcrun simctl launch "$device" com.gokuencinar.ultimatecam
 sleep 5
 xcrun simctl io "$device" screenshot build/ui/Ultimate-CAM-photo.png
