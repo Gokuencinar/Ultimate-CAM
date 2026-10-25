@@ -112,7 +112,7 @@ final class CameraModel: NSObject, ObservableObject, AVCapturePhotoCaptureDelega
     override init() {
         super.init()
         diagnosticBridge = DiagnosticBridge(capture: { [weak self] request in
-            self?.capture(stack: request.stack, count: request.count, raw: request.raw, flash: request.flash, options: request.options)
+            self?.capture(stack: request.stack, count: request.count, raw: request.raw, flash: request.flash, options: request.options,mirrorSelfie:request.mirrorSelfie)
         }, command: { [weak self] object in self?.diagnosticCommand(object) })
         CaptureTrace.record("model.init", [
             "processingDelegate": responds(to: NSSelectorFromString("captureOutput:didFinishProcessingPhoto:error:")),

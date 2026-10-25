@@ -63,7 +63,7 @@ jobs:
           xcrun --sdk macosx swiftc -O "${SOURCES[@]}" Tests/SphereChecks.swift -o build/sphere-checks
           build/sphere-checks 2>&1 | tee build/sphere-checks.log
           xcrun --sdk macosx swiftc -O "${SOURCES[@]}" Tests/SpectralChecks.swift -o build/spectral-checks
-          build/spectral-checks 2>&1 | tee build/spectral-checks.log
+          ULTIMATECAM_PROCESSOR_TRACE=1 build/spectral-checks 2>&1 | tee build/spectral-checks.log
       - name: Package rootless DEB
         run: bash scripts/package_deb.sh
       - name: Package RootHide DEB

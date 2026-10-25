@@ -75,6 +75,10 @@ final class CameraInteractionTests: XCTestCase {
         app.buttons["processing.systemQuality"].tap()
         XCTAssertTrue(app.buttons["Noche estática"].waitForExistence(timeout: 3))
         app.buttons["Noche estática"].tap()
+        app.buttons["settings.tab.Captura"].tap()
+        let spectral=app.switches["night.spectralFusion"]
+        for _ in 0..<8 { if spectral.isHittable { break };app.swipeUp() }
+        setSwitch(spectral,to:"1")
         app.buttons["Listo"].tap()
         XCTAssertTrue(app.staticTexts["Noche estática · JPEG"].waitForExistence(timeout: 3))
         XCTAssertTrue(app.buttons["camera.shutter"].exists)

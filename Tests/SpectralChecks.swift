@@ -80,11 +80,16 @@ import Darwin
         var options=ProcessingOptions();options.nightStatic=true;options.nightSpectralFusion=true;options.nightSpectralStrength=1.5
         try check(try JSONDecoder().decode(ProcessingOptions.self,from:JSONEncoder().encode(options))==options,"Spectral recipe did not round trip")
         var texture=[Float](repeating:1,count:256*192*4)
-        for y in 0..<192 { for x in 0..<256 { for c in 0..<3 { texture[(y*256+x)*4+c]=Float(30+(x*13+y*7+c*53)%190)/255 } } }
+        // Unique texture: a periodic lattice can legitimately produce an
+        // ambiguous Vision registration, even for two otherwise equal inputs.
+        for y in 0..<192 { for x in 0..<256 { for c in 0..<3 {
+            texture[(y*256+x)*4+c]=0.15+Float(x)/700+Float(y)/1000+noise()*3
+        } } }
         let png=context.pngRepresentation(of:image(texture,width:256,height:192),format:.RGBA8,colorSpace:CGColorSpace(name:CGColorSpace.sRGB)!)!
         options.chooseSharpestReference=false;options.nightWeightedFusion=false
         let pipeline=try BurstProcessor().process([png,png],options:options)
-        try check(pipeline.mergedFrames==2 && pipeline.details.contains("FFT de investigación"),"Night capture pipeline did not use the spectral implementation")
+        print("Integrated spectral pipeline:",pipeline.mergedFrames,pipeline.details)
+        try check(pipeline.mergedFrames==2 && pipeline.details.contains("FFT de investigación"),"Night capture pipeline did not use the spectral implementation: \(pipeline.details)")
         options.rejectMotion=false;try rejected { _=try options.validated() }
     }
 }

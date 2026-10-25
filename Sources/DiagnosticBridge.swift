@@ -10,24 +10,36 @@ struct DiagnosticCaptureRequest {
     let adjustments: Bool
     let night: Bool
     let nightRAW: Bool
+    let spectral:Bool
+    let spectralStrength:Double
+    let nightBudget:Double
+    let nightShutterLimit:Double
+    let mirrorSelfie:Bool
 
     init?(_ object: [String: String]) {
-        guard Set(object.keys).isSubset(of: ["action", "mode", "count", "raw", "adjustments", "flash", "nightRaw"]),
+        guard Set(object.keys).isSubset(of: ["action", "mode", "count", "raw", "adjustments", "flash", "nightRaw","spectral","spectralStrength","nightBudget","nightShutterLimit","mirrorSelfie"]),
               object["action"] == "capture",
               ["normal", "stack", "night"].contains(object["mode"] ?? "normal"),
               ["true", "false"].contains(object["raw"] ?? "false"),
               ["true", "false"].contains(object["nightRaw"] ?? "false"),
               ["true", "false"].contains(object["adjustments"] ?? "false"),
+              ["true", "false"].contains(object["spectral"] ?? "false"),
+              ["true", "false"].contains(object["mirrorSelfie"] ?? "false"),
+              let strength=Double(object["spectralStrength"] ?? "1"),strength.isFinite,(0.25...4).contains(strength),
+              let budget=Double(object["nightBudget"] ?? "8"),budget.isFinite,(1...16).contains(budget),
+              let limit=Double(object["nightShutterLimit"] ?? "1"),limit.isFinite,(1.0/30...1).contains(limit),
               let flash = CameraFlash(rawValue: object["flash"] ?? "off"),
               let count = Int(object["count"] ?? "3"), [3, 5, 7, 9].contains(count) else { return nil }
         night = object["mode"] == "night"
         nightRAW = object["nightRaw"] == "true"
+        spectral=object["spectral"] == "true";spectralStrength=strength;nightBudget=budget;nightShutterLimit=limit
+        mirrorSelfie=object["mirrorSelfie"] == "true"
         stack = object["mode"] == "stack" || night
         self.count = count
         raw = object["raw"] == "true"
         adjustments = object["adjustments"] == "true"
         self.flash = flash
-        guard !nightRAW || night else { return nil }
+        guard (!nightRAW && !spectral) || night else { return nil }
         guard !(stack && raw), flash == .off || (!stack && !raw) else { return nil }
     }
 
@@ -36,6 +48,8 @@ struct DiagnosticCaptureRequest {
         if night {
             result.nightStatic = true
             result.nightRAW = nightRAW
+            result.nightSpectralFusion=spectral;result.nightSpectralStrength=spectralStrength
+            result.nightBudget=nightBudget;result.nightShutterLimit=nightShutterLimit
             result.maximumDimension = 4096
             result.noiseReduction = 0.012
             result.sharpening = 0.1
@@ -78,7 +92,7 @@ final class DiagnosticBridge {
                 }
                 CaptureTrace.record("diagnostic.capture", ["mode": request.night ? "night" : (request.stack ? "stack" : "normal"),
                     "count": request.stack ? request.count : 1, "raw": request.raw,
-                    "adjustments": request.adjustments])
+                    "adjustments": request.adjustments,"spectral":request.spectral,"mirrorSelfie":request.mirrorSelfie])
                 capture(request)
             } else {
                 CaptureTrace.record("diagnostic.command", ["action": action])
