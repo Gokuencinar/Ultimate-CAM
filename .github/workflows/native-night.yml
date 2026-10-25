@@ -17,6 +17,6 @@ jobs:
       - uses: actions/upload-artifact@v4
         with:
           name: Ultimate-CAM-Native-Night-${{ matrix.scheme }}-${{ github.run_id }}
-          path: build/native-night/
+          path: build/native-night/*.deb
           if-no-files-found: error
           retention-days: 14

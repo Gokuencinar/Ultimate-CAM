@@ -13,7 +13,7 @@ for tool in ldid dpkg-deb; do
   fi
 done
 xcrun clang -std=c11 -Wall -Wextra -Werror NativeBridge/tools/NativeNightProtocolChecks.c -o build/native-night/protocol-checks
-build/native-night/protocol-checks | tee build/native-night/protocol-checks.log
+build/native-night/protocol-checks
 xcrun --sdk iphoneos clang -arch arm64 -arch arm64e -miphoneos-version-min=18.0 -dynamiclib -fobjc-arc -Wall -Wextra -Werror -DUCN_ROOTHIDE="$roothide" \
   -framework Foundation -framework UIKit -install_name @rpath/UltimateCAMNativeNight.dylib \
   NativeBridge/UltimateCAMNativeNight.m -o build/native-night/UltimateCAMNativeNight.dylib

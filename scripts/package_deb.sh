@@ -73,4 +73,3 @@ dpkg-deb --info "$destination/$name"
 dpkg-deb --contents "$destination/$name"
 cd "$destination"
 shasum -a 256 "$name" > SHA256SUMS.txt
-printf 'Commit: %s\nPaquete: %s\nEsquema: %s\nFirma: ad hoc ldid, sin certificado Apple\n' "$commit" "$name" "$scheme" > BUILD.txt
