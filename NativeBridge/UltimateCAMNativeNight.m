@@ -122,7 +122,17 @@ __attribute__((constructor)) static void Install(void) {
             !Signature(cls,"_resolvedLowLightMode","q16@0:8")) { Status(0,UCNStatusABIRejected); return; }
         HookMessage hook=(HookMessage)dlsym(RTLD_DEFAULT,"MSHookMessageEx");
         if (!hook) {
-            void *backend=dlopen("/var/jb/usr/lib/libsubstrate.dylib",RTLD_NOW|RTLD_LOCAL);
+            const char *path="/var/jb/usr/lib/libsubstrate.dylib";
+#if UCN_ROOTHIDE
+            // RootHide creates this backlink beside the loaded Mach-O. Never
+            // search for or cache a randomized bootstrap name from another boot.
+            Dl_info image={0};
+            if (!dladdr(&intentToken,&image) || !image.dli_fname) { Status(0,UCNStatusABIRejected); return; }
+            NSString *backendPath=[[@(image.dli_fname) stringByDeletingLastPathComponent]
+                stringByAppendingPathComponent:@".jbroot/usr/lib/libsubstrate.dylib"];
+            path=backendPath.fileSystemRepresentation;
+#endif
+            void *backend=dlopen(path,RTLD_NOW|RTLD_LOCAL);
             if (backend) hook=(HookMessage)dlsym(backend,"MSHookMessageEx");
         }
         if (!hook) { Status(0,UCNStatusABIRejected); return; }

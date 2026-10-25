@@ -13,7 +13,7 @@ final class CameraInteractionTests: XCTestCase {
         XCTAssertTrue(app.buttons["video.settings"].waitForExistence(timeout:8))
         app.buttons["video.settings"].tap()
         XCTAssertTrue(app.navigationBars["Vídeo"].waitForExistence(timeout:3))
-        XCTAssertTrue(app.otherElements["video.resolution"].exists || app.buttons["video.resolution"].exists)
+        XCTAssertTrue(app.descendants(matching:.any).matching(identifier:"video.resolution").firstMatch.exists)
         let image=XCTAttachment(screenshot:app.screenshot());image.name="Video configuration";image.lifetime = .keepAlways;add(image)
         app.buttons["Listo"].tap();app.buttons["video.close"].tap()
         XCTAssertTrue(app.buttons["camera.shutter"].waitForExistence(timeout:5))

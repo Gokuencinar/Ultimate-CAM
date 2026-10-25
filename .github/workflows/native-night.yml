@@ -5,15 +5,18 @@ permissions:
   contents: read
 jobs:
   package:
+    strategy:
+      matrix:
+        scheme: [rootless, roothide]
     runs-on: macos-15
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
       - name: Compile, check protocol and package companion
-        run: bash NativeBridge/package_native.sh
+        run: bash NativeBridge/package_native.sh ${{ matrix.scheme }}
       - uses: actions/upload-artifact@v4
         with:
-          name: Ultimate-CAM-Native-Night-${{ github.run_id }}
+          name: Ultimate-CAM-Native-Night-${{ matrix.scheme }}-${{ github.run_id }}
           path: build/native-night/
           if-no-files-found: error
           retention-days: 14

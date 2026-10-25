@@ -1,10 +1,16 @@
 #!/bin/bash
 set -euo pipefail
+scheme=${1:-rootless}
+case "$scheme" in
+  rootless) prefix=/var/jb; architecture=iphoneos-arm64; interpreter=/var/jb/bin/sh; destination=build ;;
+  roothide) prefix=; architecture=iphoneos-arm64e; interpreter=/bin/sh; destination=build/roothide ;;
+  *) echo "Unsupported package scheme: $scheme" >&2; exit 2 ;;
+esac
 app=build/DerivedData/Build/Products/Release-iphoneos/UltimateCAM.app
 stage=$(mktemp -d "${TMPDIR:-/tmp}/ultimatecam-package.XXXXXX")
 trap 'rm -rf "$stage"' EXIT
-bundle="$stage/var/jb/Applications/UltimateCAM.app"
-mkdir -p "$stage/DEBIAN" "$(dirname "$bundle")" build
+bundle="$stage$prefix/Applications/UltimateCAM.app"
+mkdir -p "$stage/DEBIAN" "$(dirname "$bundle")" "$destination"
 ditto "$app" "$bundle"
 # Bind this ad-hoc app to its own data container. Without this, platform trust
 # can deny even its own cache (observed NSCocoaErrorDomain 513 on the device).
@@ -26,27 +32,27 @@ cat > "$stage/DEBIAN/control" <<EOF
 Package: com.gokuencinar.ultimatecam
 Name: Ultimate CAM
 Version: $version
-Architecture: iphoneos-arm64
+Architecture: $architecture
 Maintainer: Gokuencinar
 Author: Gokuencinar
 Section: Multimedia
 Depends: firmware (>= 18.0), uikittools
-Description: Camara propia con captura multiple experimental e interfaz inspirada en 26CAM.
+Description: Ultimate CAM photo processing, video and native Night companion integration.
 Homepage: https://github.com/Gokuencinar/Ultimate-CAM
 EOF
-cat > "$stage/DEBIAN/postinst" <<'EOF'
-#!/var/jb/bin/sh
+cat > "$stage/DEBIAN/postinst" <<EOF
+#!$interpreter
 set -e
-if [ "$1" = configure ]; then
-    /var/jb/usr/bin/uicache -p /var/jb/Applications/UltimateCAM.app
+if [ "\$1" = configure ]; then
+    $prefix/usr/bin/uicache -p $prefix/Applications/UltimateCAM.app
 fi
 exit 0
 EOF
-cat > "$stage/DEBIAN/prerm" <<'EOF'
-#!/var/jb/bin/sh
+cat > "$stage/DEBIAN/prerm" <<EOF
+#!$interpreter
 set -e
-if [ "$1" = remove ] || [ "$1" = deconfigure ]; then
-    /var/jb/usr/bin/uicache -u /var/jb/Applications/UltimateCAM.app
+if [ "\$1" = remove ] || [ "\$1" = deconfigure ]; then
+    $prefix/usr/bin/uicache -u $prefix/Applications/UltimateCAM.app
 fi
 exit 0
 EOF
@@ -56,15 +62,15 @@ chmod 755 "$bundle/UltimateCAM" "$stage/DEBIAN/postinst" "$stage/DEBIAN/prerm"
 python3 - "$stage" <<'PY'
 import hashlib, pathlib, sys
 root = pathlib.Path(sys.argv[1])
-files = sorted(p for p in (root/'var').rglob('*') if p.is_file())
+files = sorted(p for p in root.rglob('*') if p.is_file() and 'DEBIAN' not in p.relative_to(root).parts)
 (root/'DEBIAN'/'md5sums').write_text(''.join(
     hashlib.md5(p.read_bytes()).hexdigest() + '  ' + p.relative_to(root).as_posix() + '\n'
     for p in files), encoding='utf-8')
 PY
-name="Ultimate-CAM_${version}_iphoneos-arm64.deb"
-dpkg-deb --root-owner-group -Zgzip --build "$stage" "build/$name"
-dpkg-deb --info "build/$name"
-dpkg-deb --contents "build/$name"
-cd build
+name="Ultimate-CAM_${version}_${architecture}.deb"
+dpkg-deb --root-owner-group -Zgzip --build "$stage" "$destination/$name"
+dpkg-deb --info "$destination/$name"
+dpkg-deb --contents "$destination/$name"
+cd "$destination"
 shasum -a 256 "$name" > SHA256SUMS.txt
-printf 'Commit: %s\nPaquete: %s\nEsquema: rootless /var/jb\nFirma: ad hoc ldid, sin certificado Apple\n' "$commit" "$name" > BUILD.txt
+printf 'Commit: %s\nPaquete: %s\nEsquema: %s\nFirma: ad hoc ldid, sin certificado Apple\n' "$commit" "$name" "$scheme" > BUILD.txt

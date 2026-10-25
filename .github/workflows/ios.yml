@@ -60,6 +60,10 @@ jobs:
           build/movie-checks 2>&1 | tee build/movie-checks.log
       - name: Package rootless DEB
         run: bash scripts/package_deb.sh
+      - name: Package RootHide DEB
+        run: bash scripts/package_deb.sh roothide
+      - name: Validate both package layouts
+        run: python3 Tests/PackageChecks.py build
       - name: Build read-only device diagnostic
         run: |
           set -euo pipefail
@@ -83,6 +87,13 @@ jobs:
             build/*.deb
             build/SHA256SUMS.txt
             build/BUILD.txt
+          if-no-files-found: error
+          retention-days: 14
+      - name: Upload RootHide DEB and checksum
+        uses: actions/upload-artifact@v4
+        with:
+          name: Ultimate-CAM-roothide-${{ github.run_number }}
+          path: build/roothide/
           if-no-files-found: error
           retention-days: 14
       - name: Capture interface on iPhone 11 Pro simulator
