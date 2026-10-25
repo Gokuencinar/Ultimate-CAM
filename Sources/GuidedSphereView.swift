@@ -117,7 +117,7 @@ struct GuidedSphereView:View {
     }
     private func accept(_ frame:GuidedPhotoFrame) {
         guard scene == .active,!closing else { pendingTarget=nil;return }
-        guard let target=pendingTarget,let sample=frame.motion else { message="No se recibió orientación para esa foto; no se añade a la esfera.";pendingTarget=nil;return }
+        guard let target=pendingTarget,let sample=frame.motion else { message="No se recibió orientación para esa foto; no se añade a la esfera.";pendingTarget=nil;if captured.isEmpty { camera.unlock() };return }
         pendingTarget=nil
         do {
             guard sample.rotationSpeed<0.12 else { throw CameraFailure.message("El teléfono se movió durante la foto. Mantén el objetivo quieto y vuelve a pulsar.") }
@@ -126,7 +126,7 @@ struct GuidedSphereView:View {
             guard SphereTarget.all[target].angle(to:pose.forward)<9 else { throw CameraFailure.message("La foto se hizo fuera del objetivo. No se añade; vuelve a alinear y pulsa.") }
             reference=candidate;captured[target]=SphereImageFrame(data:frame.data,pose:pose,fieldOfView:frame.fieldOfView)
             message="Vista añadida. Gira sin desplazar la cámara."
-        } catch { message=error.localizedDescription }
+        } catch { message=error.localizedDescription;if captured.isEmpty { camera.unlock() } }
     }
     private func merge() {
         processing=true;let token=ProcessingCancellation();cancellation=token

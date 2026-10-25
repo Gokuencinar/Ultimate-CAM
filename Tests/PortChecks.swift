@@ -280,7 +280,7 @@ import Darwin
                   "Reference metadata overwrote processed dimensions or orientation")
         try check(abs((annotatedExif[kCGImagePropertyExifExposureTime] as? Double ?? 0)-0.125)<0.0001 &&
                   annotatedExif[kCGImagePropertyExifLensModel] as? String=="Fixture lens" &&
-                  annotatedExif[kCGImagePropertyExifDateTimeOriginal] as? String=="2026:10:25 12:30:00","Capture metadata did not retain reference exposure, lens and date")
+                  annotatedExif[kCGImagePropertyExifDateTimeOriginal] as? String=="2026:10:25 12:30:00","Capture metadata did not retain reference exposure, lens and date: \(annotatedExif)")
         try check(AdaptiveHDR.hasGainMap(annotated),"Attaching capture metadata removed the actual HDR map")
         let hdrDecoded=AdaptiveHDR.expanded(annotated)!
         let sdrDecoded=CIImage(data:annotated)!

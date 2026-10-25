@@ -14,7 +14,17 @@ enum CaptureMetadata {
         }
         let metadata=CGImageMetadataCreateMutable()
         func set(_ dictionary:CFString,_ key:CFString,_ value:Any) throws {
-            guard CGImageMetadataSetValueMatchingImageProperty(metadata,dictionary,key,value as CFTypeRef) else {
+            var tag=value
+            // Image properties expose EXIF dates with colons. Metadata setters
+            // accept the XMP date type, whose lexical form is ISO 8601.
+            if [kCGImagePropertyTIFFDateTime,kCGImagePropertyExifDateTimeOriginal,kCGImagePropertyExifDateTimeDigitized].contains(key),
+               let text=value as? String,text.count==19 {
+                let chars=Array(text)
+                if chars[4]==":" && chars[7]==":" && chars[10]==" " {
+                    tag=String(chars[0..<4])+"-"+String(chars[5..<7])+"-"+String(chars[8..<10])+"T"+String(chars[11..<19])
+                }
+            }
+            guard CGImageMetadataSetValueMatchingImageProperty(metadata,dictionary,key,tag as CFTypeRef) else {
                 throw CameraFailure.message("No se pudo conservar el metadato \(key).")
             }
         }
