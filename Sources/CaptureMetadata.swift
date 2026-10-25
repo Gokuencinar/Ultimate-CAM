@@ -38,10 +38,12 @@ enum CaptureMetadata {
         try set(kCGImagePropertyTIFFDictionary,kCGImagePropertyTIFFImageDescription,
                 frames>1 ? "Ultimate CAM: \(frames) frames. Exposure tags describe the reference frame." : "Ultimate CAM: processed image.")
         let bytes=NSMutableData()
-        guard let destination=CGImageDestinationCreateWithData(bytes,"public.jpeg" as CFString,1,nil),
+        var error:Unmanaged<CFError>?
+        guard let destination=CGImageDestinationCreateWithData(bytes,"public.jpeg" as CFString,CGImageSourceGetCount(source),nil),
               CGImageDestinationCopyImageSource(destination,source,[kCGImageDestinationMetadata:metadata,
-                kCGImageDestinationMergeMetadata:true,kCGImageDestinationOrientation:1] as CFDictionary,nil) else {
-            throw CameraFailure.message("No se pudo terminar el JPEG con sus metadatos.")
+                kCGImageDestinationMergeMetadata:true] as CFDictionary,&error) else {
+            let detail=error.map { CFErrorCopyDescription($0.takeRetainedValue()) as String } ?? "sin detalle de ImageIO"
+            throw CameraFailure.message("No se pudo terminar el JPEG con sus metadatos: \(detail).")
         }
         return bytes as Data
     }

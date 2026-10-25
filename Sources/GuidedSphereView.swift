@@ -38,7 +38,7 @@ struct GuidedSphereView:View {
     }
     var body:some View {
         ZStack {
-            CameraPreview(session:camera.session,zoom:1,focus:{_,_ in},changeZoom:{_ in}).ignoresSafeArea()
+            CameraPreview(session:camera.session,zoom:1,focus:{ point,_ in camera.focus(point) },changeZoom:{_ in}).ignoresSafeArea()
             VStack(spacing:12) {
                 HStack {
                     Button { if captured.isEmpty || saved { close() } else { restarting=false;confirmDiscard=true } } label: { Image(systemName:"chevron.left").frame(width:44,height:44) }
@@ -77,6 +77,7 @@ struct GuidedSphereView:View {
                     Button("Volver a las vistas") { result=nil;preview=nil;saved=false }.disabled(saving)
                 }
                 Text(message.isEmpty ? motion.message:message).font(.footnote).multilineTextAlignment(.center)
+                if result==nil { Text(camera.status).font(.caption).multilineTextAlignment(.center) }
                 if result==nil { Text("Experimental · JPEG SDR · la calibración del campo de visión necesita comprobación en el iPhone.").font(.caption2).foregroundStyle(.secondary) }
             }.padding().background { LinearGradient(colors:[.black.opacity(0.8),.clear,.black.opacity(0.85)],startPoint:.top,endPoint:.bottom).allowsHitTesting(false) }
         }.foregroundStyle(.white).preferredColorScheme(.dark).tint(CameraPalette.accent)
@@ -86,7 +87,7 @@ struct GuidedSphereView:View {
             .onChange(of:camera.frame?.id) { _,id in if id != nil,let frame=camera.frame { accept(frame) } }
             .onChange(of:scene) { _,phase in
                 if phase == .background {
-                    interrupted = !captured.isEmpty;motion.stop();camera.stop();cancellation?.cancel();UIApplication.shared.isIdleTimerDisabled=false
+                    interrupted = !captured.isEmpty;pendingTarget=nil;motion.stop();camera.stop();cancellation?.cancel();UIApplication.shared.isIdleTimerDisabled=false
                     if interrupted { message="La referencia de orientación se interrumpió. Empieza otra esfera para no mezclar ejes de sesiones distintas." }
                 } else if phase == .active && !closing {
                     UIApplication.shared.isIdleTimerDisabled=true;camera.start();if !interrupted { motion.start() }
@@ -115,6 +116,7 @@ struct GuidedSphereView:View {
         }.accessibilityLabel("Vistas esféricas completadas: \(captured.count) de 62")
     }
     private func accept(_ frame:GuidedPhotoFrame) {
+        guard scene == .active,!closing else { pendingTarget=nil;return }
         guard let target=pendingTarget,let sample=frame.motion else { message="No se recibió orientación para esa foto; no se añade a la esfera.";pendingTarget=nil;return }
         pendingTarget=nil
         do {

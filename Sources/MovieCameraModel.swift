@@ -111,6 +111,9 @@ final class MovieCameraModel: NSObject, ObservableObject, AVCaptureFileOutputRec
                 if camera.isVideoHDREnabled { camera.isVideoHDREnabled=false }
                 if camera.isFocusModeSupported(.continuousAutoFocus) { camera.focusMode = .continuousAutoFocus }
                 if camera.isExposureModeSupported(.continuousAutoExposure) { camera.exposureMode = .continuousAutoExposure }
+                if camera.isWhiteBalanceModeSupported(.continuousAutoWhiteBalance) { camera.whiteBalanceMode = .continuousAutoWhiteBalance }
+                camera.videoZoomFactor=max(1,camera.minAvailableVideoZoomFactor)
+                camera.setExposureTargetBias(0,completionHandler:nil)
                 if camera.hasTorch { camera.torchMode = .off }
                 camera.unlockForConfiguration()
                 guard let connection=output.connection(with:.video) else { throw CameraFailure.message("La conexión de vídeo no está disponible.") }

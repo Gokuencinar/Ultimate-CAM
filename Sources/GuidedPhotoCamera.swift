@@ -29,9 +29,25 @@ final class GuidedPhotoCamera:NSObject,ObservableObject,AVCapturePhotoCaptureDel
     private var captureError:Error?
     private var recoveryRequired=false
     private var locked=false
+    private var hasFrame=false
     private var permissionToken=UUID()
     var motionProvider:(()->SphereMotionSnapshot?)?
     private var capturedMotion:SphereMotionSnapshot?
+    override init() {
+        super.init()
+        NotificationCenter.default.addObserver(self,selector:#selector(sessionFailed(_:)),name:AVCaptureSession.wasInterruptedNotification,object:session)
+        NotificationCenter.default.addObserver(self,selector:#selector(sessionFailed(_:)),name:AVCaptureSession.runtimeErrorNotification,object:session)
+    }
+    deinit { NotificationCenter.default.removeObserver(self) }
+    @objc private func sessionFailed(_ notification:Notification) {
+        let error=(notification.userInfo?[AVCaptureSessionErrorKey] as? Error)?.localizedDescription
+        queue.async {
+            guard self.active else { return }
+            self.recoveryRequired=true;self.expected=nil;self.received=nil
+            if self.session.isRunning { self.session.stopRunning() }
+            self.ui { self.ready=false;self.busy=false;self.status=error ?? "La sesión se interrumpió. Cierra este modo y vuelve a abrirlo; no se repetirá la captura." }
+        }
+    }
     private func ui(_ body:@escaping ()->Void) { DispatchQueue.main.async(execute:body) }
     func start() {
         queue.async {
@@ -51,7 +67,16 @@ final class GuidedPhotoCamera:NSObject,ObservableObject,AVCapturePhotoCaptureDel
                             self.output.maxPhotoDimensions=dimensions
                         }
                         if let connection=self.output.connection(with:.video),connection.isVideoRotationAngleSupported(90) { connection.videoRotationAngle=90 }
-                        self.session.commitConfiguration();self.device=device;self.configured=true
+                        self.session.commitConfiguration()
+                        try device.lockForConfiguration()
+                        if device.isFocusModeSupported(.continuousAutoFocus) { device.focusMode = .continuousAutoFocus }
+                        if device.isExposureModeSupported(.continuousAutoExposure) { device.exposureMode = .continuousAutoExposure }
+                        if device.isWhiteBalanceModeSupported(.continuousAutoWhiteBalance) { device.whiteBalanceMode = .continuousAutoWhiteBalance }
+                        device.videoZoomFactor=max(1,device.minAvailableVideoZoomFactor)
+                        device.setExposureTargetBias(0,completionHandler:nil)
+                        if device.hasTorch { device.torchMode = .off }
+                        device.unlockForConfiguration()
+                        self.device=device;self.configured=true
                     }
                     if !self.session.isRunning { self.session.startRunning() }
                     self.ui { self.ready=true;self.status="Cámara principal · mantén la misma posición y solapa cada foto." }
@@ -62,13 +87,25 @@ final class GuidedPhotoCamera:NSObject,ObservableObject,AVCapturePhotoCaptureDel
     func stop(completion:@escaping ()->Void = {}) {
         queue.async {
             self.active=false;self.permissionToken=UUID()
+            let interrupted=self.expected != nil
+            self.expected=nil;self.received=nil;self.capturedMotion=nil
+            if interrupted { self.recoveryRequired=true }
             if self.session.isRunning { self.session.stopRunning() }
-            self.ui { self.ready=false;completion() }
+            self.ui {
+                self.ready=false;self.busy=false
+                if interrupted { self.status="La captura se interrumpió. Cierra este modo y vuelve a abrirlo; no se repetirá." }
+                completion()
+            }
         }
     }
     func capture() {
         queue.async {
             guard self.active,self.session.isRunning,self.expected==nil,!self.recoveryRequired else { return }
+            if !self.locked,let device=self.device,device.isAdjustingFocus || device.isAdjustingExposure || device.isAdjustingWhiteBalance {
+                self.ui { self.status="Espera a que terminen el enfoque y la medición antes de añadir la primera foto." };return
+            }
+            do { try self.lockControls() }
+            catch { self.ui { self.status=error.localizedDescription };return }
             let settings=AVCapturePhotoSettings(format:[AVVideoCodecKey:AVVideoCodecType.jpeg])
             settings.flashMode = .off;settings.photoQualityPrioritization = .balanced
             settings.maxPhotoDimensions=self.output.maxPhotoDimensions
@@ -99,38 +136,58 @@ final class GuidedPhotoCamera:NSObject,ObservableObject,AVCapturePhotoCaptureDel
             let motion=self.capturedMotion,fieldOfView=Double(self.device?.activeFormat.videoFieldOfView ?? 70)
             self.received=nil
             guard failure==nil,let data else {
-                self.expected=nil;self.ui { self.busy=false;self.status=failure?.localizedDescription ?? "La cámara no entregó un JPEG." };return
-            }
-            if !self.locked,let d=self.device,(try? d.lockForConfiguration()) != nil {
-                if d.isExposureModeSupported(.locked) { d.exposureMode = .locked }
-                if d.isWhiteBalanceModeSupported(.locked) { d.whiteBalanceMode = .locked }
-                if d.isFocusModeSupported(.locked) { d.focusMode = .locked }
-                d.unlockForConfiguration();self.locked=true
+                self.expected=nil;if !self.hasFrame { self.unlockControls() }
+                self.ui { self.busy=false;self.status=failure?.localizedDescription ?? "La cámara no entregó un JPEG." };return
             }
             self.processing.async {
                 let result=Result { try autoreleasepool {
                     guard let source=CIImage(data:data,options:[.applyOrientationProperty:true]) else { throw CameraFailure.message("No se pudo leer el fotograma.") }
                     let scale=min(1,1600/max(source.extent.width,source.extent.height))
                     let image=source.transformed(by:CGAffineTransform(scaleX:scale,y:scale))
-                    return try JPEGRenderer.render(image,extent:image.extent,options:ProcessingOptions(),context:CIContext(options:[.cacheIntermediates:false])).data
+                    return try JPEGRenderer.render(image,extent:image.extent,options:ProcessingOptions(),context:CIContext(options:[.cacheIntermediates:false]),metadataReference:data).data
                 } }
                 self.queue.async {
-                    guard self.expected==resolvedSettings.uniqueID else { return };self.expected=nil
+                    guard self.active,self.expected==resolvedSettings.uniqueID else { return };self.expected=nil
                     switch result {
-                    case .success(let jpeg):self.ui { self.frame=GuidedPhotoFrame(data:jpeg,motion:motion,fieldOfView:fieldOfView);self.busy=false;self.status="Fotograma listo. Desplaza la cámara dejando la mitad de la escena en común." }
-                    case .failure(let error):self.ui { self.busy=false;self.status=error.localizedDescription }
+                    case .success(let jpeg):self.hasFrame=true;self.ui { self.frame=GuidedPhotoFrame(data:jpeg,motion:motion,fieldOfView:fieldOfView);self.busy=false;self.status="Fotograma listo. Desplaza la cámara dejando la mitad de la escena en común." }
+                    case .failure(let error):if !self.hasFrame { self.unlockControls() };self.ui { self.busy=false;self.status=error.localizedDescription }
                     }
                 }
             }
         }
     }
+    func focus(_ point:CGPoint) {
+        queue.async {
+            guard self.active,self.expected==nil,!self.recoveryRequired,let device=self.device else { return }
+            guard !self.locked else { self.ui { self.status="Enfoque y exposición bloqueados para mantener las uniones. Empieza de nuevo para medir otro punto." };return }
+            do {
+                try device.lockForConfiguration();defer { device.unlockForConfiguration() }
+                if device.isFocusPointOfInterestSupported { device.focusPointOfInterest=point }
+                if device.isExposurePointOfInterestSupported { device.exposurePointOfInterest=point }
+                if device.isFocusModeSupported(.autoFocus) { device.focusMode = .autoFocus }
+                if device.isExposureModeSupported(.continuousAutoExposure) { device.exposureMode = .continuousAutoExposure }
+                self.ui { self.status="Enfocando y midiendo la primera vista…" }
+            } catch { self.ui { self.status=error.localizedDescription } }
+        }
+    }
     func unlock() {
         queue.async {
-            guard self.expected==nil,let d=self.device,(try? d.lockForConfiguration()) != nil else { return }
-            if d.isFocusModeSupported(.continuousAutoFocus) { d.focusMode = .continuousAutoFocus }
-            if d.isExposureModeSupported(.continuousAutoExposure) { d.exposureMode = .continuousAutoExposure }
-            if d.isWhiteBalanceModeSupported(.continuousAutoWhiteBalance) { d.whiteBalanceMode = .continuousAutoWhiteBalance }
-            d.unlockForConfiguration();self.locked=false
+            guard self.expected==nil else { return };self.unlockControls()
         }
+    }
+    private func lockControls() throws {
+        guard !locked else { return }
+        guard let d=device,d.isExposureModeSupported(.locked),d.isWhiteBalanceModeSupported(.locked) else { throw CameraFailure.message("La cámara no permite bloquear la medición para las uniones.") }
+        try d.lockForConfiguration();defer { d.unlockForConfiguration() }
+        d.exposureMode = .locked;d.whiteBalanceMode = .locked
+        if d.isFocusModeSupported(.locked) { d.focusMode = .locked }
+        locked=true
+    }
+    private func unlockControls() {
+        guard let d=device,(try? d.lockForConfiguration()) != nil else { return }
+        if d.isFocusModeSupported(.continuousAutoFocus) { d.focusMode = .continuousAutoFocus }
+        if d.isExposureModeSupported(.continuousAutoExposure) { d.exposureMode = .continuousAutoExposure }
+        if d.isWhiteBalanceModeSupported(.continuousAutoWhiteBalance) { d.whiteBalanceMode = .continuousAutoWhiteBalance }
+        d.unlockForConfiguration();locked=false;hasFrame=false
     }
 }

@@ -18,7 +18,7 @@ struct GuidedPanoramaView:View {
     @State private var closing=false
     var body:some View {
         ZStack {
-            CameraPreview(session:camera.session,zoom:1,focus:{_,_ in},changeZoom:{_ in}).ignoresSafeArea()
+            CameraPreview(session:camera.session,zoom:1,focus:{ point,_ in camera.focus(point) },changeZoom:{_ in}).ignoresSafeArea()
             if let last=frames.last,let cg=PreviewDecoder.image(last,maximumDimension:600),result==nil {
                 GeometryReader { g in
                     Image(decorative:cg,scale:1).resizable().scaledToFill().frame(width:g.size.width,height:g.size.height).clipped().opacity(0.18)
@@ -56,7 +56,7 @@ struct GuidedPanoramaView:View {
             .interactiveDismissDisabled(!frames.isEmpty || camera.busy || processing || saving)
             .onAppear { UIApplication.shared.isIdleTimerDisabled=true;camera.start() }
             .onDisappear { UIApplication.shared.isIdleTimerDisabled=false;cancellation?.cancel();camera.stop() }
-            .onChange(of:camera.frame?.id) { _,id in if id != nil,let data=camera.frame?.data,frames.count<10 { frames.append(data);message="" } }
+            .onChange(of:camera.frame?.id) { _,id in if scene == .active,!closing,id != nil,let data=camera.frame?.data,frames.count<10 { frames.append(data);message="" } }
             .onChange(of:scene) { _,phase in
                 if phase == .background { UIApplication.shared.isIdleTimerDisabled=false;camera.stop();cancellation?.cancel() }
                 else if phase == .active && !closing { UIApplication.shared.isIdleTimerDisabled=true;camera.start() }
