@@ -40,7 +40,9 @@ struct SphereReference {
     func pose(_ snapshot:SphereMotionSnapshot) throws -> SpherePose {
         _=try snapshot.validated()
         let r=transposed ? snapshot.rotation.transpose:snapshot.rotation
-        return SpherePose(sphereToDevice:r.transpose*basis,forward:simd_normalize(basis.transpose*r*SIMD3<Float>(0,0,-1)))
+        let worldForward=simd_mul(r,SIMD3<Float>(0,0,-1))
+        let sphereForward=simd_mul(basis.transpose,worldForward)
+        return SpherePose(sphereToDevice:simd_mul(r.transpose,basis),forward:simd_normalize(sphereForward))
     }
 }
 struct SphereTarget:Identifiable {

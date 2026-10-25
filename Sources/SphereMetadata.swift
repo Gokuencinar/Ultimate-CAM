@@ -3,11 +3,11 @@ import Foundation
 
 enum SphereMetadata {
     static func add(to jpeg:Data,width:Int,height:Int,sources:Int) throws -> Data {
+        let metadata=CGImageMetadataCreateMutable()
         guard width>0,height>0,width==height*2,(2...62).contains(sources),let source=CGImageSourceCreateWithData(jpeg as CFData,nil),
               CGImageSourceGetType(source) as String? == "public.jpeg",
               let info=CGImageSourceCopyPropertiesAtIndex(source,0,nil) as? [CFString:Any],
-              info[kCGImagePropertyPixelWidth] as? Int==width,info[kCGImagePropertyPixelHeight] as? Int==height,
-              let metadata=CGImageMetadataCreateMutable() else { throw CameraFailure.message("Dimensiones esféricas no válidas.") }
+              info[kCGImagePropertyPixelWidth] as? Int==width,info[kCGImagePropertyPixelHeight] as? Int==height else { throw CameraFailure.message("Dimensiones esféricas no válidas.") }
         guard CGImageMetadataRegisterNamespaceForPrefix(metadata,"http://ns.google.com/photos/1.0/panorama/" as CFString,"GPano" as CFString,nil) else {
             throw CameraFailure.message("No se pudo registrar el formato de panorama.")
         }
