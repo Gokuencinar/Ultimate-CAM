@@ -242,7 +242,7 @@ final class BurstProcessor {
         // A temporal stack needs its own radiometric HDR merge, so never borrow
         // the reference's map for pixels assembled from different frames.
         let hdrSource = options.preserveHDR && frames.count == 1 && !isRAW && !options.nightStatic ? AdaptiveHDR.expanded(first) : nil
-        let rendered = try JPEGRenderer.render(accumulator,extent:common,options:options,context:context,hdrSource:hdrSource)
+        let rendered = try JPEGRenderer.render(accumulator,extent:common,options:options,context:context,hdrSource:hdrSource,metadataReference:referenceData,frames:accepted)
         try cancellation?.check()
         let details: String
         if frames.count == 1 {

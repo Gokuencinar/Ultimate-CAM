@@ -104,7 +104,7 @@ struct MovieCameraView: View {
         NavigationStack {
             VStack {
                 if let url=camera.previewURL {
-                    VideoPlayer(player:AVPlayer(url:url)).frame(minHeight:280)
+                    MoviePlayback(url:url).frame(minHeight:280)
                     ShareLink(item:url) { Label("Compartir archivo",systemImage:"square.and.arrow.up") }
                 }
                 Text(camera.status).font(.footnote).padding()
@@ -116,5 +116,17 @@ struct MovieCameraView: View {
                 }.disabled(busy)
             }.padding().navigationTitle("Vídeo grabado").toolbar { Button("Cerrar") { showingReview=false } }
         }.tint(CameraPalette.accent).preferredColorScheme(.dark)
+    }
+}
+
+/// Keep playback stable when PhotoKit status or review buttons change.
+private struct MoviePlayback:View {
+    let url:URL
+    @State private var player:AVPlayer?
+    var body:some View {
+        VideoPlayer(player:player)
+            .onAppear { if player==nil { player=AVPlayer(url:url) } }
+            .onChange(of:url) { _,value in player?.pause();player=AVPlayer(url:value) }
+            .onDisappear { player?.pause() }
     }
 }

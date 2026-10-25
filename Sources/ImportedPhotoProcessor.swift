@@ -33,9 +33,9 @@ enum ImportedPhotoProcessor {
                                               .cacheIntermediates: false])
             defer { context.clearCaches() }
             let reference = isJPEG ? data :
-                try JPEGRenderer.render(sdr, extent: sdr.extent, options: ProcessingOptions(), context: context).data
+                try JPEGRenderer.render(sdr, extent: sdr.extent, options: ProcessingOptions(), context: context,metadataReference:data).data
             try cancellation?.check()
-            let rendered = try JPEGRenderer.render(sdr, extent: sdr.extent, options: recipe, context: context, hdrSource: hdr)
+            let rendered = try JPEGRenderer.render(sdr, extent: sdr.extent, options: recipe, context: context, hdrSource: hdr,metadataReference:data)
             try cancellation?.check()
             return CaptureResult(jpeg: rendered.data, reference: reference,
                 details: "Foto importada · \(rendered.width) × \(rendered.height) px. \(rendered.encodingDescription) Sin nueva captura.",
@@ -50,7 +50,7 @@ enum ImportedPhotoProcessor {
             let context = CIContext(options: [.cacheIntermediates: false])
             defer { context.clearCaches() }
             reference = try JPEGRenderer.render(image, extent: image.extent,
-                options: ProcessingOptions(), context: context).data
+                options: ProcessingOptions(), context: context,metadataReference:data).data
         }
         try cancellation?.check()
         var result = try BurstProcessor().process([reference], options: recipe, cancellation: cancellation)

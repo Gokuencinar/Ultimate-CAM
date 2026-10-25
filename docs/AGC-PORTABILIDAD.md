@@ -1,3 +1,5 @@
+> Documento histórico de 0.5. Para el estado actual de HDR/LUT, vídeo, retrato, herramientas en directo, panorama, esfera y RootHide, consulta [Funciones 0.10](FUNCIONES-0.10.md).
+
 # AGC 1.8.6: auditoría y adaptación para Ultimate CAM 0.5
 
 Estado histórico de 0.5. Véase [la siguiente etapa 0.6](AGC-PORTABILIDAD-0.6.md) para HDR, ajustes de color, interfaz y conexión jb-p1lot.

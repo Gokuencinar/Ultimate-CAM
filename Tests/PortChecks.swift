@@ -264,8 +264,26 @@ import Darwin
         let hdrFile=try JPEGRenderer.render(sdrBase,extent:hdrBounds,options:hdrOutput,context:context,hdrSource:hdrOriginal)
         try check(hdrFile.adaptiveHDR && AdaptiveHDR.hasGainMap(hdrFile.data), "Encoded JPEG has no real HDR auxiliary image")
         try check(hdrFile.width==227 && hdrFile.height==128, "HDR aspect crop differs from SDR")
-        let hdrDecoded=AdaptiveHDR.expanded(hdrFile.data)!
-        let sdrDecoded=CIImage(data:hdrFile.data)!
+        let cameraTagBytes=NSMutableData()
+        let cameraTagWriter=CGImageDestinationCreateWithData(cameraTagBytes,"public.jpeg" as CFString,1,nil)!
+        CGImageDestinationAddImage(cameraTagWriter,context.createCGImage(sdrBase,from:hdrBounds)!,[
+            kCGImagePropertyOrientation:6,
+            kCGImagePropertyTIFFDictionary:[kCGImagePropertyTIFFMake:"Synthetic camera",kCGImagePropertyTIFFModel:"Fixture"],
+            kCGImagePropertyExifDictionary:[kCGImagePropertyExifExposureTime:0.125,kCGImagePropertyExifISOSpeedRatings:[400],
+                kCGImagePropertyExifDateTimeOriginal:"2026:10:25 12:30:00",kCGImagePropertyExifLensModel:"Fixture lens"]] as CFDictionary)
+        try check(CGImageDestinationFinalize(cameraTagWriter),"Could not create camera metadata fixture")
+        let annotated=try CaptureMetadata.attach(to:hdrFile.data,reference:cameraTagBytes as Data,frames:3)
+        let annotatedSource=CGImageSourceCreateWithData(annotated as CFData,nil)!
+        let annotatedInfo=CGImageSourceCopyPropertiesAtIndex(annotatedSource,0,nil)! as NSDictionary
+        let annotatedExif=annotatedInfo[kCGImagePropertyExifDictionary] as! NSDictionary
+        try check(annotatedInfo[kCGImagePropertyOrientation] as? Int==1 && annotatedInfo[kCGImagePropertyPixelWidth] as? Int==227,
+                  "Reference metadata overwrote processed dimensions or orientation")
+        try check(abs((annotatedExif[kCGImagePropertyExifExposureTime] as? Double ?? 0)-0.125)<0.0001 &&
+                  annotatedExif[kCGImagePropertyExifLensModel] as? String=="Fixture lens" &&
+                  annotatedExif[kCGImagePropertyExifDateTimeOriginal] as? String=="2026:10:25 12:30:00","Capture metadata did not retain reference exposure, lens and date")
+        try check(AdaptiveHDR.hasGainMap(annotated),"Attaching capture metadata removed the actual HDR map")
+        let hdrDecoded=AdaptiveHDR.expanded(annotated)!
+        let sdrDecoded=CIImage(data:annotated)!
         func sampleLinear(_ image:CIImage,_ x:Int) -> Float {
             var pixel=[Float](repeating:0,count:4)
             pixel.withUnsafeMutableBytes { context.render(image,toBitmap:$0.baseAddress!,rowBytes:16,

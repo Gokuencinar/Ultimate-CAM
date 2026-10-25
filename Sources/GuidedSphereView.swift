@@ -45,13 +45,16 @@ struct GuidedSphereView:View {
                         .accessibilityIdentifier("sphere.close").disabled(camera.busy || processing || saving)
                     Spacer();Text("ESFERA").font(.headline);Spacer();Text("\(captured.count)/62").monospacedDigit()
                 }
-                coverageMap.frame(height:110).background(.black.opacity(0.65),in:RoundedRectangle(cornerRadius:10))
+                if result==nil { coverageMap.frame(height:110).background(.black.opacity(0.65),in:RoundedRectangle(cornerRadius:10)) }
                 if let preview {
-                    Picker("Revisión",selection:$interactivePreview) { Text("360°").tag(true);Text("Plana").tag(false) }.pickerStyle(.segmented)
-                    if interactivePreview,let cg=preview.cgImage { SphereViewer(image:cg) }
-                    else { Image(uiImage:preview).resizable().scaledToFit().padding() }
+                    ScrollView {
+                        Picker("Revisión",selection:$interactivePreview) { Text("360°").tag(true);Text("Plana").tag(false) }.pickerStyle(.segmented)
+                        if interactivePreview,let cg=preview.cgImage { SphereViewer(image:cg) }
+                        else { Image(uiImage:preview).resizable().scaledToFit().padding() }
+                        if let result { Text(result.details).font(.footnote).padding(.vertical) }
+                    }.scrollBounceBehavior(.basedOnSize)
                 }
-                Spacer()
+                if result==nil { Spacer() }
                 if result==nil {
                     Text(reference==nil ? "Empieza con el móvil vertical y apunta al horizonte." : "Mantén el teléfono en el mismo punto y gira hacia el siguiente objetivo.")
                         .font(.subheadline).multilineTextAlignment(.center)
@@ -70,12 +73,11 @@ struct GuidedSphereView:View {
                     }
                     if processing { ProgressView();Button("Cancelar unión") { cancellation?.cancel() } }
                 } else {
-                    Text(result!.details).font(.footnote)
                     Button(saved ? "Guardado en Fotos":"Guardar esfera") { save() }.buttonStyle(.borderedProminent).disabled(saved || saving)
                     Button("Volver a las vistas") { result=nil;preview=nil;saved=false }.disabled(saving)
                 }
                 Text(message.isEmpty ? motion.message:message).font(.footnote).multilineTextAlignment(.center)
-                Text("Experimental · JPEG SDR · la calibración del campo de visión necesita comprobación en el iPhone.").font(.caption2).foregroundStyle(.secondary)
+                if result==nil { Text("Experimental · JPEG SDR · la calibración del campo de visión necesita comprobación en el iPhone.").font(.caption2).foregroundStyle(.secondary) }
             }.padding().background { LinearGradient(colors:[.black.opacity(0.8),.clear,.black.opacity(0.85)],startPoint:.top,endPoint:.bottom).allowsHitTesting(false) }
         }.foregroundStyle(.white).preferredColorScheme(.dark).tint(CameraPalette.accent)
             .interactiveDismissDisabled(!captured.isEmpty || camera.busy || processing || saving)

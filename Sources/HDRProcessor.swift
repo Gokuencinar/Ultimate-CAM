@@ -61,7 +61,7 @@ final class HDRProcessor {
         guard let merged = Self.mergeKernel?.apply(extent:extent,arguments:[images[0],images[1],images[2],
             CIVector(x:scales[0],y:scales[1],z:scales[2]),CIVector(x:valid[0],y:valid[1],z:valid[2]),options.rejectMotion ? 1.0 : 0.0]),
               let mapped = Self.toneKernel?.apply(extent:extent,arguments:[merged]) else { throw CameraFailure.message("No se pudo ejecutar la fusión HDR.") }
-        let rendered = try JPEGRenderer.render(mapped,extent:extent,options:options,context:context,hdrSource:merged)
+        let rendered = try JPEGRenderer.render(mapped,extent:extent,options:options,context:context,hdrSource:merged,metadataReference:frames[0],frames:3)
         try cancellation?.check()
         return CaptureResult(jpeg:rendered.data,reference:frames[0],
             details:"HDR experimental · \(accepted)/3 exposiciones · \(String(format:"%.1f",log2(scales.max()!/scales.min()!))) EV recibidos · \(rendered.width) × \(rendered.height) px. \(rendered.encodingDescription)",

@@ -10,7 +10,10 @@ struct RenderedJPEG {
 /// Shared finishing path for a single frame, a temporal stack, and HDR.
 enum JPEGRenderer {
     static func render(_ input: CIImage, extent inputExtent: CGRect, options: ProcessingOptions, context: CIContext,
-                       hdrSource: CIImage? = nil) throws -> RenderedJPEG {
+                       hdrSource: CIImage? = nil,metadataReference:Data?=nil,frames:Int=1) throws -> RenderedJPEG {
+        func metadata(_ data:Data) throws -> Data {
+            if let metadataReference { return try CaptureMetadata.attach(to:data,reference:metadataReference,frames:frames) };return data
+        }
         var baseInput=input.cropped(to:inputExtent),hdrInput=hdrSource
         if options.portraitAmount>0 {
             let mask=try PortraitProcessor.personMask(baseInput,extent:inputExtent,context:context)
@@ -28,7 +31,7 @@ enum JPEGRenderer {
             let base = CIImage(cgImage: cg).transformed(by: CGAffineTransform(translationX: extent.minX, y: extent.minY))
             let data = try AdaptiveHDR.encode(base: base, originalSDR: baseInput, originalHDR: hdrSource,
                 extent: extent, colorSpace: outputSpace, quality: options.jpegQuality ?? 0.95, context: context)
-            return RenderedJPEG(data: data, width: Int(extent.width), height: Int(extent.height), adaptiveHDR: true)
+            return RenderedJPEG(data: try metadata(data), width: Int(extent.width), height: Int(extent.height), adaptiveHDR: true)
         }
         let data = NSMutableData()
         guard let destination = CGImageDestinationCreateWithData(data, "public.jpeg" as CFString, 1, nil) else {
@@ -36,7 +39,7 @@ enum JPEGRenderer {
         }
         CGImageDestinationAddImage(destination, cg, [kCGImageDestinationLossyCompressionQuality: options.jpegQuality ?? 0.95] as CFDictionary)
         guard CGImageDestinationFinalize(destination) else { throw CameraFailure.message("Error al codificar el JPEG.") }
-        return RenderedJPEG(data:data as Data,width:cg.width,height:cg.height)
+        return RenderedJPEG(data:try metadata(data as Data),width:cg.width,height:cg.height)
     }
 
     /// Same finishing operators for export and the bounded live look. Preparing
