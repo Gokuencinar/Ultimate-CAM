@@ -528,8 +528,8 @@ struct CameraView: View {
                 Text("El flash se usa en Foto JPEG. RAW y las pilas conservan luz continua sin destellos.")
                     .font(.footnote).foregroundStyle(.secondary)
                 Picker("Temporizador", selection: $timerSeconds) { Text("Desactivado").tag(0); Text("3 segundos").tag(3); Text("10 segundos").tag(10) }
-                Toggle("Disparar con botones de volumen",isOn:$hardwareButtons)
-                Toggle("Guardar selfies reflejadas",isOn:$mirrorSelfies)
+                Toggle("Disparar con botones de volumen",isOn:$hardwareButtons).accessibilityIdentifier("capture.hardwareButtons")
+                Toggle("Guardar selfies reflejadas",isOn:$mirrorSelfies).accessibilityIdentifier("capture.mirrorSelfies")
                 Toggle("Cuadrícula", isOn: $grid)
                 if grid { Picker("Guía", selection: $guide) { ForEach(CompositionGuide.allCases) { Text($0.rawValue).tag($0) } } }
             }

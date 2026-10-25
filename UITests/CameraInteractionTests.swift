@@ -27,12 +27,22 @@ final class CameraInteractionTests: XCTestCase {
     func testVideoSettingsAndReturnWithoutRecording() {
         continueAfterFailure=false
         let app=XCUIApplication();app.launch()
+        app.buttons["camera.settings"].tap()
+        let mirror=app.switches["capture.mirrorSelfies"],hardware=app.switches["capture.hardwareButtons"]
+        for _ in 0..<6 { if mirror.isHittable && hardware.isHittable { break };app.swipeUp() }
+        XCTAssertTrue(mirror.isHittable && hardware.isHittable)
+        setSwitch(mirror,to:"1");setSwitch(hardware,to:"0")
+        app.buttons["Listo"].tap()
         let video=revealMode(app,"camera.mode.video")
         XCTAssertTrue(video.isHittable);video.tap()
         XCTAssertTrue(app.buttons["video.settings"].waitForExistence(timeout:8))
         app.buttons["video.settings"].tap()
         XCTAssertTrue(app.navigationBars["Vídeo"].waitForExistence(timeout:3))
         XCTAssertTrue(app.descendants(matching:.any).matching(identifier:"video.resolution").firstMatch.exists)
+        for _ in 0..<4 { if mirror.isHittable && hardware.isHittable { break };app.swipeUp() }
+        XCTAssertTrue(NSPredicate(format:"value == %@","1").evaluate(with:mirror),"Selfie preference did not propagate to video")
+        XCTAssertTrue(NSPredicate(format:"value == %@","0").evaluate(with:hardware),"Hardware preference did not propagate to video")
+        setSwitch(mirror,to:"0");setSwitch(hardware,to:"1")
         let image=XCTAttachment(screenshot:app.screenshot());image.name="Video configuration";image.lifetime = .keepAlways;add(image)
         app.buttons["Listo"].tap();app.buttons["video.close"].tap()
         XCTAssertTrue(app.buttons["camera.shutter"].waitForExistence(timeout:5))
@@ -137,5 +147,10 @@ final class CameraInteractionTests: XCTestCase {
         if !button.isHittable { modes.swipeRight() }
         for _ in 0..<4 { if button.isHittable { break };modes.swipeLeft() }
         return button
+    }
+    private func setSwitch(_ control:XCUIElement,to value:String) {
+        XCTAssertTrue(control.isHittable)
+        if (control.value as? String) != value { control.coordinate(withNormalizedOffset:CGVector(dx:0.9,dy:0.5)).tap() }
+        XCTAssertTrue(NSPredicate(format:"value == %@",value).evaluate(with:control))
     }
 }

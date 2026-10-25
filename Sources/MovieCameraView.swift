@@ -101,8 +101,8 @@ struct MovieCameraView: View {
                 }
                 Toggle("Grabar audio",isOn:Binding(get:{camera.configuration.audio},set:{v in update {$0.audio=v} }))
                 Toggle("Solicitar estabilización",isOn:Binding(get:{camera.configuration.stabilized},set:{v in update {$0.stabilized=v} }))
-                Toggle("Guardar selfies reflejadas",isOn:$mirrorSelfies)
-                Toggle("Disparar con botones de volumen",isOn:$hardwareButtons)
+                Toggle("Guardar selfies reflejadas",isOn:$mirrorSelfies).accessibilityIdentifier("capture.mirrorSelfies")
+                Toggle("Disparar con botones de volumen",isOn:$hardwareButtons).accessibilityIdentifier("capture.hardwareButtons")
                 Text("Las combinaciones disponibles dependen de cada lente. El sistema elige la estabilización compatible. HEVC ocupa menos espacio; H.264 tiene mayor compatibilidad. Los ajustes de color de Fotos no se aplican al vídeo.").font(.footnote)
                 Text(camera.status).font(.footnote)
             }.navigationTitle("Vídeo").toolbar { Button("Listo") { settings=false } }
