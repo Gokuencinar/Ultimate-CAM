@@ -39,12 +39,11 @@ struct GuidedPanoramaView:View {
                     ProgressView();Button("Cancelar unión") { cancellation?.cancel() }
                 } else if result==nil {
                     HStack {
-                        Button("Deshacer") { if !frames.isEmpty { frames.removeLast() };if frames.isEmpty { camera.unlock() } }.disabled(frames.isEmpty || camera.busy)
-                        Spacer()
+                        Button("Deshacer") { if !frames.isEmpty { frames.removeLast() };if frames.isEmpty { camera.unlock() } }
+                            .frame(maxWidth:.infinity).disabled(frames.isEmpty || camera.busy).opacity(frames.isEmpty ? 0.35:1)
                         Button { camera.capture() } label: { Circle().fill(.white).frame(width:64,height:64).overlay(Circle().stroke(.black,lineWidth:3).padding(5)) }
                             .accessibilityIdentifier("panorama.capture").accessibilityLabel("Añadir foto al panorama").disabled(!camera.ready || camera.busy || frames.count>=10)
-                        Spacer()
-                        Button("Unir") { merge() }.disabled(frames.count<2 || camera.busy)
+                        Button("Unir") { merge() }.frame(maxWidth:.infinity).disabled(frames.count<2 || camera.busy).opacity(frames.count<2 ? 0.35:1)
                     }
                 } else {
                     Button(saved ? "Guardado en Fotos":"Guardar panorama") { save() }.buttonStyle(.borderedProminent).disabled(saved || saving)

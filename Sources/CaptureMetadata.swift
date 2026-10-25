@@ -13,6 +13,7 @@ enum CaptureMetadata {
             throw CameraFailure.message("No se pudieron leer los metadatos de la referencia.")
         }
         let metadata=CGImageMetadataCreateMutable()
+        let sourceMetadata=CGImageSourceCopyMetadataAtIndex(original,0,nil)
         func set(_ dictionary:CFString,_ key:CFString,_ value:Any) throws {
             var tag=value
             // Image properties expose EXIF dates with colons. Metadata setters
@@ -32,6 +33,7 @@ enum CaptureMetadata {
             if let text=value as? String { return text.utf8.count<=256 }
             if let number=value as? NSNumber { return number.doubleValue.isFinite }
             if let array=value as? [NSNumber] { return array.count<=4 && array.allSatisfy { $0.doubleValue.isFinite } }
+            if let array=value as? [String] { return array.count<=4 && array.allSatisfy { $0.utf8.count<=64 } }
             return false
         }
         let allowed:[(CFString,[CFString])]=[
@@ -41,7 +43,16 @@ enum CaptureMetadata {
                 kCGImagePropertyExifFocalLength,kCGImagePropertyExifFocalLenIn35mmFilm,kCGImagePropertyExifLensMake,kCGImagePropertyExifLensModel])]
         for (dictionary,keys) in allowed {
             guard let values=properties[dictionary] as? [CFString:Any] else { continue }
-            for key in keys { if let value=values[key],bounded(value) { try set(dictionary,key,value) } }
+            for key in keys {
+                guard let raw=values[key],bounded(raw) else { continue }
+                // ImageIO's property dictionary turns EXIF rationals into
+                // doubles. Its XMP setter needs the original rational lexical
+                // form (e.g. 1/8); passing 0.125 can serialize as exposure 0.
+                if let sourceMetadata,let tag=CGImageMetadataCopyTagMatchingImageProperty(sourceMetadata,dictionary,key),
+                   let canonical=CGImageMetadataTagCopyValue(tag),bounded(canonical) {
+                    try set(dictionary,key,canonical)
+                } else { try set(dictionary,key,raw) }
+            }
         }
         try set(kCGImagePropertyTIFFDictionary,kCGImagePropertyTIFFSoftware,"Ultimate CAM")
         try set(kCGImagePropertyTIFFDictionary,kCGImagePropertyTIFFOrientation,1)

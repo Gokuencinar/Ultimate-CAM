@@ -371,15 +371,15 @@ struct CameraView: View {
             HStack(spacing:4) {
                 Button { showControls = true } label: { Image(systemName:"gearshape").font(.system(size:19)).frame(width:40,height:44) }
                     .accessibilityLabel("Ajustes de cámara").accessibilityIdentifier("camera.settings")
-                ScrollView(.horizontal,showsIndicators:false) {
+                ScrollViewReader { proxy in ScrollView(.horizontal,showsIndicators:false) {
                     HStack(spacing:4) {
-                        modeButton("Noche",selected:options.nightStatic) { applyPreset("Noche estática") }
-                        modeButton("Cámara",selected:!stack && !options.hdrBracketing && options.portraitAmount==0) { options.nightStatic=false;options.hdrBracketing=false;options.portraitAmount=0;stack=false }
+                        modeButton("Noche",selected:options.nightStatic) { applyPreset("Noche estática") }.id("night")
+                        modeButton("Cámara",selected:!stack && !options.hdrBracketing && options.portraitAmount==0) { options.nightStatic=false;options.hdrBracketing=false;options.portraitAmount=0;stack=false }.id("photo")
                         modeButton("Retrato",selected:!stack && !options.hdrBracketing && options.portraitAmount>0) {
                             options.nightStatic=false;options.hdrBracketing=false;options.portraitAmount=0.5;stack=false
-                        }.accessibilityIdentifier("camera.mode.portrait")
-                        modeButton("HDR",selected:options.hdrBracketing) { activateHDR() }.accessibilityIdentifier("camera.mode.hdr")
-                        modeButton("Pila",selected:stack && !options.nightStatic && !options.hdrBracketing) { options.nightStatic=false;options.hdrBracketing=false;stack=true }
+                        }.accessibilityIdentifier("camera.mode.portrait").id("portrait")
+                        modeButton("HDR",selected:options.hdrBracketing) { activateHDR() }.accessibilityIdentifier("camera.mode.hdr").id("hdr")
+                        modeButton("Pila",selected:stack && !options.nightStatic && !options.hdrBracketing) { options.nightStatic=false;options.hdrBracketing=false;options.portraitAmount=0;stack=true }.id("stack")
                         modeButton("Vídeo",selected:false) {
                             openAuxiliary(.video)
                         }.accessibilityIdentifier("camera.mode.video")
@@ -388,6 +388,8 @@ struct CameraView: View {
                         modeButton("iOS",selected:false) { nativeNight.open(camera:camera) }.accessibilityIdentifier("camera.mode.nativeNight")
                     }
                 }.accessibilityIdentifier("camera.modes")
+                    .onChange(of:selectedPhotoMode) { _,value in withAnimation(.easeOut(duration:0.2)) { proxy.scrollTo(value,anchor:.center) } }
+                }
                 Button { panel = .color; showControls = true } label: { Image(systemName:"slider.horizontal.3").font(.system(size:19)).frame(width:40,height:44) }
                     .accessibilityLabel("Ajustes de imagen")
             }.disabled(!controlsEnabled)
@@ -398,6 +400,11 @@ struct CameraView: View {
                 .accessibilityIdentifier("camera.status")
             }
         }.padding(.horizontal, 20).padding(.top, 10).padding(.bottom, 5).tint(CameraPalette.accent)
+    }
+
+    private var selectedPhotoMode:String {
+        if options.nightStatic { return "night" };if options.hdrBracketing { return "hdr" }
+        if stack { return "stack" };return options.portraitAmount>0 ? "portrait":"photo"
     }
 
     private func modeButton(_ title: String, selected: Bool, action: @escaping () -> Void) -> some View {
@@ -616,7 +623,7 @@ struct CameraView: View {
             }
             Section("Puntos de partida") {
                 Button("Foto con procesado de iOS") {
-                    applyPreset("Natural"); options.singlePhotoQuality = .quality
+                    applyPreset("Natural"); options.singlePhotoQuality = .quality;stack=false;rawEnabled=false
                     resetUIControls(); camera.switchLens(lens)
                 }.accessibilityIdentifier("processing.systemQuality")
                 HStack {
@@ -773,7 +780,7 @@ struct CameraView: View {
         rawEnabled = false; tint = 0; flash = .off
     }
     private func activateHDR() {
-        options.nightStatic=false;options.nightRAW=false;options.hdrBracketing=true
+        options.nightStatic=false;options.nightRAW=false;options.hdrBracketing=true;options.portraitAmount=0
         stack=true;rawEnabled=false;flash = .off;manualExposure=false
         camera.setManualExposure(iso:nil)
     }

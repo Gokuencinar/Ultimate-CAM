@@ -61,15 +61,15 @@ struct GuidedSphereView:View {
                     if let next { Text("Objetivo: giro \(Int(next.yaw))° · altura \(Int(next.pitch))° · distancia \(Int(angle))°").font(.caption.monospacedDigit()) }
                     Image(systemName:aimReady ? "scope":"viewfinder").font(.system(size:40)).foregroundStyle(aimReady ? CameraPalette.accent:.white)
                     HStack {
-                        Button("Empezar de nuevo") { restarting=true;confirmDiscard=true }.disabled(camera.busy || processing || saving || captured.isEmpty)
-                        Spacer()
+                        Button("Reiniciar") { restarting=true;confirmDiscard=true }.font(.subheadline)
+                            .accessibilityLabel("Empezar la esfera de nuevo").frame(maxWidth:.infinity)
+                            .disabled(camera.busy || processing || saving || captured.isEmpty).opacity(captured.isEmpty ? 0.35:1)
                         Button {
                             guard let next else { return };pendingTarget=next.id;camera.capture()
                         } label: { Circle().fill(aimReady ? CameraPalette.accent:.gray).frame(width:64,height:64) }
                             .accessibilityLabel("Añadir vista a la esfera").accessibilityIdentifier("sphere.capture")
                             .disabled(!camera.ready || camera.busy || !aimReady || next==nil || processing)
-                        Spacer()
-                        Button("Unir") { merge() }.disabled(captured.count<6 || camera.busy || processing)
+                        Button("Unir") { merge() }.frame(maxWidth:.infinity).disabled(captured.count<6 || camera.busy || processing).opacity(captured.count<6 ? 0.35:1)
                     }
                     if processing { ProgressView();Button("Cancelar unión") { cancellation?.cancel() } }
                 } else {

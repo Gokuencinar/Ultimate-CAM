@@ -269,7 +269,7 @@ import Darwin
         CGImageDestinationAddImage(cameraTagWriter,context.createCGImage(sdrBase,from:hdrBounds)!,[
             kCGImagePropertyOrientation:6,
             kCGImagePropertyTIFFDictionary:[kCGImagePropertyTIFFMake:"Synthetic camera",kCGImagePropertyTIFFModel:"Fixture"],
-            kCGImagePropertyExifDictionary:[kCGImagePropertyExifExposureTime:0.125,kCGImagePropertyExifISOSpeedRatings:[400],
+            kCGImagePropertyExifDictionary:[kCGImagePropertyExifExposureTime:0.125,kCGImagePropertyExifISOSpeedRatings:[400],kCGImagePropertyExifFNumber:2.8,kCGImagePropertyExifFocalLength:4.25,
                 kCGImagePropertyExifDateTimeOriginal:"2026:10:25 12:30:00",kCGImagePropertyExifLensModel:"Fixture lens"]] as CFDictionary)
         try check(CGImageDestinationFinalize(cameraTagWriter),"Could not create camera metadata fixture")
         let annotated=try CaptureMetadata.attach(to:hdrFile.data,reference:cameraTagBytes as Data,frames:3)
@@ -279,6 +279,7 @@ import Darwin
         try check(annotatedInfo[kCGImagePropertyOrientation] as? Int==1 && annotatedInfo[kCGImagePropertyPixelWidth] as? Int==227,
                   "Reference metadata overwrote processed dimensions or orientation")
         try check(abs((annotatedExif[kCGImagePropertyExifExposureTime] as? Double ?? 0)-0.125)<0.0001 &&
+                  abs((annotatedExif[kCGImagePropertyExifFNumber] as? Double ?? 0)-2.8)<0.0001 && abs((annotatedExif[kCGImagePropertyExifFocalLength] as? Double ?? 0)-4.25)<0.0001 &&
                   annotatedExif[kCGImagePropertyExifLensModel] as? String=="Fixture lens" &&
                   annotatedExif[kCGImagePropertyExifDateTimeOriginal] as? String=="2026:10:25 12:30:00","Capture metadata did not retain reference exposure, lens and date: \(annotatedExif)")
         try check(AdaptiveHDR.hasGainMap(annotated),"Attaching capture metadata removed the actual HDR map")

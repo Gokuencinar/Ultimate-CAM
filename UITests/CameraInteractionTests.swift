@@ -17,6 +17,7 @@ final class CameraInteractionTests: XCTestCase {
             XCTAssertTrue(button.isHittable);button.tap()
             XCTAssertTrue(app.buttons[close].waitForExistence(timeout:8))
             XCTAssertTrue(app.buttons[capture].exists)
+            XCTAssertEqual(app.buttons[capture].frame.midX,app.frame.midX,accuracy:2,"Guided shutter must stay centered regardless of the side labels")
             let image=XCTAttachment(screenshot:app.screenshot());image.name="Guided "+mode;image.lifetime = .keepAlways;add(image)
             // No shutter, motion service simulation or photo-library write.
             app.buttons[close].tap()
@@ -121,6 +122,9 @@ final class CameraInteractionTests: XCTestCase {
         XCTAssertTrue(hdr.isHittable)
         hdr.tap()
         XCTAssertTrue(app.staticTexts["HDR · 3 exposiciones"].waitForExistence(timeout:3))
+        let carousel=app.scrollViews["camera.modes"].frame
+        XCTAssertGreaterThanOrEqual(hdr.frame.minX,carousel.minX-1)
+        XCTAssertLessThanOrEqual(hdr.frame.maxX,carousel.maxX+1,"Selected mode must be completely visible")
         let image = XCTAttachment(screenshot: app.screenshot())
         image.lifetime = .keepAlways
         add(image)
