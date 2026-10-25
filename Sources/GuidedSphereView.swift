@@ -21,6 +21,7 @@ struct GuidedSphereView:View {
     @State private var closing=false
     @State private var confirmDiscard=false
     @State private var restarting=false
+    @State private var interactivePreview=true
     private var direction:SIMD3<Float>? {
         guard let reference,let snapshot=motion.snapshot else { return nil };return try? reference.pose(snapshot).forward
     }
@@ -45,7 +46,11 @@ struct GuidedSphereView:View {
                     Spacer();Text("ESFERA").font(.headline);Spacer();Text("\(captured.count)/62").monospacedDigit()
                 }
                 coverageMap.frame(height:110).background(.black.opacity(0.65),in:RoundedRectangle(cornerRadius:10))
-                if let preview { Image(uiImage:preview).resizable().scaledToFit().padding() }
+                if let preview {
+                    Picker("Revisión",selection:$interactivePreview) { Text("360°").tag(true);Text("Plana").tag(false) }.pickerStyle(.segmented)
+                    if interactivePreview,let cg=preview.cgImage { SphereViewer(image:cg) }
+                    else { Image(uiImage:preview).resizable().scaledToFit().padding() }
+                }
                 Spacer()
                 if result==nil {
                     Text(reference==nil ? "Empieza con el móvil vertical y apunta al horizonte." : "Mantén el teléfono en el mismo punto y gira hacia el siguiente objetivo.")

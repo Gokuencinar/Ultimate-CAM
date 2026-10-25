@@ -1,6 +1,28 @@
 import XCTest
 
 final class CameraInteractionTests: XCTestCase {
+    func testGuidedModesAndPreviewToolsWithoutTakingPhotos() {
+        continueAfterFailure=false
+        let app=XCUIApplication();app.launch()
+        app.buttons["camera.previewTools"].tap()
+        XCTAssertTrue(app.buttons["Histograma del visor"].waitForExistence(timeout:3))
+        app.buttons["Histograma del visor"].tap()
+        // Menu selection dismisses the menu; reopen to inspect the other tools.
+        app.buttons["camera.previewTools"].tap()
+        XCTAssertTrue(app.buttons["Resaltar enfoque"].exists)
+        XCTAssertTrue(app.buttons["Cebras de luces"].exists)
+        app.buttons["Resaltar enfoque"].tap()
+        for (mode,close,capture) in [("panorama","panorama.close","panorama.capture"),("sphere","sphere.close","sphere.capture")] {
+            let button=revealMode(app,"camera.mode."+mode)
+            XCTAssertTrue(button.isHittable);button.tap()
+            XCTAssertTrue(app.buttons[close].waitForExistence(timeout:8))
+            XCTAssertTrue(app.buttons[capture].exists)
+            let image=XCTAttachment(screenshot:app.screenshot());image.name="Guided "+mode;image.lifetime = .keepAlways;add(image)
+            // No shutter, motion service simulation or photo-library write.
+            app.buttons[close].tap()
+            XCTAssertTrue(app.buttons["camera.shutter"].waitForExistence(timeout:5))
+        }
+    }
     func testVideoSettingsAndReturnWithoutRecording() {
         continueAfterFailure=false
         let app=XCUIApplication();app.launch()

@@ -46,6 +46,18 @@ import simd
         }
         let front=sample(256,128),rightColor=sample(384,128),left=sample(128,128)
         try check(front[0]>0.9 && front[1]<0.1 && rightColor[1]>0.9 && rightColor[0]<0.1 && left[2]>0.9,"Projection rotated or reflected camera directions")
+        let viewer=SphereViewerRenderer()
+        func viewSample(_ yaw:Double,_ pitch:Double) throws -> [Float] {
+            let frame=try viewer.render(cg,yaw:yaw,pitch:pitch,fieldOfView:70,width:128,height:80)
+            var values=[Float](repeating:0,count:4)
+            values.withUnsafeMutableBytes { context.render(CIImage(cgImage:frame),toBitmap:$0.baseAddress!,rowBytes:16,bounds:CGRect(x:64,y:40,width:1,height:1),format:.RGBAf,colorSpace:space) }
+            return values
+        }
+        let vFront=try viewSample(0,0),vRight=try viewSample(Double.pi/2,0),vUp=try viewSample(0,Double.pi/2),vDown=try viewSample(0,-Double.pi/2)
+        try check(vFront[0]>0.9 && vFront[1]<0.1 && vRight[1]>0.9 && vRight[0]<0.1,"360 viewer heading is reflected or offset")
+        try check(vUp[0]>0.9 && vUp[2]>0.9 && vUp[1]<0.1 && vDown[0]<0.1 && vDown[1]>0.9 && vDown[2]>0.9,"360 viewer flipped the poles")
+        let seamA=try viewSample(Double.pi-0.001,0),seamB=try viewSample(-Double.pi+0.001,0)
+        try check(zip(seamA,seamB).allSatisfy { abs($0-$1)<0.02 } && seamA[0]>0.9 && seamA[1]>0.9,"360 viewer exposes a gap at the longitude seam")
         let metadata=CGImageSourceCopyMetadataAtIndex(source,0,nil)!
         try check(CGImageMetadataCopyStringValueWithPath(metadata,nil,"GPano:ProjectionType" as CFString) as String? == "equirectangular","JPEG has no GPano projection metadata")
         try check(CGImageMetadataCopyStringValueWithPath(metadata,nil,"GPano:FullPanoWidthPixels" as CFString) as String? == "512","GPano dimensions differ from actual file")

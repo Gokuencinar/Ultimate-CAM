@@ -22,7 +22,11 @@ final class SphereMotionProvider:ObservableObject {
         manager.startDeviceMotionUpdates(using:reference,to:queue) { [weak self] motion,error in
             guard let self else { return }
             guard let motion else {
-                if let error { DispatchQueue.main.async { self.message=error.localizedDescription;self.snapshot=nil } };return
+                if let error { DispatchQueue.main.async {
+                    self.lock.lock();let valid=self.active && self.token==epoch
+                    if valid { self.latest=nil };self.lock.unlock()
+                    if valid { self.message=error.localizedDescription;self.snapshot=nil }
+                } };return
             }
             let m=motion.attitude.rotationMatrix,g=motion.gravity,r=motion.rotationRate
             let value=SphereMotionSnapshot(rotation:simd_float3x3(columns:(SIMD3(Float(m.m11),Float(m.m21),Float(m.m31)),SIMD3(Float(m.m12),Float(m.m22),Float(m.m32)),SIMD3(Float(m.m13),Float(m.m23),Float(m.m33)))),
