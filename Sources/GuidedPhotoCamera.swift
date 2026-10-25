@@ -6,6 +6,8 @@ import UIKit
 struct GuidedPhotoFrame:Identifiable {
     let id=UUID()
     let data:Data
+    var motion:SphereMotionSnapshot?=nil
+    var fieldOfView:Double=70
 }
 
 /// One explicitly requested JPEG at a time for guided captures. No automatic
@@ -28,6 +30,8 @@ final class GuidedPhotoCamera:NSObject,ObservableObject,AVCapturePhotoCaptureDel
     private var recoveryRequired=false
     private var locked=false
     private var permissionToken=UUID()
+    var motionProvider:(()->SphereMotionSnapshot?)?
+    private var capturedMotion:SphereMotionSnapshot?
     private func ui(_ body:@escaping ()->Void) { DispatchQueue.main.async(execute:body) }
     func start() {
         queue.async {
@@ -69,6 +73,7 @@ final class GuidedPhotoCamera:NSObject,ObservableObject,AVCapturePhotoCaptureDel
             settings.flashMode = .off;settings.photoQualityPrioritization = .balanced
             settings.maxPhotoDimensions=self.output.maxPhotoDimensions
             self.expected=settings.uniqueID;self.received=nil;self.captureError=nil
+            self.capturedMotion=nil
             let id=settings.uniqueID;self.ui { self.busy=true;self.status="Capturando fotograma…" }
             self.output.capturePhoto(with:settings,delegate:self)
             self.queue.asyncAfter(deadline:.now()+30) {
@@ -83,10 +88,15 @@ final class GuidedPhotoCamera:NSObject,ObservableObject,AVCapturePhotoCaptureDel
         let data=photo.fileDataRepresentation(),id=photo.resolvedSettings.uniqueID
         queue.async { guard self.expected==id else { return };self.received=data;self.captureError=error }
     }
+    func photoOutput(_ output:AVCapturePhotoOutput,willCapturePhotoFor resolvedSettings:AVCaptureResolvedPhotoSettings) {
+        let snapshot=motionProvider?()
+        queue.async { if self.expected==resolvedSettings.uniqueID { self.capturedMotion=snapshot } }
+    }
     func photoOutput(_ output:AVCapturePhotoOutput,didFinishCaptureFor resolvedSettings:AVCaptureResolvedPhotoSettings,error:Error?) {
         queue.async {
             guard self.expected==resolvedSettings.uniqueID else { return }
             let data=self.received,failure=error ?? self.captureError
+            let motion=self.capturedMotion,fieldOfView=Double(self.device?.activeFormat.videoFieldOfView ?? 70)
             self.received=nil
             guard failure==nil,let data else {
                 self.expected=nil;self.ui { self.busy=false;self.status=failure?.localizedDescription ?? "La cámara no entregó un JPEG." };return
@@ -107,7 +117,7 @@ final class GuidedPhotoCamera:NSObject,ObservableObject,AVCapturePhotoCaptureDel
                 self.queue.async {
                     guard self.expected==resolvedSettings.uniqueID else { return };self.expected=nil
                     switch result {
-                    case .success(let jpeg):self.ui { self.frame=GuidedPhotoFrame(data:jpeg);self.busy=false;self.status="Fotograma listo. Desplaza la cámara dejando la mitad de la escena en común." }
+                    case .success(let jpeg):self.ui { self.frame=GuidedPhotoFrame(data:jpeg,motion:motion,fieldOfView:fieldOfView);self.busy=false;self.status="Fotograma listo. Desplaza la cámara dejando la mitad de la escena en común." }
                     case .failure(let error):self.ui { self.busy=false;self.status=error.localizedDescription }
                     }
                 }

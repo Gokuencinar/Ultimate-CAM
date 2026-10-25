@@ -15,7 +15,7 @@ private enum ImportedProcessingFile {
 }
 
 private enum AuxiliaryCameraMode:String,Identifiable {
-    case video,panorama
+    case video,panorama,sphere
     var id:String { rawValue }
 }
 
@@ -170,7 +170,7 @@ struct CameraView: View {
         }) { settings }
         .sheet(isPresented: $showResult) { review }
         .fullScreenCover(item:$auxiliaryMode,onDismiss:{ resetUIControls();camera.resumeAfterAuxiliary() }) { mode in
-            switch mode { case .video: MovieCameraView();case .panorama: GuidedPanoramaView() }
+            switch mode { case .video: MovieCameraView();case .panorama: GuidedPanoramaView();case .sphere: GuidedSphereView() }
         }
         .photosPicker(isPresented: $showPhotoPicker, selection: $selectedPhoto, matching: .images,
                       preferredItemEncoding: .current)
@@ -384,6 +384,7 @@ struct CameraView: View {
                             openAuxiliary(.video)
                         }.accessibilityIdentifier("camera.mode.video")
                         modeButton("Panorama",selected:false) { openAuxiliary(.panorama) }.accessibilityIdentifier("camera.mode.panorama")
+                        modeButton("Esfera",selected:false) { openAuxiliary(.sphere) }.accessibilityIdentifier("camera.mode.sphere")
                         modeButton("iOS",selected:false) { nativeNight.open(camera:camera) }.accessibilityIdentifier("camera.mode.nativeNight")
                     }
                 }.accessibilityIdentifier("camera.modes")

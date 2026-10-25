@@ -18,6 +18,7 @@ targets:
         UISupportedInterfaceOrientations: [UIInterfaceOrientationPortrait]
         NSCameraUsageDescription: UltimateCAM necesita la cámara para tomar fotografías.
         NSMicrophoneUsageDescription: Ultimate CAM usa el micrófono solo cuando eliges grabar vídeo con audio.
+        NSMotionUsageDescription: Ultimate CAM usa la orientación del teléfono para guiar y unir las fotos de una esfera.
         NSPhotoLibraryAddUsageDescription: UltimateCAM guarda las fotos que elijas y su referencia original.
     settings:
       base:
