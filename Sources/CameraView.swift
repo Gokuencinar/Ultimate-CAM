@@ -1,4 +1,5 @@
 import AVFoundation
+import AVKit
 import SwiftUI
 import UIKit
 import UniformTypeIdentifiers
@@ -51,6 +52,8 @@ private struct ViewfinderGrid: View {
 }
 
 struct CameraView: View {
+    @AppStorage("hardwareCaptureButtons") private var hardwareButtons=true
+    @AppStorage("mirrorSelfies") private var mirrorSelfies=false
     @StateObject private var camera = CameraModel()
     @StateObject private var nativeNight = NativeNightCoordinator()
     @StateObject private var profiles = ProcessingProfiles()
@@ -108,11 +111,21 @@ struct CameraView: View {
     private var zoom: Double { camera.zoomFactor }
     private var lens: CameraLens { camera.selectedLens }
     private var controlsEnabled: Bool { !camera.busy && !loadingPhoto && !nativeNight.opening && !openingVideo && countdown == 0 }
+    private var hardwareCaptureReady:Bool {
+        hardwareButtons && camera.ready && !camera.busy && !loadingPhoto && !nativeNight.opening && !openingVideo &&
+        scenePhase == .active && auxiliaryMode==nil && !showControls && !showResult && !showPhotoPicker &&
+        !importFile && !exportFile && !importingDocument && !nativeNight.showMessage && camera.importFailure==nil
+    }
 
     var body: some View {
         ZStack {
             Color.black.ignoresSafeArea()
             viewfinder.ignoresSafeArea()
+        }
+        .onCameraCaptureEvent(isEnabled:hardwareCaptureReady) { event in
+            guard event.phase == .ended else { return }
+            CaptureTrace.record("ui.hardwareCapture",["timerActive":countdown>0])
+            if countdown>0 { cancelCountdown() } else { takePhoto() }
         }
         .overlay(alignment: .top) {
             VStack(spacing: 0) {
@@ -515,6 +528,8 @@ struct CameraView: View {
                 Text("El flash se usa en Foto JPEG. RAW y las pilas conservan luz continua sin destellos.")
                     .font(.footnote).foregroundStyle(.secondary)
                 Picker("Temporizador", selection: $timerSeconds) { Text("Desactivado").tag(0); Text("3 segundos").tag(3); Text("10 segundos").tag(10) }
+                Toggle("Disparar con botones de volumen",isOn:$hardwareButtons)
+                Toggle("Guardar selfies reflejadas",isOn:$mirrorSelfies)
                 Toggle("Cuadrícula", isOn: $grid)
                 if grid { Picker("Guía", selection: $guide) { ForEach(CompositionGuide.allCases) { Text($0.rawValue).tag($0) } } }
             }
@@ -809,8 +824,8 @@ struct CameraView: View {
     }
     private func takePhoto() {
         let selectedFlash = flash
-        let captureStack = stack, count = stackCount, raw = rawEnabled, processing = options
-        if timerSeconds == 0 { camera.capture(stack: captureStack, count: count, raw: raw, flash: selectedFlash, options: processing); return }
+        let captureStack = stack, count = stackCount, raw = rawEnabled, processing = options,mirror=mirrorSelfies
+        if timerSeconds == 0 { camera.capture(stack: captureStack, count: count, raw: raw, flash: selectedFlash, options: processing,mirrorSelfie:mirror); return }
         let delay = timerSeconds
         let id = UUID()
         countdownID = id
@@ -824,7 +839,7 @@ struct CameraView: View {
                 guard countdownID == id else { return }
                 countdown = 0
                 countdownTask = nil
-                camera.capture(stack: captureStack, count: count, raw: raw, flash: selectedFlash, options: processing)
+                camera.capture(stack: captureStack, count: count, raw: raw, flash: selectedFlash, options: processing,mirrorSelfie:mirror)
             } catch { if countdownID == id { countdown = 0; countdownTask = nil } }
         }
     }

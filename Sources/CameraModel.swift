@@ -595,7 +595,7 @@ final class CameraModel: NSObject, ObservableObject, AVCapturePhotoCaptureDelega
         }
     }
 
-    func capture(stack: Bool, count: Int = 3, raw: Bool = false, flash: CameraFlash = .off, options: ProcessingOptions = ProcessingOptions()) {
+    func capture(stack: Bool, count: Int = 3, raw: Bool = false, flash: CameraFlash = .off, options: ProcessingOptions = ProcessingOptions(),mirrorSelfie:Bool=false) {
         queue.async {
             guard self.active, self.session.isRunning, !self.interrupted, !self.inFlight, !self.captureRecoveryRequired,
                   let device = self.input?.device else { return }
@@ -635,6 +635,9 @@ final class CameraModel: NSObject, ObservableObject, AVCapturePhotoCaptureDelega
                 let angle=try CaptureRotation.cardinal(Double(rotation.videoRotationAngleForHorizonLevelCapture))
                 guard connection.isVideoRotationAngleSupported(CGFloat(angle)) else { throw CameraFailure.message("La cámara no admite esa orientación de foto.") }
                 connection.videoRotationAngle=CGFloat(angle)
+                let mirror=mirrorSelfie && device.position == .front
+                if connection.isVideoMirroringSupported { connection.automaticallyAdjustsVideoMirroring=false;connection.isVideoMirrored=mirror }
+                else if mirror { throw CameraFailure.message("Esta cámara no admite guardar la selfie reflejada.") }
                 if burst {
                     guard !device.isAdjustingExposure, !device.isAdjustingWhiteBalance,
                           !device.isAdjustingFocus else {
@@ -768,7 +771,7 @@ final class CameraModel: NSObject, ObservableObject, AVCapturePhotoCaptureDelega
             "running": session.isRunning, "enabled": connection.isEnabled,
             "active": connection.isActive, "quality": settings.photoQualityPrioritization.rawValue,
             "width": settings.maxPhotoDimensions.width, "height": settings.maxPhotoDimensions.height,
-            "count": desiredCount, "raw": rawRequested, "flash": requestedFlash.rawValue,"rotationAngle":connection.videoRotationAngle])
+            "count": desiredCount, "raw": rawRequested, "flash": requestedFlash.rawValue,"rotationAngle":connection.videoRotationAngle,"mirrored":connection.isVideoMirrored])
         captureID = identifier
         expectedFrameCount = frames.count + 1
         output.capturePhoto(with: settings, delegate: self)

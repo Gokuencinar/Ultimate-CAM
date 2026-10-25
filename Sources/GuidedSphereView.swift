@@ -1,8 +1,10 @@
 import Photos
+import AVKit
 import SwiftUI
 import UIKit
 
 struct GuidedSphereView:View {
+    @AppStorage("hardwareCaptureButtons") private var hardwareButtons=true
     @StateObject private var camera=GuidedPhotoCamera()
     @StateObject private var motion=SphereMotionProvider()
     @Environment(\.dismiss) private var dismiss
@@ -38,7 +40,8 @@ struct GuidedSphereView:View {
     }
     var body:some View {
         ZStack {
-            CameraPreview(session:camera.session,zoom:1,focus:{ point,_ in camera.focus(point) },changeZoom:{_ in}).ignoresSafeArea()
+            CameraPreview(session:camera.session,zoom:1,focus:{ point,_ in camera.focus(point) },changeZoom:{_ in},supportsFocusLock:false,supportsZoom:false)
+                .allowsHitTesting(captured.isEmpty && !camera.busy && !processing && result==nil).ignoresSafeArea()
             VStack(spacing:12) {
                 HStack {
                     Button { if captured.isEmpty || saved { close() } else { restarting=false;confirmDiscard=true } } label: { Image(systemName:"chevron.left").frame(width:44,height:44) }
@@ -81,6 +84,10 @@ struct GuidedSphereView:View {
                 if result==nil { Text("Experimental · JPEG SDR · la calibración del campo de visión necesita comprobación en el iPhone.").font(.caption2).foregroundStyle(.secondary) }
             }.padding().background { LinearGradient(colors:[.black.opacity(0.8),.clear,.black.opacity(0.85)],startPoint:.top,endPoint:.bottom).allowsHitTesting(false) }
         }.foregroundStyle(.white).preferredColorScheme(.dark).tint(CameraPalette.accent)
+            .onCameraCaptureEvent(isEnabled:hardwareButtons && scene == .active && camera.ready && !camera.busy && !processing && !saving &&
+                                  !closing && !confirmDiscard && result==nil && aimReady && next != nil) { event in
+                if event.phase == .ended,let next { pendingTarget=next.id;camera.capture() }
+            }
             .interactiveDismissDisabled(!captured.isEmpty || camera.busy || processing || saving)
             .onAppear { UIApplication.shared.isIdleTimerDisabled=true;camera.motionProvider={ motion.read() };motion.start();camera.start() }
             .onDisappear { UIApplication.shared.isIdleTimerDisabled=false;motion.stop();camera.stop();cancellation?.cancel() }

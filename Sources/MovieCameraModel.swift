@@ -150,7 +150,7 @@ final class MovieCameraModel: NSObject, ObservableObject, AVCaptureFileOutputRec
             recoverDraftIfNeeded()
         } catch { ui { self.ready=self.session.isRunning && self.configured;self.status=error.localizedDescription } }
     }
-    func record() {
+    func record(mirrorSelfie:Bool=false) {
         queue.async {
             guard self.active,self.configured,self.session.isRunning,self.machine.phase == .idle else { return }
             do {
@@ -158,6 +158,9 @@ final class MovieCameraModel: NSObject, ObservableObject, AVCaptureFileOutputRec
                 let angle=try CaptureRotation.cardinal(Double(rotation.videoRotationAngleForHorizonLevelCapture))
                 guard connection.isVideoRotationAngleSupported(CGFloat(angle)) else { throw CameraFailure.message("La cámara no admite esa orientación de vídeo.") }
                 connection.videoRotationAngle=CGFloat(angle)
+                let mirror=mirrorSelfie && self.selected == .front
+                if connection.isVideoMirroringSupported { connection.automaticallyAdjustsVideoMirroring=false;connection.isVideoMirrored=mirror }
+                else if mirror { throw CameraFailure.message("Esta cámara no admite guardar el vídeo frontal reflejado.") }
                 try FileManager.default.createDirectory(at:self.directory,withIntermediateDirectories:true)
                 guard let token=self.machine.begin() else { return }
                 let url=self.directory.appendingPathComponent("UltimateCAM-\(token.uuidString).mov")
@@ -203,6 +206,9 @@ final class MovieCameraModel: NSObject, ObservableObject, AVCaptureFileOutputRec
                         self.syncUI("\(info.width) × \(info.height) · \(String(format:"%.1f",info.duration)) s · \(info.bytes/1_000_000) MB")
                     } else { self.syncUI(error?.localizedDescription ?? "No se pudo validar el vídeo. El archivo permanece en VideoDrafts.") }
                     if !self.active { self.session.stopRunning() }
+                    else if self.rotationCoordinator==nil,let device=self.device {
+                        self.rotationCoordinator=AVCaptureDevice.RotationCoordinator(device:device,previewLayer:nil)
+                    }
                     let completion=self.shutdownCompletion;self.shutdownCompletion=nil
                     let ready=self.active && self.session.isRunning && self.configured
                     self.ui { self.ready=ready;completion?() }

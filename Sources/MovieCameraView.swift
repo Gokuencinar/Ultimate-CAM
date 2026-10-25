@@ -2,6 +2,8 @@ import AVKit
 import SwiftUI
 
 struct MovieCameraView: View {
+    @AppStorage("hardwareCaptureButtons") private var hardwareButtons=true
+    @AppStorage("mirrorSelfies") private var mirrorSelfies=false
     @StateObject private var camera=MovieCameraModel()
     @Environment(\.dismiss) private var dismiss
     @Environment(\.scenePhase) private var scene
@@ -45,7 +47,7 @@ struct MovieCameraView: View {
                     Button { camera.toggleTorch() } label: { Image(systemName:camera.torch ? "bolt.fill":"bolt.slash").frame(width:50,height:50) }
                         .accessibilityLabel("Antorcha de vídeo").disabled(!camera.torchAvailable || camera.phase == .finishing)
                     Spacer()
-                    Button { recording ? camera.stopRecording() : camera.record() } label: {
+                    Button { recording ? camera.stopRecording() : camera.record(mirrorSelfie:mirrorSelfies) } label: {
                         ZStack {
                             Circle().stroke(.white,lineWidth:3).frame(width:76,height:76)
                             RoundedRectangle(cornerRadius:recording ? 6:32).fill(.red).frame(width:recording ? 30:60,height:recording ? 30:60)
@@ -62,6 +64,10 @@ struct MovieCameraView: View {
                 LinearGradient(colors:[.black.opacity(0.75),.clear,.black.opacity(0.8)],startPoint:.top,endPoint:.bottom).allowsHitTesting(false)
             }
         }.foregroundStyle(.white).preferredColorScheme(.dark)
+            .onCameraCaptureEvent(isEnabled:hardwareButtons && scene == .active && !settings && !showingReview && !confirmDiscard && !leaving &&
+                                  (recording || (camera.ready && camera.phase == .idle))) { event in
+                guard event.phase == .ended else { return };recording ? camera.stopRecording():camera.record(mirrorSelfie:mirrorSelfies)
+            }
             .interactiveDismissDisabled(busy || (camera.previewURL != nil && !camera.saved))
             .onAppear { UIApplication.shared.isIdleTimerDisabled=true;camera.start() }
             .onDisappear { UIApplication.shared.isIdleTimerDisabled=false;camera.shutdown() }
@@ -95,6 +101,8 @@ struct MovieCameraView: View {
                 }
                 Toggle("Grabar audio",isOn:Binding(get:{camera.configuration.audio},set:{v in update {$0.audio=v} }))
                 Toggle("Solicitar estabilización",isOn:Binding(get:{camera.configuration.stabilized},set:{v in update {$0.stabilized=v} }))
+                Toggle("Guardar selfies reflejadas",isOn:$mirrorSelfies)
+                Toggle("Disparar con botones de volumen",isOn:$hardwareButtons)
                 Text("Las combinaciones disponibles dependen de cada lente. El sistema elige la estabilización compatible. HEVC ocupa menos espacio; H.264 tiene mayor compatibilidad. Los ajustes de color de Fotos no se aplican al vídeo.").font(.footnote)
                 Text(camera.status).font(.footnote)
             }.navigationTitle("Vídeo").toolbar { Button("Listo") { settings=false } }

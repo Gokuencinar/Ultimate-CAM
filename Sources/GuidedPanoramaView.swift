@@ -1,8 +1,10 @@
 import Photos
+import AVKit
 import SwiftUI
 import UIKit
 
 struct GuidedPanoramaView:View {
+    @AppStorage("hardwareCaptureButtons") private var hardwareButtons=true
     @StateObject private var camera=GuidedPhotoCamera()
     @Environment(\.dismiss) private var dismiss
     @Environment(\.scenePhase) private var scene
@@ -18,7 +20,8 @@ struct GuidedPanoramaView:View {
     @State private var closing=false
     var body:some View {
         ZStack {
-            CameraPreview(session:camera.session,zoom:1,focus:{ point,_ in camera.focus(point) },changeZoom:{_ in}).ignoresSafeArea()
+            CameraPreview(session:camera.session,zoom:1,focus:{ point,_ in camera.focus(point) },changeZoom:{_ in},supportsFocusLock:false,supportsZoom:false)
+                .allowsHitTesting(frames.isEmpty && !camera.busy && !processing && result==nil).ignoresSafeArea()
             if let last=frames.last,let cg=PreviewDecoder.image(last,maximumDimension:600),result==nil {
                 GeometryReader { g in
                     Image(decorative:cg,scale:1).resizable().scaledToFill().frame(width:g.size.width,height:g.size.height).clipped().opacity(0.18)
@@ -52,6 +55,10 @@ struct GuidedPanoramaView:View {
                 Text(message.isEmpty ? camera.status:message).font(.footnote).multilineTextAlignment(.center).padding(.vertical,6)
             }.padding().background { LinearGradient(colors:[.black.opacity(0.75),.clear,.black.opacity(0.8)],startPoint:.top,endPoint:.bottom).allowsHitTesting(false) }
         }.foregroundStyle(.white).tint(CameraPalette.accent).preferredColorScheme(.dark)
+            .onCameraCaptureEvent(isEnabled:hardwareButtons && scene == .active && camera.ready && !camera.busy && !processing && !saving &&
+                                  !closing && !confirmClose && result==nil && frames.count<10) { event in
+                if event.phase == .ended { camera.capture() }
+            }
             .interactiveDismissDisabled(!frames.isEmpty || camera.busy || processing || saving)
             .onAppear { UIApplication.shared.isIdleTimerDisabled=true;camera.start() }
             .onDisappear { UIApplication.shared.isIdleTimerDisabled=false;cancellation?.cancel();camera.stop() }

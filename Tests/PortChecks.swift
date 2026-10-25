@@ -202,6 +202,20 @@ import Darwin
         try check(CGImageDestinationFinalize(rotatedDestination), "Could not encode orientation fixture")
         let rotatedPreview = PreviewDecoder.image(rotatedData as Data)!
         try check(rotatedPreview.width == 48 && rotatedPreview.height == 96, "Review preview ignored EXIF rotation")
+        for orientation in [2,4,5,7] {
+            let mirrored=NSMutableData(),writer=CGImageDestinationCreateWithData(mirrored,"public.jpeg" as CFString,1,nil)!
+            CGImageDestinationAddImage(writer,rectangle,[kCGImagePropertyOrientation:orientation] as CFDictionary)
+            try check(CGImageDestinationFinalize(writer),"Could not encode mirrored orientation fixture")
+            let source=CGImageSourceCreateWithData(mirrored as CFData,nil)!
+            let expected=CIImage(cgImage:CGImageSourceCreateImageAtIndex(source,0,nil)!).oriented(forExifOrientation:Int32(orientation))
+            var edit=base;edit.postExposure=0.001;edit.jpegQuality=1
+            let processed=try ImportedPhotoProcessor.process(mirrored as Data,options:edit)
+            let output=CIImage(data:processed.jpeg,options:[.applyOrientationProperty:true])!
+            try check(output.extent.size==expected.extent.size && difference(output,expected)<0.025,
+                      "Editing a mirrored image rotated/reflected it twice or lost its geometry: \(orientation)")
+            let info=CGImageSourceCopyPropertiesAtIndex(CGImageSourceCreateWithData(processed.jpeg as CFData,nil)!,0,nil)! as NSDictionary
+            try check(info[kCGImagePropertyOrientation] as? Int==1,"Processed mirrored image retained a stale orientation tag")
+        }
         let source = CGImageSourceCreateWithData(result.jpeg as CFData,nil)!
         let cg = CGImageSourceCreateImageAtIndex(source,0,nil)!
         try check(cg.width == 96 && cg.height == 54, "16:9 output is not cropped correctly")

@@ -63,6 +63,8 @@ struct CameraPreview: UIViewRepresentable {
     let zoom: Double
     let focus: (CGPoint, Bool) -> Void
     let changeZoom: (Double) -> Void
+    var supportsFocusLock=true
+    var supportsZoom=true
 
     final class Coordinator: NSObject {
         var parent: CameraPreview
@@ -92,13 +94,13 @@ struct CameraPreview: UIViewRepresentable {
         let view = PreviewSurface()
         view.previewLayer.session = session
         view.previewLayer.videoGravity = .resizeAspectFill
-        let hold = UILongPressGestureRecognizer(target: context.coordinator, action: #selector(Coordinator.hold(_:)))
-        hold.minimumPressDuration = 0.55
         let tap = UITapGestureRecognizer(target: context.coordinator, action: #selector(Coordinator.tap(_:)))
-        tap.require(toFail: hold)
-        view.addGestureRecognizer(hold)
+        if supportsFocusLock {
+            let hold=UILongPressGestureRecognizer(target:context.coordinator,action:#selector(Coordinator.hold(_:)))
+            hold.minimumPressDuration=0.55;tap.require(toFail:hold);view.addGestureRecognizer(hold)
+        } else { view.accessibilityLabel="Visor. Toca para enfocar y medir la primera vista." }
         view.addGestureRecognizer(tap)
-        view.addGestureRecognizer(UIPinchGestureRecognizer(target: context.coordinator, action: #selector(Coordinator.pinch(_:))))
+        if supportsZoom { view.addGestureRecognizer(UIPinchGestureRecognizer(target: context.coordinator, action: #selector(Coordinator.pinch(_:)))) }
         return view
     }
     func updateUIView(_ view: PreviewSurface, context: Context) { context.coordinator.parent = self }
