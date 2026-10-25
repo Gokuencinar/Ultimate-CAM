@@ -23,3 +23,5 @@ Panorama y Esfera permiten enfocar/medir antes de su primera vista. Después man
 El simulador no valida botones físicos, sensores de orientación, espejo real JPEG/DNG ni cambios de orientación del dispositivo. Estas comprobaciones se mantienen aplazadas, sin conectar con el iPhone ni instalar esta versión.
 
 Referencias: [rotación de captura](https://developer.apple.com/documentation/avfoundation/avcapturedevice/rotationcoordinator), [eventos de botones físicos](https://developer.apple.com/documentation/avkit/avcaptureeventinteraction) y [su integración SwiftUI](https://developer.apple.com/documentation/swiftui/view/oncameracaptureevent(isenabled:action:)).
+
+La prueba de interfaz comprueba también que espejo y botones físicos sean preferencias compartidas entre Foto y Vídeo, restaurando sus valores al terminar. Esto comprueba su persistencia y navegación; no valida un botón físico ni una selfie real.

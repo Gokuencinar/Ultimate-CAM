@@ -2,6 +2,8 @@
 
 Cámara experimental para iPhone con una interfaz inspirada en GCam y procesamiento propio sobre AVFoundation, Core Image y Vision. Se distribuye como **DEB**, con esquemas separados para Dopamine rootless y RootHide. No incluye el motor propietario de Google ni binarios, shaders o modelos del APK AGC.
 
+La siguiente [revisión 0.11](docs/FUNCIONES-0.11.md) añade orientación automática de archivos, disparo con botones físicos y selfies reflejadas opcionales; mantiene separadas sus comprobaciones de las de build81.
+
 La versión 0.10 añade vídeo, retrato de personas, panorama guiado, esfera de 360°, histograma/peaking/cebras y vista de color/LUT en directo. Mantiene foto JPEG/DNG, controles manuales, pilas temporales, Noche estática, horquillado HDR, JPEG adaptativo con mapa HDR, importación de fotos, LUT y perfiles por lente.
 
 El [candidato build81](docs/VALIDACION-0.10.md) tiene compilación, cinco suites de fixtures, empaquetado y tres casos de interfaz correctos en el mismo commit de código. Se conservan sus DEB rootless/RootHide, hashes y fuentes. No está instalado ni probado en el teléfono.
