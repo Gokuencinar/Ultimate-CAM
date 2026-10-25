@@ -10,6 +10,12 @@ import Darwin
         catch { fputs("MOVIE CHECK FAILED: \(error)\n",stderr);exit(1) }
     }
     static func run() async throws {
+        for (input,expected) in [(-90.0,270.0),(0,0),(89.9,90),(180,180),(270.1,270),(360,0),(450,90)] {
+            try check(try CaptureRotation.cardinal(input)==expected,"Capture rotation lost the cardinal convention")
+        }
+        do { _=try CaptureRotation.cardinal(.nan);throw CameraFailure.message("Invalid rotation accepted") }
+        catch CameraFailure.message(let text) where text == "Invalid rotation accepted" { throw CameraFailure.message(text) }
+        catch { }
         var state=MovieRecordingState()
         try check(!state.stop() && state.beginSave()==nil,"Idle operation accepted")
         let first=state.begin()!
@@ -39,6 +45,7 @@ import Darwin
         let url=directory.appendingPathComponent("synthetic.mov")
         let writer=try AVAssetWriter(outputURL:url,fileType:.mov)
         let input=AVAssetWriterInput(mediaType:.video,outputSettings:[AVVideoCodecKey:AVVideoCodecType.h264,AVVideoWidthKey:64,AVVideoHeightKey:48])
+        input.transform=CGAffineTransform(rotationAngle:CGFloat.pi/2)
         let adaptor=AVAssetWriterInputPixelBufferAdaptor(assetWriterInput:input,
             sourcePixelBufferAttributes:[kCVPixelBufferPixelFormatTypeKey as String:kCVPixelFormatType_32BGRA,
                 kCVPixelBufferWidthKey as String:64,kCVPixelBufferHeightKey as String:48])
@@ -60,7 +67,7 @@ import Darwin
         input.markAsFinished();await writer.finishWriting()
         try check(writer.status == .completed,"Synthetic MOV could not finish")
         let result=try await MovieRecordedAsset.inspect(url)
-        try check(result.width==64 && result.height==48 && result.duration>0.9 && result.duration<1.1 && result.bytes>100,"Production movie validator read wrong metadata")
+        try check(result.width==48 && result.height==64 && result.duration>0.9 && result.duration<1.1 && result.bytes>100,"Production movie validator ignored display rotation or read wrong metadata")
         let bad=directory.appendingPathComponent("broken.mov");try Data("not a movie".utf8).write(to:bad)
         do { _=try await MovieRecordedAsset.inspect(bad);throw CameraFailure.message("Corrupt movie accepted") }
         catch CameraFailure.message(let text) where text == "Corrupt movie accepted" { throw CameraFailure.message(text) }

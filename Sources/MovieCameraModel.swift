@@ -27,6 +27,7 @@ final class MovieCameraModel: NSObject, ObservableObject, AVCaptureFileOutputRec
     private var current=MovieConfiguration()
     private var selected=CameraLens.wide
     private var device:AVCaptureDevice?
+    private var rotationCoordinator:AVCaptureDevice.RotationCoordinator?
     private var active=false
     private var configured=false
     private var recordingURL:URL?
@@ -139,6 +140,7 @@ final class MovieCameraModel: NSObject, ObservableObject, AVCaptureFileOutputRec
                 throw error
             }
             device=camera;selected=lens;current=request;configured=true
+            rotationCoordinator=AVCaptureDevice.RotationCoordinator(device:camera,previewLayer:nil)
             session.startRunning()
             let running=session.isRunning
             ui { self.ready=running;self.configuration=request;self.lens=lens;self.zoom=1
@@ -152,6 +154,10 @@ final class MovieCameraModel: NSObject, ObservableObject, AVCaptureFileOutputRec
         queue.async {
             guard self.active,self.configured,self.session.isRunning,self.machine.phase == .idle else { return }
             do {
+                guard let connection=self.output.connection(with:.video),let rotation=self.rotationCoordinator else { throw CameraFailure.message("No se pudo preparar la orientación del vídeo.") }
+                let angle=try CaptureRotation.cardinal(Double(rotation.videoRotationAngleForHorizonLevelCapture))
+                guard connection.isVideoRotationAngleSupported(CGFloat(angle)) else { throw CameraFailure.message("La cámara no admite esa orientación de vídeo.") }
+                connection.videoRotationAngle=CGFloat(angle)
                 try FileManager.default.createDirectory(at:self.directory,withIntermediateDirectories:true)
                 guard let token=self.machine.begin() else { return }
                 let url=self.directory.appendingPathComponent("UltimateCAM-\(token.uuidString).mov")
@@ -264,6 +270,7 @@ final class MovieCameraModel: NSObject, ObservableObject, AVCaptureFileOutputRec
         queue.async {
             if !self.active && !self.session.isRunning && self.machine.phase != .finishing { self.ui { completion() };return }
             self.active=false
+            self.rotationCoordinator=nil
             self.permissionToken=UUID()
             if self.machine.phase == .recording { self.stopOnQueue() }
             if let device=self.device,device.hasTorch,(try? device.lockForConfiguration()) != nil { device.torchMode = .off;device.unlockForConfiguration() }

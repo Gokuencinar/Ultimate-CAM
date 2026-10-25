@@ -68,6 +68,7 @@ final class CameraModel: NSObject, ObservableObject, AVCapturePhotoCaptureDelega
     private let processing = DispatchQueue(label: "local.ultimatecam.processing", qos: .userInitiated)
     private let output = AVCapturePhotoOutput()
     private var input: AVCaptureDeviceInput?
+    private var rotationCoordinator:AVCaptureDevice.RotationCoordinator?
     private var configured = false
     private var configuredLens = CameraLens.wide
     private var active = false
@@ -157,6 +158,7 @@ final class CameraModel: NSObject, ObservableObject, AVCapturePhotoCaptureDelega
                 configured = true
             }
             if !session.isRunning { session.startRunning() }
+            if rotationCoordinator==nil,let device=input?.device { rotationCoordinator=AVCaptureDevice.RotationCoordinator(device:device,previewLayer:nil) }
             let rawAvailable = !output.availableRawPhotoPixelFormatTypes.isEmpty
             publish { self.supportsRAW = rawAvailable }
             let available = self.session.isRunning && !self.interrupted
@@ -238,6 +240,7 @@ final class CameraModel: NSObject, ObservableObject, AVCapturePhotoCaptureDelega
     func stop() {
         queue.async {
             self.active = false
+            self.rotationCoordinator=nil
             self.previewAnalyzer.setActive(false)
             self.focusToken = UUID()
             self.publish { self.ready = false }
@@ -249,6 +252,7 @@ final class CameraModel: NSObject, ObservableObject, AVCapturePhotoCaptureDelega
         queue.async {
             guard !self.inFlight else { self.publish { completion(false) }; return }
             self.active=false;self.focusToken=UUID()
+            self.rotationCoordinator=nil
             self.previewAnalyzer.setActive(false)
             if self.session.isRunning { self.session.stopRunning() }
             let stopped = !self.session.isRunning
@@ -361,6 +365,7 @@ final class CameraModel: NSObject, ObservableObject, AVCapturePhotoCaptureDelega
         session.commitConfiguration()
         committed = true
         configuredLens=lens
+        rotationCoordinator=AVCaptureDevice.RotationCoordinator(device:device,previewLayer:nil)
         let rawAvailable = !output.availableRawPhotoPixelFormatTypes.isEmpty
         publish {
             self.selectedLens = lens
@@ -622,6 +627,14 @@ final class CameraModel: NSObject, ObservableObject, AVCapturePhotoCaptureDelega
             self.rawData = nil
             self.publish { self.busy = true }
             do {
+                // Snapshot once for the whole transaction. A turn during a
+                // temporal stack/HDR bracket must not change its pixel axes.
+                guard let connection=self.output.connection(with:.video),let rotation=self.rotationCoordinator else {
+                    throw CameraFailure.message("No se pudo preparar la orientación. Vuelve a abrir la cámara.")
+                }
+                let angle=try CaptureRotation.cardinal(Double(rotation.videoRotationAngleForHorizonLevelCapture))
+                guard connection.isVideoRotationAngleSupported(CGFloat(angle)) else { throw CameraFailure.message("La cámara no admite esa orientación de foto.") }
+                connection.videoRotationAngle=CGFloat(angle)
                 if burst {
                     guard !device.isAdjustingExposure, !device.isAdjustingWhiteBalance,
                           !device.isAdjustingFocus else {
@@ -755,7 +768,7 @@ final class CameraModel: NSObject, ObservableObject, AVCapturePhotoCaptureDelega
             "running": session.isRunning, "enabled": connection.isEnabled,
             "active": connection.isActive, "quality": settings.photoQualityPrioritization.rawValue,
             "width": settings.maxPhotoDimensions.width, "height": settings.maxPhotoDimensions.height,
-            "count": desiredCount, "raw": rawRequested, "flash": requestedFlash.rawValue])
+            "count": desiredCount, "raw": rawRequested, "flash": requestedFlash.rawValue,"rotationAngle":connection.videoRotationAngle])
         captureID = identifier
         expectedFrameCount = frames.count + 1
         output.capturePhoto(with: settings, delegate: self)
