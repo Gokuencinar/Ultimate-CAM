@@ -69,6 +69,7 @@ final class CameraModel: NSObject, ObservableObject, AVCapturePhotoCaptureDelega
     private let output = AVCapturePhotoOutput()
     private var input: AVCaptureDeviceInput?
     private var configured = false
+    private var configuredLens = CameraLens.wide
     private var active = false
     private var inFlight = false
     private var frames = [Data]()
@@ -152,7 +153,7 @@ final class CameraModel: NSObject, ObservableObject, AVCapturePhotoCaptureDelega
         }
         do {
             if !configured {
-                try configure(.wide)
+                try configure(configuredLens)
                 configured = true
             }
             if !session.isRunning { session.startRunning() }
@@ -256,6 +257,14 @@ final class CameraModel: NSObject, ObservableObject, AVCapturePhotoCaptureDelega
         }
     }
 
+    func resumeAfterAuxiliary() {
+        queue.async {
+            guard !self.inFlight else { return }
+            self.configured=false
+            self.activate()
+        }
+    }
+
     @objc private func sessionInterrupted() {
         queue.async {
             self.interrupted = true
@@ -351,6 +360,7 @@ final class CameraModel: NSObject, ObservableObject, AVCapturePhotoCaptureDelega
         configurePreviewOutput()
         session.commitConfiguration()
         committed = true
+        configuredLens=lens
         let rawAvailable = !output.availableRawPhotoPixelFormatTypes.isEmpty
         publish {
             self.selectedLens = lens

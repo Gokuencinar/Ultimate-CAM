@@ -259,6 +259,7 @@ final class MovieCameraModel: NSObject, ObservableObject, AVCaptureFileOutputRec
     }
     func shutdown(completion:@escaping ()->Void = {}) {
         queue.async {
+            if !self.active && !self.session.isRunning && self.machine.phase != .finishing { self.ui { completion() };return }
             self.active=false
             self.permissionToken=UUID()
             if self.machine.phase == .recording { self.stopOnQueue() }

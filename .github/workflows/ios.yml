@@ -51,13 +51,15 @@ jobs:
       - name: Check image alignment and noise averaging
         run: |
           set -euo pipefail
-          SOURCES=(Sources/PortraitProcessor.swift Sources/PreviewAnalysis.swift Sources/MovieConfiguration.swift Sources/MovieRecordedAsset.swift Sources/AdaptiveHDR.swift Sources/PNGLUT.swift Sources/PhotoCapturePolicy.swift Sources/WeightedTemporalMerger.swift Sources/ImportedPhotoProcessor.swift Sources/ColorRecipe.swift Sources/HDRCapturePlan.swift Sources/HDRProcessor.swift Sources/JPEGRenderer.swift Sources/NightCapturePlan.swift Sources/ProcessingCancellation.swift Sources/PreviewDecoder.swift Sources/ProcessingOptions.swift Sources/CubeLUT.swift Sources/ProcessingProfiles.swift Sources/AdvancedProcessor.swift Sources/LocalAlignment.swift Sources/NoiseAwareMerger.swift Sources/ImageStatistics.swift Sources/BurstProcessor.swift)
+          SOURCES=(Sources/PanoramaProcessor.swift Sources/PortraitProcessor.swift Sources/PreviewAnalysis.swift Sources/MovieConfiguration.swift Sources/MovieRecordedAsset.swift Sources/AdaptiveHDR.swift Sources/PNGLUT.swift Sources/PhotoCapturePolicy.swift Sources/WeightedTemporalMerger.swift Sources/ImportedPhotoProcessor.swift Sources/ColorRecipe.swift Sources/HDRCapturePlan.swift Sources/HDRProcessor.swift Sources/JPEGRenderer.swift Sources/NightCapturePlan.swift Sources/ProcessingCancellation.swift Sources/PreviewDecoder.swift Sources/ProcessingOptions.swift Sources/CubeLUT.swift Sources/ProcessingProfiles.swift Sources/AdvancedProcessor.swift Sources/LocalAlignment.swift Sources/NoiseAwareMerger.swift Sources/ImageStatistics.swift Sources/BurstProcessor.swift)
           xcrun --sdk macosx swiftc -O "${SOURCES[@]}" Tests/PortChecks.swift -o build/port-checks
           build/port-checks 2>&1 | tee build/port-checks.log
           xcrun --sdk macosx swiftc -O "${SOURCES[@]}" Tests/ProcessorChecks.swift -o build/processor-checks
           ULTIMATECAM_PROCESSOR_TRACE=1 build/processor-checks 2>&1 | tee build/processor-checks.log
           xcrun --sdk macosx swiftc -O "${SOURCES[@]}" Tests/MovieChecks.swift -o build/movie-checks
           build/movie-checks 2>&1 | tee build/movie-checks.log
+          xcrun --sdk macosx swiftc -O "${SOURCES[@]}" Tests/PanoramaChecks.swift -o build/panorama-checks
+          build/panorama-checks 2>&1 | tee build/panorama-checks.log
       - name: Package rootless DEB
         run: bash scripts/package_deb.sh
       - name: Package RootHide DEB
@@ -118,5 +120,6 @@ jobs:
             build/processor-checks.log
             build/port-checks.log
             build/movie-checks.log
+            build/panorama-checks.log
           if-no-files-found: warn
           retention-days: 14

@@ -14,6 +14,11 @@ private enum ImportedProcessingFile {
     case profile(Data)
 }
 
+private enum AuxiliaryCameraMode:String,Identifiable {
+    case video,panorama
+    var id:String { rawValue }
+}
+
 private enum CompositionGuide: String, CaseIterable, Identifiable {
     case thirds = "Tercios", golden = "Áurea", center = "Centro", diagonal = "Diagonales"
     var id: String { rawValue }
@@ -74,7 +79,7 @@ struct CameraView: View {
     @State private var showPhotoPicker = false
     @State private var pendingPhotoImport = false
     @State private var pendingNativeNight = false
-    @State private var showingVideo = false
+    @State private var auxiliaryMode:AuxiliaryCameraMode?
     @State private var openingVideo = false
     @State private var previewTools = PreviewAnalysisOptions()
     @State private var selectedPhoto: PhotosPickerItem?
@@ -136,10 +141,10 @@ struct CameraView: View {
             }
         }
         .background(Color.black).foregroundStyle(.white).preferredColorScheme(.dark)
-        .onAppear { UIApplication.shared.isIdleTimerDisabled = true; if !showingVideo && !openingVideo { camera.start() }; loadProfile(profiles.options(for: lens.rawValue) ?? ProcessingOptions()) }
+        .onAppear { UIApplication.shared.isIdleTimerDisabled = true; if auxiliaryMode == nil && !openingVideo { camera.start() }; loadProfile(profiles.options(for: lens.rawValue) ?? ProcessingOptions()) }
         .onDisappear { UIApplication.shared.isIdleTimerDisabled = false; cancelCountdown(); profiles.flush() }
         .onChange(of: scenePhase) { _, phase in
-            if phase == .active { UIApplication.shared.isIdleTimerDisabled = true; if !nativeNight.opening && !showingVideo && !openingVideo { nativeNight.returnedToApp(); camera.start() } }
+            if phase == .active { UIApplication.shared.isIdleTimerDisabled = true; if !nativeNight.opening && auxiliaryMode == nil && !openingVideo { nativeNight.returnedToApp(); camera.start() } }
             else if phase == .background {
                 UIApplication.shared.isIdleTimerDisabled = false
                 cancelCountdown()
@@ -164,7 +169,9 @@ struct CameraView: View {
             else if pendingNativeNight { pendingNativeNight = false; nativeNight.open(camera:camera) }
         }) { settings }
         .sheet(isPresented: $showResult) { review }
-        .fullScreenCover(isPresented:$showingVideo,onDismiss:{ camera.start() }) { MovieCameraView() }
+        .fullScreenCover(item:$auxiliaryMode,onDismiss:{ resetUIControls();camera.resumeAfterAuxiliary() }) { mode in
+            switch mode { case .video: MovieCameraView();case .panorama: GuidedPanoramaView() }
+        }
         .photosPicker(isPresented: $showPhotoPicker, selection: $selectedPhoto, matching: .images,
                       preferredItemEncoding: .current)
         .task(id: selectedPhoto) {
@@ -374,9 +381,9 @@ struct CameraView: View {
                         modeButton("HDR",selected:options.hdrBracketing) { activateHDR() }.accessibilityIdentifier("camera.mode.hdr")
                         modeButton("Pila",selected:stack && !options.nightStatic && !options.hdrBracketing) { options.nightStatic=false;options.hdrBracketing=false;stack=true }
                         modeButton("Vídeo",selected:false) {
-                            openingVideo=true
-                            camera.prepareNativeHandoff { accepted in openingVideo=false;if accepted { showingVideo=true } }
+                            openAuxiliary(.video)
                         }.accessibilityIdentifier("camera.mode.video")
+                        modeButton("Panorama",selected:false) { openAuxiliary(.panorama) }.accessibilityIdentifier("camera.mode.panorama")
                         modeButton("iOS",selected:false) { nativeNight.open(camera:camera) }.accessibilityIdentifier("camera.mode.nativeNight")
                     }
                 }.accessibilityIdentifier("camera.modes")
@@ -399,6 +406,15 @@ struct CameraView: View {
                 .padding(.horizontal, 12).frame(height: 38)
                 .background(selected ? Color(white: 0.16) : .clear, in: Capsule())
         }.accessibilityAddTraits(selected ? .isSelected : [])
+    }
+
+    private func openAuxiliary(_ mode:AuxiliaryCameraMode) {
+        openingVideo=true
+        camera.prepareNativeHandoff { accepted in
+            openingVideo=false
+            if accepted && scenePhase == .active { auxiliaryMode=mode }
+            else if scenePhase == .active { camera.start() }
+        }
     }
 
     private var settings: some View {
