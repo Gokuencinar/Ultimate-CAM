@@ -1,8 +1,10 @@
 # Ultimate CAM
 
-Cámara experimental para iPhone con una interfaz inspirada en GCam y procesamiento propio sobre AVFoundation, Core Image y Vision. Se distribuye como **DEB**, con esquemas separados para Dopamine rootless y RootHide. No incluye el motor propietario de Google ni binarios, shaders o modelos del APK AGC.
+Cámara experimental para iPhone con una interfaz inspirada en GCam y procesamiento propio sobre AVFoundation, Core Image y Vision. Se distribuye como **DEB**, con esquemas separados para Dopamine rootless y RootHide. No incluye el motor propietario de Google ni binarios, shaders o modelos del APK AGC. La adaptación de investigación abierta distribuye su licencia y avisos en `Legal/`.
 
-La siguiente [revisión 0.11](docs/FUNCIONES-0.11.md) añade orientación automática de archivos, disparo con botones físicos y selfies reflejadas opcionales; mantiene separadas sus comprobaciones de las de build81.
+La [revisión 0.12](docs/FUSION-ESPECTRAL-0.12.md) añade una fusión nocturna espectral opcional, adaptada de investigación pública de Google con licencia Apache 2.0 y contrastada con su referencia numérica. Trabaja sobre RGB revelado, limita el lado largo a 2048 px y está desactivada por defecto. La [matriz actual del port](docs/ESTADO-DEL-PORT-0.12.md) identifica las funciones disponibles y las familias que siguen sin implementarse.
+
+La [revisión 0.11](docs/FUNCIONES-0.11.md) incorporó orientación automática de archivos, disparo con botones físicos y selfies reflejadas opcionales.
 
 La versión 0.10 añade vídeo, retrato de personas, panorama guiado, esfera de 360°, histograma/peaking/cebras y vista de color/LUT en directo. Mantiene foto JPEG/DNG, controles manuales, pilas temporales, Noche estática, horquillado HDR, JPEG adaptativo con mapa HDR, importación de fotos, LUT y perfiles por lente.
 
@@ -50,6 +52,8 @@ El APK AGC aportado es una app independiente con referencias a fotografía compu
 
 Documentación:
 
+- [Estado actual del port](docs/ESTADO-DEL-PORT-0.12.md).
+- [Fusión espectral de investigación](docs/FUSION-ESPECTRAL-0.12.md).
 - [Funciones y paquetes de 0.10](docs/FUNCIONES-0.10.md).
 - [Análisis inicial del APK](docs/AGC-PORTABILIDAD.md), histórico de 0.5.
 - [HDR adaptativo y LUT PNG](docs/HDR-Y-LUT-0.9.md).
