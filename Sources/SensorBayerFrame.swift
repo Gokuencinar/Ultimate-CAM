@@ -79,36 +79,17 @@ struct SensorBayerFrame {
             phaseMap.append(row*2+col)
         }
         let croppedPattern=phaseMap.map { pattern[$0] }
-        let step=max(1,Int(ceil(Double(max(cw,ch))/2048)))
+        let step=max(1,Int(ceil(Double(max(cw,ch))/4096)))
         let qw=cw/(2*step),qh=ch/(2*step)
         let status=CVPixelBufferLockBaseAddress(pixel,.readOnly)
         guard status==kCVReturnSuccess else { throw CameraFailure.message("No se pudo leer el plano Bayer.") }
         defer { CVPixelBufferUnlockBaseAddress(pixel,.readOnly) }
-        guard let base=CVPixelBufferGetBaseAddress(pixel),CVPixelBufferGetBytesPerRow(pixel)>=w*2 else { throw CameraFailure.message("Stride Bayer inválido.") }
         let rowBytes=CVPixelBufferGetBytesPerRow(pixel)
-        var packed=[UInt16](repeating:0,count:qw*qh*4)
-        for y in 0..<qh { for x in 0..<qw { for phase in 0..<4 {
-            // Resample each CFA plane at the physical center of the output
-            // mosaic pixel. Averaging same-phase 2x2 cells without this offset
-            // would place R/G/B at inconsistent positions after decimation.
-            let px=phase&1,py=phase>>1
-            let sourceX=Double(x*step)+Double(px*(step-1))/2+Double(step-1)/4
-            let sourceY=Double(y*step)+Double(py*(step-1))/2+Double(step-1)/4
-            let ix=Int(floor(sourceX)),iy=Int(floor(sourceY))
-            let fx=sourceX-Double(ix),fy=sourceY-Double(iy)
-            let maxX=(cw-1-px)/2,maxY=(ch-1-py)/2
-            var sum:Double=0
-            for by in 0...1 { for bx in 0...1 {
-                let sx=offsetX+min(maxX,max(0,ix+bx))*2+px
-                let sy=offsetY+min(maxY,max(0,iy+by))*2+py
-                let value=base.loadUnaligned(fromByteOffset:sy*rowBytes+sx*2,as:UInt16.self).littleEndian
-                guard value<=16383 else { throw CameraFailure.message("El plano RAW no respeta el empaquetado de 14 bits esperado.") }
-                let weightX=bx==0 ? 1-fx:fx,weightY=by==0 ? 1-fy:fy
-                sum+=Double(value)*weightX*weightY
-            } }
-            let level=black[black.count==1 ? 0:phaseMap[phase]]
-            packed[(y*qw+x)*4+phase]=Float16((sum-level)/(white-level)).bitPattern.littleEndian
-        } } }
+        guard let base=CVPixelBufferGetBaseAddress(pixel),rowBytes>=w*2,rowBytes%2==0,Int(bitPattern:base)%2==0 else { throw CameraFailure.message("Stride o alineación Bayer inválidos.") }
+        let levels=phaseMap.map { Float(black[black.count==1 ? 0:$0]) }
+        let samples=UnsafeBufferPointer(start:base.assumingMemoryBound(to:UInt16.self),count:rowBytes/2*h)
+        let packed=try BayerQuadPacking.pack(samples,rowElements:rowBytes/2,originX:offsetX,originY:offsetY,
+            cropWidth:cw,cropHeight:ch,step:step,black:levels,white:Float(white))
         let exif=props[kCGImagePropertyExifDictionary as String] as? [String:Any] ?? [:]
         let exposure=FrameExposure(seconds:(exif[kCGImagePropertyExifExposureTime as String] as? NSNumber)?.doubleValue ?? 0,
             iso:(exif[kCGImagePropertyExifISOSpeedRatings as String] as? [NSNumber])?.first?.doubleValue ?? 0)
@@ -125,17 +106,67 @@ struct SensorBayerFrame {
         guard (1...8).contains(orientation) else { throw CameraFailure.message("Orientación RAW inválida.") }
         var calibration=BayerCalibration(pattern:croppedPattern,matrix:matrix,neutral:neutral,illuminant:UInt16(illumination),orientation:orientation)
         calibration.extraColor=extra;calibration.illuminant2=extra[50722]==nil ? 0:UInt16(secondIlluminant)
-        return SensorBayerFrame(width:qw,height:qh,quads:packed.withUnsafeBufferPointer { Data(buffer:$0) },
+        return SensorBayerFrame(width:qw,height:qh,quads:packed,
             calibration:calibration,exposure:exposure,timestamp:photo.timestamp.seconds)
     }
     #endif
+}
+
+enum BayerQuadPacking {
+    static func pack(_ input:UnsafeBufferPointer<UInt16>,rowElements:Int,originX:Int,originY:Int,
+                     cropWidth:Int,cropHeight:Int,step:Int,black:[Float],white:Float) throws -> Data {
+        guard rowElements>0,originX>=0,originY>=0,cropWidth>=4,cropHeight>=4,
+              step>=1,step<=5,originX+cropWidth<=rowElements,(originY+cropHeight)<=input.count/rowElements,
+              black.count==4,black.allSatisfy({$0.isFinite && $0>=0 && $0+64<white}),white.isFinite,white<=16383 else { throw CameraFailure.message("Plano Bayer fuera de límites.") }
+        let width=cropWidth/(2*step),height=cropHeight/(2*step)
+        guard width>0,height>0,width<=2048,height<=2048,let source=input.baseAddress else { throw CameraFailure.message("Dimensiones de cuartetos fuera de rango.") }
+        let count=width*height*4,output=UnsafeMutablePointer<UInt16>.allocate(capacity:count)
+        var transferred=false
+        defer { if !transferred { output.deallocate() } }
+        let b=SIMD4<Float>(black[0],black[1],black[2],black[3])
+        let gain=SIMD4<Float>(repeating:1)/(SIMD4<Float>(repeating:white)-b)
+        @inline(__always) func normalized(_ value:UInt16,_ phase:Int) -> UInt16 { Float16((Float(UInt16(littleEndian:value))-b[phase])*gain[phase]).bitPattern.littleEndian }
+        if step==1 {
+            // Native 4032x3024: two tight loops and four explicitly typed loads.
+            // No per-pixel division, interpolation, Data indexing or extra copy.
+            for y in 0..<height {
+                let top=source.advanced(by:(originY+y*2)*rowElements+originX),bottom=top.advanced(by:rowElements)
+                let destination=output.advanced(by:y*width*4)
+                for x in 0..<width {
+                    let a=top[x*2],b=top[x*2+1],c=bottom[x*2],d=bottom[x*2+1]
+                    guard ((UInt16(littleEndian:a)|UInt16(littleEndian:b)|UInt16(littleEndian:c)|UInt16(littleEndian:d)) & 0xc000)==0 else { throw CameraFailure.message("El sensor excede el formato Bayer de 14 bits.") }
+                    let q=destination.advanced(by:x*4)
+                    q[0]=normalized(a,0);q[1]=normalized(b,1);q[2]=normalized(c,2);q[3]=normalized(d,3)
+                }
+            }
+        } else {
+            // Larger sensors: resample each CFA phase at its physical center.
+            for y in 0..<height { for x in 0..<width { for phase in 0..<4 {
+                let px=phase&1,py=phase>>1
+                let sx=Double(x*step)+Double(px*(step-1))/2+Double(step-1)/4
+                let sy=Double(y*step)+Double(py*(step-1))/2+Double(step-1)/4
+                let ix=Int(floor(sx)),iy=Int(floor(sy)),fx=Float(sx-Double(floor(sx))),fy=Float(sy-Double(floor(sy)))
+                var sum:Float=0
+                for dy in 0...1 { for dx in 0...1 {
+                    let col=originX+min((cropWidth-1-px)/2,max(0,ix+dx))*2+px
+                    let row=originY+min((cropHeight-1-py)/2,max(0,iy+dy))*2+py
+                    let value=UInt16(littleEndian:source[row*rowElements+col])
+                    guard value<=16383 else { throw CameraFailure.message("Bayer fuera de rango.") }
+                    sum+=Float(value)*(dx==0 ? 1-fx:fx)*(dy==0 ? 1-fy:fy)
+                } }
+                output[(y*width+x)*4+phase]=Float16((sum-b[phase])*gain[phase]).bitPattern.littleEndian
+            } } }
+        }
+        let data=Data(bytesNoCopy:UnsafeMutableRawPointer(output),count:count*2,deallocator:.custom { pointer,_ in pointer.assumingMemoryBound(to:UInt16.self).deallocate() })
+        transferred=true;return data
+    }
 }
 
 /// Minimal uncompressed DNG for CIRAWFilter demosaicing/color conversion of the
 /// fused mosaic. The saved user's RAW remains the original, never this working DNG.
 enum FusedDNG {
     static func encode(quads:Data,width:Int,height:Int,calibration c:BayerCalibration) throws -> Data {
-        guard width>0,height>0,width<=1024,height<=1024,quads.count==width*height*8,c.pattern.count==4,
+        guard width>0,height>0,width<=2048,height<=2048,quads.count==width*height*8,c.pattern.count==4,
               c.matrix.count==9,c.matrix.allSatisfy({$0.isFinite && abs($0)<32}),
               c.neutral.count==3,c.neutral.allSatisfy({$0.isFinite && $0>0 && $0<32}),
               c.pattern.sorted()==[0,1,1,2],(1...8).contains(c.orientation),(1...255).contains(c.illuminant) else { throw CameraFailure.message("Mosaico fusionado inválido.") }
@@ -176,16 +207,35 @@ enum FusedDNG {
             else if tag.data.count<=4 { entries+=tag.data+Data(repeating:0,count:4-tag.data.count) }
             else { entries+=u32(UInt32(base+extra.count));extra+=tag.data;if extra.count%2==1 { extra.append(0) } }
         }
-        var mosaic=[UInt16](repeating:0,count:w*h)
+        var header=Data([0x49,0x49,42,0])
+        header+=u32(8);header+=u16(UInt16(tags.count));header+=entries;header+=u32(0);header+=extra
+        guard header.count==stripOffset,stripOffset%2==0 else { throw CameraFailure.message("Cabecera DNG desalineada.") }
+        let length=header.count+w*h*2
+        let allocation=UnsafeMutableRawPointer.allocate(byteCount:length,alignment:16)
+        var transferred=false
+        defer { if !transferred { allocation.deallocate() } }
+        header.withUnsafeBytes { allocation.copyMemory(from:$0.baseAddress!,byteCount:header.count) }
+        let mosaic=allocation.advanced(by:stripOffset).assumingMemoryBound(to:UInt16.self)
         try quads.withUnsafeBytes { bytes in
-            for y in 0..<height { for x in 0..<width { for phase in 0..<4 {
-                let value=Float(Float16(bitPattern:UInt16(littleEndian:bytes.loadUnaligned(fromByteOffset:((y*width+x)*4+phase)*2,as:UInt16.self))))
+            guard let address=bytes.baseAddress,Int(bitPattern:address)%2==0 else { throw CameraFailure.message("Cuartetos RAW desalineados.") }
+            let input=UnsafeBufferPointer(start:address.assumingMemoryBound(to:UInt16.self),count:width*height*4)
+            @inline(__always) func encoded(_ bits:UInt16) throws -> UInt16 {
+                let value=Float(Float16(bitPattern:UInt16(littleEndian:bits)))
                 guard value.isFinite else { throw CameraFailure.message("La fusión RAW devolvió un valor no finito.") }
-                mosaic[(y*2+(phase>>1))*w+x*2+(phase&1)]=UInt16(min(65535,max(0,(value*57343+4096).rounded()))).littleEndian
-            } } }
+                let sample=min(Float(65535),max(0,(value*57343+4096).rounded()))
+                return UInt16(sample).littleEndian
+            }
+            for y in 0..<height {
+                let top=mosaic.advanced(by:y*2*w),bottom=top.advanced(by:w)
+                let row=input.baseAddress!.advanced(by:y*width*4)
+                for x in 0..<width {
+                    let q=row.advanced(by:x*4),pixel=x*2
+                    top[pixel]=try encoded(q[0]);top[pixel+1]=try encoded(q[1])
+                    bottom[pixel]=try encoded(q[2]);bottom[pixel+1]=try encoded(q[3])
+                }
+            }
         }
-        var result=Data([0x49,0x49,42,0])
-        result+=u32(8);result+=u16(UInt16(tags.count));result+=entries;result+=u32(0);result+=extra
-        result+=mosaic.withUnsafeBufferPointer { Data(buffer:$0) };return result
+        let result=Data(bytesNoCopy:allocation,count:length,deallocator:.custom { pointer,_ in pointer.deallocate() })
+        transferred=true;return result
     }
 }

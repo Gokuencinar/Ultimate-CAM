@@ -548,7 +548,7 @@ struct CameraView: View {
                         if value { options.nightRAW=true;options.nightSpectralFusion=false }
                     })).disabled(!camera.supportsRAW && !options.nightMetalRAW).accessibilityIdentifier("night.metalRAW")
                     if options.nightMetalRAW {
-                        Text("Experimental: Bayer de 14 bits, alineación por teselas y tono en GPU; salida hasta 2048 px. El DNG guardado sigue siendo el original. Requiere calibración DNG compatible.").font(.footnote).foregroundStyle(.secondary)
+                        Text("Experimental: Bayer de 14 bits, alineación por teselas y tono en GPU; salida hasta 4096 px. El DNG guardado sigue siendo el original. Requiere calibración DNG compatible.").font(.footnote).foregroundStyle(.secondary)
                     }
                     Picker("Presupuesto de integración", selection: $options.nightBudget) {
                         ForEach([2.0,4,8,16], id: \.self) { Text("\(Int($0)) segundos").tag($0) }
@@ -573,7 +573,7 @@ struct CameraView: View {
             if options.hdrBracketing {
                 Section("HDR por horquillado") {
                     Toggle("HDR Bayer con Metal",isOn:$options.hdrMetalRAW).disabled(!camera.supportsRAW && !options.hdrMetalRAW).accessibilityIdentifier("hdr.metalRAW")
-                    if options.hdrMetalRAW { Text("Experimental: fusiona RAW lineal con rechazo de saturación y referencia de exposición corta. Salida hasta 2048 px; no utiliza el motor HDR+ de Google.").font(.footnote).foregroundStyle(.secondary) }
+                    if options.hdrMetalRAW { Text("Experimental: fusiona RAW lineal con rechazo de saturación y referencia de exposición corta. Salida hasta 4096 px; no utiliza el motor HDR+ de Google.").font(.footnote).foregroundStyle(.secondary) }
                     Picker("Separación respecto a la referencia",selection:$options.hdrSpan) { Text("±1 EV").tag(1.0);Text("±2 EV").tag(2.0);Text("±3 EV").tag(3.0) }
                     Text("Tres exposiciones distintas; JPEG por defecto o Bayer con Metal. Puedes conservar el rango ampliado activando el mapa HDR en Color · Salida JPEG. Es experimental; no es el motor HDR+ de Google.").font(.footnote).foregroundStyle(.secondary)
                 }
