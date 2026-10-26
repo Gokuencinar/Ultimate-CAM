@@ -383,8 +383,6 @@ struct CameraView: View {
                     .disabled(!controlsEnabled || !camera.ready || !camera.lenses.contains(.front))
             }
             HStack(spacing:4) {
-                Button { showControls = true } label: { Image(systemName:"gearshape").font(.system(size:19)).frame(width:40,height:44) }
-                    .accessibilityLabel("Ajustes de cámara").accessibilityIdentifier("camera.settings")
                 ScrollViewReader { proxy in ScrollView(.horizontal,showsIndicators:false) {
                     HStack(spacing:4) {
                         modeButton("Noche",selected:options.nightStatic) { applyPreset("Noche estática") }.id("night")
@@ -404,7 +402,8 @@ struct CameraView: View {
                 }.accessibilityIdentifier("camera.modes")
                     .onChange(of:selectedPhotoMode) { _,value in withAnimation(.easeOut(duration:0.2)) { proxy.scrollTo(value,anchor:.center) } }
                 }
-                Button { panel = .color; showControls = true } label: { Image(systemName:"slider.horizontal.3").font(.system(size:19)).frame(width:40,height:44) }
+                Button { showControls = true } label: { Image(systemName:"gearshape").font(.system(size:19)).frame(width:44,height:44) }
+                    .accessibilityIdentifier("camera.settings")
                     .accessibilityLabel("Ajustes de imagen")
             }.disabled(!controlsEnabled)
             if camera.busy || !camera.ready {
