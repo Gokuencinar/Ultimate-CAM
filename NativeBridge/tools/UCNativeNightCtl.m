@@ -2,10 +2,14 @@
 #import <notify.h>
 #import <time.h>
 #import "../UCNativeNightProtocol.h"
+#import "../UCNotifyTokens.h"
 int main(int argc,char **argv) {
     @autoreleasepool {
-        int intent=0,status=0,ack=0,control=0,resolved=0,confirmed=0,previous=0;
-        if (notify_register_check(UCN_INTENT_NAME,&intent)!=NOTIFY_STATUS_OK || notify_register_check(UCN_STATUS_NAME,&status)!=NOTIFY_STATUS_OK || notify_register_check(UCN_ACK_NAME,&ack)!=NOTIFY_STATUS_OK || notify_register_check(UCN_CONTROL_NAME,&control)!=NOTIFY_STATUS_OK || notify_register_check(UCN_RESOLVED_NAME,&resolved)!=NOTIFY_STATUS_OK || notify_register_check(UCN_CONFIRMED_NAME,&confirmed)!=NOTIFY_STATUS_OK || notify_register_check(UCN_PREVIOUS_NAME,&previous)!=NOTIFY_STATUS_OK) return 2;
+        UCNNotifyTokens tokens=UCN_TOKEN_INITIALIZER;size_t failed=0;
+        uint32_t registration=UCNRegisterTokens(&tokens,notify_register_check,notify_cancel,&failed);
+        if (registration!=NOTIFY_STATUS_OK) { fprintf(stderr,"notify registration failed: %s code=%u\n",UCNTokenNames[failed],registration);return 2; }
+        @try {
+        int intent=tokens.values[0],status=tokens.values[1],ack=tokens.values[2],control=tokens.values[3],resolved=tokens.values[4],confirmed=tokens.values[5],previous=tokens.values[6];
         uint64_t now=(uint64_t)time(NULL);
         NSString *action=argc>1 ? @(argv[1]) : @"status";
         if ([action isEqualToString:@"arm-max"]) {
@@ -18,9 +22,9 @@ int main(int argc,char **argv) {
         notify_get_state(intent,&request); notify_get_state(status,&code); notify_get_state(ack,&acknowledgement);
         notify_get_state(control,&nativeControl);notify_get_state(resolved,&nativeResolved);
         notify_get_state(confirmed,&confirmedRequest);notify_get_state(previous,&previousControl);
-        NSData *data=[NSJSONSerialization dataWithJSONObject:@{@"request":@(request),@"armed":@(UCNIntentValid(request,now)),@"status":@(code),@"ack":@(acknowledgement),@"native_control":@(nativeControl),@"native_resolved":@(nativeResolved),@"confirmed_request":@(confirmedRequest),@"previous_control":@(previousControl),@"capture_requests":@0} options:NSJSONWritingSortedKeys error:NULL];
+        NSData *data=[NSJSONSerialization dataWithJSONObject:@{@"request":@(request),@"armed":@(UCNIntentValid(request,now)),@"status":@(code),@"status_reason":@(UCNStatusName(code)),@"ack":@(acknowledgement),@"native_control":@(nativeControl),@"native_resolved":@(nativeResolved),@"confirmed_request":@(confirmedRequest),@"previous_control":@(previousControl),@"capture_requests":@0} options:NSJSONWritingSortedKeys error:NULL];
         fwrite(data.bytes,1,data.length,stdout); fputc('\n',stdout);
-        notify_cancel(intent);notify_cancel(status);notify_cancel(ack);notify_cancel(control);notify_cancel(resolved);notify_cancel(confirmed);notify_cancel(previous);
+        } @finally { UCNCancelTokens(&tokens,notify_cancel); }
     }
     return 0;
 }

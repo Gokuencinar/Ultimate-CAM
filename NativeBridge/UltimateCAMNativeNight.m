@@ -7,6 +7,7 @@
 #import <sys/sysctl.h>
 #import <time.h>
 #import "UCNativeNightProtocol.h"
+#import "UCNotifyTokens.h"
 
 typedef void (*HookMessage)(Class,SEL,IMP,IMP *);
 typedef void (*ViewAppeared)(id,SEL,BOOL);
@@ -15,7 +16,14 @@ typedef long long (*ResolveMode)(id,SEL,long long,long long,long long,BOOL);
 static ViewAppeared originalAppeared;
 static UserChanged originalChanged;
 static ResolveMode originalResolve;
-static int intentToken, statusToken, ackToken, controlToken, resolvedToken, confirmedToken, previousToken;
+static UCNNotifyTokens notificationTokens=UCN_TOKEN_INITIALIZER;
+#define intentToken notificationTokens.values[0]
+#define statusToken notificationTokens.values[1]
+#define ackToken notificationTokens.values[2]
+#define controlToken notificationTokens.values[3]
+#define resolvedToken notificationTokens.values[4]
+#define confirmedToken notificationTokens.values[5]
+#define previousToken notificationTokens.values[6]
 static __weak id currentViewfinder;
 static uint64_t appliedRequest;
 static NSUInteger previousControl;
@@ -35,11 +43,14 @@ static void Status(uint64_t request, enum UCNStatus status) {
 static BOOL TargetMatches(void) {
     char model[64]={0},build[64]={0}; size_t m=sizeof(model),b=sizeof(build);
     return sysctlbyname("hw.machine",model,&m,NULL,0)==0 && sysctlbyname("kern.osversion",build,&b,NULL,0)==0 &&
-        strcmp(model,"iPhone12,3")==0 && strcmp(build,"22H31")==0;
+        strcmp(model,UCN_TESTED_MODEL)==0 && strcmp(build,UCN_TESTED_BUILD)==0;
 }
 static BOOL Signature(Class cls, const char *name, const char *encoding) {
     Method method=class_getInstanceMethod(cls,sel_registerName(name));
-    return method && strcmp(method_getTypeEncoding(method),encoding)==0;
+    const char *actual=method ? method_getTypeEncoding(method):NULL;
+    BOOL valid=actual && strcmp(actual,encoding)==0;
+    if (!valid) NSLog(@"UltimateCAM NativeNight ABI selector=%s actual=%s expected=%s",name,actual ?: "<missing>",encoding);
+    return valid;
 }
 static void Disarm(BOOL restore) {
     uint64_t request=appliedRequest;
@@ -106,20 +117,30 @@ static void IntentChanged(CFNotificationCenterRef center,void *observer,CFString
 __attribute__((constructor)) static void Install(void) {
     @autoreleasepool {
         if (![NSBundle.mainBundle.bundleIdentifier isEqualToString:@"com.apple.camera"]) return;
-        if (notify_register_check(UCN_INTENT_NAME,&intentToken)!=NOTIFY_STATUS_OK ||
-            notify_register_check(UCN_STATUS_NAME,&statusToken)!=NOTIFY_STATUS_OK ||
-            notify_register_check(UCN_ACK_NAME,&ackToken)!=NOTIFY_STATUS_OK ||
-            notify_register_check(UCN_CONTROL_NAME,&controlToken)!=NOTIFY_STATUS_OK ||
-            notify_register_check(UCN_RESOLVED_NAME,&resolvedToken)!=NOTIFY_STATUS_OK ||
-            notify_register_check(UCN_CONFIRMED_NAME,&confirmedToken)!=NOTIFY_STATUS_OK ||
-            notify_register_check(UCN_PREVIOUS_NAME,&previousToken)!=NOTIFY_STATUS_OK) return;
-        if (!TargetMatches()) { Status(0,UCNStatusUnsupported); return; }
+        size_t failed=0;
+        uint32_t registration=UCNRegisterTokens(&notificationTokens,notify_register_check,notify_cancel,&failed);
+        if (registration!=NOTIFY_STATUS_OK) {
+            NSLog(@"UltimateCAM NativeNight notify registration failed name=%s code=%u; prior tokens cancelled",UCNTokenNames[failed],registration);
+            return;
+        }
         Class cls=objc_lookUpClass("CAMViewfinderViewController");
-        if (!cls || !Signature(cls,"viewDidAppear:","v20@0:8B16") ||
-            !Signature(cls,"_handleUserChangedToNightMode:","v24@0:8Q16") ||
-            !Signature(cls,"_lowLightModeForMode:captureMode:device:isBurst:","q44@0:8q16q24q32B40") ||
-            !Signature(cls,"_desiredLowLightControlMode","Q16@0:8") ||
-            !Signature(cls,"_resolvedLowLightMode","q16@0:8")) { Status(0,UCNStatusABIRejected); return; }
+        const char *selectors[]={"viewDidAppear:","_handleUserChangedToNightMode:","_lowLightModeForMode:captureMode:device:isBurst:","_desiredLowLightControlMode","_resolvedLowLightMode"};
+        const char *encodings[]={"v20@0:8B16","v24@0:8Q16","q44@0:8q16q24q32B40","Q16@0:8","q16@0:8"};
+        BOOL abi=cls!=Nil;
+        for (size_t i=0;i<sizeof(selectors)/sizeof(selectors[0]);++i) {
+            if (!Signature(cls,selectors[i],encodings[i])) abi=NO;
+        }
+        if (!TargetMatches()) {
+            char model[64]={0},build[64]={0};size_t m=sizeof(model),b=sizeof(build);
+            int modelError=sysctlbyname("hw.machine",model,&m,NULL,0),buildError=sysctlbyname("kern.osversion",build,&b,NULL,0);
+            model[sizeof(model)-1]=0;build[sizeof(build)-1]=0;
+            enum UCNStatus reason=modelError || buildError ? UCNStatusUnsupported:UCNTargetPolicy(model,build,abi);
+            // Refuse an unreviewed build even when signatures match, but report
+            // both facts exactly so a future update need not guess the cause.
+            NSLog(@"UltimateCAM NativeNight target rejected model=%s build=%s expected=%s/%s ABI=%s reason=%s sysctl=%d/%d",model,build,UCN_TESTED_MODEL,UCN_TESTED_BUILD,abi ? "identical":"mismatch",UCNStatusName(reason),modelError,buildError);
+            Status(0,reason);return;
+        }
+        if (!abi) { Status(0,UCNStatusABIRejected);return; }
         HookMessage hook=(HookMessage)dlsym(RTLD_DEFAULT,"MSHookMessageEx");
         if (!hook) {
             const char *path="/var/jb/usr/lib/libsubstrate.dylib";
