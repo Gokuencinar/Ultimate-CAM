@@ -404,7 +404,7 @@ struct CameraView: View {
                 }
                 Button { showControls = true } label: { Image(systemName:"gearshape").font(.system(size:19)).frame(width:44,height:44) }
                     .accessibilityIdentifier("camera.settings")
-                    .accessibilityLabel("Ajustes de imagen")
+                    .accessibilityLabel("Ajustes de cámara")
             }.disabled(!controlsEnabled)
             if camera.busy || !camera.ready {
             Text(camera.status).font(.system(size: 12, weight: .medium))
@@ -517,6 +517,11 @@ struct CameraView: View {
                 Text("Calidad iOS pide el mejor procesado disponible al sistema. No activa el modo Noche de Cámara. Con RAW, bloqueo AE, exposición manual o pilas se usa rapidez para respetar cada exposición.")
                     .font(.footnote).foregroundStyle(.secondary)
                 Toggle("RAW + JPEG", isOn: $rawEnabled).disabled(!camera.supportsRAW || stack)
+                Toggle("ZSL con fusión del visor",isOn:$options.zeroShutterLagFusion)
+                    .disabled(rawEnabled || stack || options.portraitAmount>0).accessibilityIdentifier("capture.zsl")
+                if options.zeroShutterLagFusion {
+                    Text("Fusiona hasta 8 fotogramas anteriores al disparo, a un máximo de 1280 px. Es RGB del visor, no una ráfaga RAW ni HDR de exposición múltiple. Si el búfer no está listo se toma una foto normal.").font(.footnote).foregroundStyle(.secondary)
+                }
                 if !camera.supportsRAW { Text("RAW no disponible en la cámara actual.").font(.footnote).foregroundStyle(.secondary) }
                 if options.nightStatic {
                     Text(camera.supportsRAW ? "Noche usa JPEG de cámara por defecto. La fusión DNG experimental se activa en Procesado y conserva el DNG de referencia." : "Esta lente usa la alternativa JPEG nocturna; no dispone de RAW.")
@@ -535,6 +540,14 @@ struct CameraView: View {
             }
             if options.nightStatic {
                 Section("Captura nocturna") {
+                    Toggle("Adaptar obturación al movimiento",isOn:$options.nightMotionMetering)
+                    Toggle("Fusión Bayer con Metal",isOn:Binding(get:{options.nightMetalRAW},set:{ value in
+                        options.nightMetalRAW=value
+                        if value { options.nightRAW=true;options.nightSpectralFusion=false }
+                    })).disabled(!camera.supportsRAW).accessibilityIdentifier("night.metalRAW")
+                    if options.nightMetalRAW {
+                        Text("Experimental: Bayer de 14 bits, alineación por teselas y tono en GPU; salida hasta 2048 px. El DNG guardado sigue siendo el original. Requiere calibración DNG compatible.").font(.footnote).foregroundStyle(.secondary)
+                    }
                     Picker("Presupuesto de integración", selection: $options.nightBudget) {
                         ForEach([2.0,4,8,16], id: \.self) { Text("\(Int($0)) segundos").tag($0) }
                     }.accessibilityIdentifier("night.budget")
@@ -543,7 +556,7 @@ struct CameraView: View {
                         Text("1/2 s").tag(0.5); Text("1 s").tag(1.0)
                     }.accessibilityIdentifier("night.shutterLimit")
                     Toggle("Fusión espectral experimental",isOn:Binding(get:{options.nightSpectralFusion},set:{ value in
-                        options.nightSpectralFusion=value;if value { options.rejectMotion=true }
+                        options.nightSpectralFusion=value;if value { options.rejectMotion=true;options.nightMetalRAW=false }
                     })).accessibilityIdentifier("night.spectralFusion")
                     if options.nightSpectralFusion {
                         optionSlider("Mezcla espectral",value:$options.nightSpectralStrength,range:0.25...4)
@@ -674,7 +687,7 @@ struct CameraView: View {
             }
             if options.nightStatic && camera.supportsRAW {
                 Section("RAW nocturno experimental") {
-                    Toggle("Fusionar DNG", isOn: $options.nightRAW)
+                    Toggle("Fusionar DNG", isOn: $options.nightRAW).disabled(options.nightMetalRAW)
                         .accessibilityIdentifier("night-raw-toggle")
                     Text("Más lento y con color aún sin calibrar en sombras profundas. Desactivado conserva el color del JPEG de cámara. El DNG guardado es una referencia original, no un RAW fusionado.")
                         .font(.footnote).foregroundStyle(.secondary)

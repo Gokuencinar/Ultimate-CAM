@@ -12,6 +12,9 @@ enum PhotoAspect: String, Codable, CaseIterable, Identifiable {
 }
 
 struct ProcessingOptions: Codable, Equatable {
+    var zeroShutterLagFusion:Bool = false
+    var nightMetalRAW:Bool = false
+    var nightMotionMetering:Bool = true
     var singlePhotoQuality: SinglePhotoQuality = .quality
     var nightBudget: Double = 8
     var nightShutterLimit: Double = 1
@@ -58,6 +61,7 @@ struct ProcessingOptions: Codable, Equatable {
     }
 
     func validated() throws -> ProcessingOptions {
+        guard !(nightStatic && nightMetalRAW && (!nightRAW || nightSpectralFusion)) else { throw CameraFailure.message("Metal Bayer necesita RAW y no se combina con la fusión espectral RGB.") }
         guard nightSpectralStrength.isFinite,(0.25...4).contains(nightSpectralStrength),
               !(nightStatic && nightSpectralFusion && !rejectMotion) else { throw CameraFailure.message("La fusión espectral necesita rechazo de movimiento y una intensidad entre 0,25 y 4.") }
         guard nightBudget.isFinite, (1...16).contains(nightBudget), nightShutterLimit.isFinite,
@@ -94,11 +98,14 @@ struct ProcessingOptions: Codable, Equatable {
 // not silently clamped into a different recipe.
 extension ProcessingOptions {
     enum CodingKeys: String, CodingKey {
-        case singlePhotoQuality, nightBudget, nightShutterLimit, nightWeightedFusion, nightSpectralFusion, nightSpectralStrength, hdrBracketing, hdrSpan, color, nightStatic, nightRAW, chooseSharpestReference, rejectMotion, maximumDimension, noiseReduction, sharpening, liftShadows, localAlignment, adaptiveMotionRejection, motionSigma, chromaDenoise, localContrast, fineDetail, contrast, saturation, vibrance, gamma, postExposure, highlightCompression, sharpenRadius, vignette, jpegQuality, outputColor, preserveHDR, portraitAmount, aspect, lutID, lutIntensity
+        case zeroShutterLagFusion, nightMetalRAW, nightMotionMetering, singlePhotoQuality, nightBudget, nightShutterLimit, nightWeightedFusion, nightSpectralFusion, nightSpectralStrength, hdrBracketing, hdrSpan, color, nightStatic, nightRAW, chooseSharpestReference, rejectMotion, maximumDimension, noiseReduction, sharpening, liftShadows, localAlignment, adaptiveMotionRejection, motionSigma, chromaDenoise, localContrast, fineDetail, contrast, saturation, vibrance, gamma, postExposure, highlightCompression, sharpenRadius, vignette, jpegQuality, outputColor, preserveHDR, portraitAmount, aspect, lutID, lutIntensity
     }
     init(from decoder: Decoder) throws {
         self.init()
         let c = try decoder.container(keyedBy: CodingKeys.self)
+        zeroShutterLagFusion = try c.decodeIfPresent(Bool.self,forKey:.zeroShutterLagFusion) ?? zeroShutterLagFusion
+        nightMetalRAW = try c.decodeIfPresent(Bool.self,forKey:.nightMetalRAW) ?? nightMetalRAW
+        nightMotionMetering = try c.decodeIfPresent(Bool.self,forKey:.nightMotionMetering) ?? nightMotionMetering
         singlePhotoQuality = try c.decodeIfPresent(SinglePhotoQuality.self, forKey: .singlePhotoQuality) ?? singlePhotoQuality
         nightBudget = try c.decodeIfPresent(Double.self, forKey: .nightBudget) ?? nightBudget
         nightShutterLimit = try c.decodeIfPresent(Double.self, forKey: .nightShutterLimit) ?? nightShutterLimit

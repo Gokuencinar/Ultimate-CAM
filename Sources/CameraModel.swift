@@ -92,6 +92,8 @@ final class CameraModel: NSObject, ObservableObject, AVCapturePhotoCaptureDelega
     private var rawRequested = false
     private var rawData: Data?
     private var nightRawFrames = [Data]()
+    private var sensorFrames=[SensorBayerFrame]()
+    private var temporalFeed=false
     private var hdrPlan: [FrameExposure] = []
     private var hdrExposures: [FrameExposure] = []
     private var lastHDRTimestamp: Double?
@@ -162,7 +164,7 @@ final class CameraModel: NSObject, ObservableObject, AVCapturePhotoCaptureDelega
             let rawAvailable = !output.availableRawPhotoPixelFormatTypes.isEmpty
             publish { self.supportsRAW = rawAvailable }
             let available = self.session.isRunning && !self.interrupted
-            previewAnalyzer.setActive(available && previewTools.enabled)
+            previewAnalyzer.setActive(available && (previewTools.enabled || temporalFeed))
             CaptureTrace.record("session.ready", ["running": available, "inputs": session.inputs.count, "outputs": session.outputs.count])
             publish { self.ready = available }
             message("Lista. La pila es experimental y requiere una escena inmóvil.")
@@ -351,6 +353,8 @@ final class CameraModel: NSObject, ObservableObject, AVCapturePhotoCaptureDelega
         let focusAvailable = device.isLockingFocusWithCustomLensPositionSupported
         let zoom = max(1, min(8, Double(device.maxAvailableVideoZoomFactor)))
         output.maxPhotoQualityPrioritization = .quality
+        if output.isZeroShutterLagSupported { output.isZeroShutterLagEnabled=true }
+        previewAnalyzer.history.reset();previewAnalyzer.motion.reset()
         if let dimensions = device.activeFormat.supportedMaxPhotoDimensions.max(by: {
             Int64($0.width) * Int64($0.height) < Int64($1.width) * Int64($1.height)
         }) { output.maxPhotoDimensions = dimensions }
@@ -390,16 +394,17 @@ final class CameraModel: NSObject, ObservableObject, AVCapturePhotoCaptureDelega
 
     func setPreviewTools(_ tools:PreviewAnalysisOptions,processing:ProcessingOptions) {
         queue.async {
-            let graphChanged=self.session.outputs.contains(where:{$0===self.previewAnalyzer.output}) != tools.enabled
+            self.temporalFeed=processing.zeroShutterLagFusion || (processing.nightStatic && processing.nightMotionMetering)
+            let graphChanged=self.session.outputs.contains(where:{$0===self.previewAnalyzer.output}) != (tools.enabled || self.temporalFeed)
             self.previewTools=tools;self.previewAnalyzer.configure(tools,processing:processing)
             guard self.configured,!self.inFlight else { return }
             if graphChanged { self.session.beginConfiguration();self.configurePreviewOutput();self.session.commitConfiguration() }
-            self.previewAnalyzer.setActive(self.active && tools.enabled)
+            self.previewAnalyzer.setActive(self.active && (tools.enabled || self.temporalFeed))
         }
     }
     private func configurePreviewOutput() {
         let data=previewAnalyzer.output
-        if previewTools.enabled {
+        if previewTools.enabled || temporalFeed {
             if !session.outputs.contains(where:{$0===data}),session.canAddOutput(data) { session.addOutput(data) }
             if let connection=data.connection(with:.video) {
                 if connection.isVideoRotationAngleSupported(90) { connection.videoRotationAngle=90 }
@@ -409,7 +414,7 @@ final class CameraModel: NSObject, ObservableObject, AVCapturePhotoCaptureDelega
                 }
             }
         } else if session.outputs.contains(where:{$0===data}) { session.removeOutput(data) }
-        previewAnalyzer.setActive(active && previewTools.enabled)
+        previewAnalyzer.setActive(active && (previewTools.enabled || temporalFeed))
     }
 
     func setBias(_ bias: Float) {
@@ -596,6 +601,7 @@ final class CameraModel: NSObject, ObservableObject, AVCapturePhotoCaptureDelega
     }
 
     func capture(stack: Bool, count: Int = 3, raw: Bool = false, flash: CameraFlash = .off, options: ProcessingOptions = ProcessingOptions(),mirrorSelfie:Bool=false) {
+        let shutterTime=ProcessInfo.processInfo.systemUptime
         queue.async {
             guard self.active, self.session.isRunning, !self.interrupted, !self.inFlight, !self.captureRecoveryRequired,
                   let device = self.input?.device else { return }
@@ -617,7 +623,7 @@ final class CameraModel: NSObject, ObservableObject, AVCapturePhotoCaptureDelega
             self.inFlight = true
             self.transaction = UUID()
             self.frames = []
-            self.nightRawFrames = []
+            self.nightRawFrames = [];self.sensorFrames=[]
             self.hdrPlan = []; self.hdrExposures = []; self.lastHDRTimestamp = nil
             self.nightFrameSeconds = 0
             self.lastNightTimestamp = nil
@@ -625,6 +631,10 @@ final class CameraModel: NSObject, ObservableObject, AVCapturePhotoCaptureDelega
             self.processingOptions = options
             self.rawRequested = (raw || (night && options.nightRAW)) && !self.output.availableRawPhotoPixelFormatTypes.isEmpty
             self.rawData = nil
+            let preRoll=options.zeroShutterLagFusion && !burst && !raw && flash == .off && options.portraitAmount==0
+                && device.exposureMode != .custom && device.exposureMode != .locked ? self.previewAnalyzer.history.snapshot(at:shutterTime).map(\.value):[]
+            let motion=options.nightMotionMetering ? self.previewAnalyzer.motion.estimate(at:shutterTime):nil
+            self.previewAnalyzer.setActive(false)
             self.publish { self.busy = true }
             do {
                 // Snapshot once for the whole transaction. A turn during a
@@ -638,6 +648,11 @@ final class CameraModel: NSObject, ObservableObject, AVCapturePhotoCaptureDelega
                 let mirror=mirrorSelfie && device.position == .front
                 if connection.isVideoMirroringSupported { connection.automaticallyAdjustsVideoMirroring=false;connection.isVideoMirrored=mirror }
                 else if mirror { throw CameraFailure.message("Esta cámara no admite guardar la selfie reflejada.") }
+                if preRoll.count>=3 {
+                    self.processZSL(preRoll,options:options,angle:angle,unmirror:device.position == .front && !mirror)
+                    return
+                }
+                if options.nightMetalRAW && night && !self.rawRequested { throw CameraFailure.message("La lente no ofrece Bayer RAW para Metal.") }
                 if burst {
                     guard !device.isAdjustingExposure, !device.isAdjustingWhiteBalance,
                           !device.isAdjustingFocus else {
@@ -653,7 +668,7 @@ final class CameraModel: NSObject, ObservableObject, AVCapturePhotoCaptureDelega
                         isoRange: Double(device.activeFormat.minISO)...Double(device.activeFormat.maxISO),
                         durationRange: device.activeFormat.minExposureDuration.seconds...device.activeFormat.maxExposureDuration.seconds,
                         targetOffset: Double(device.exposureTargetOffset), budget: options.nightBudget,
-                        shutterLimit: options.nightShutterLimit) : nil
+                        shutterLimit: min(options.nightShutterLimit,motion?.shutterLimit ?? 1)) : nil
                     let bracket = hdr ? try HDRCapturePlan.make(iso:Double(device.iso),seconds:device.exposureDuration.seconds,span:options.hdrSpan,
                         isoRange:Double(device.activeFormat.minISO)...Double(device.activeFormat.maxISO),
                         durationRange:device.activeFormat.minExposureDuration.seconds...device.activeFormat.maxExposureDuration.seconds) : nil
@@ -749,7 +764,7 @@ final class CameraModel: NSObject, ObservableObject, AVCapturePhotoCaptureDelega
         }
         message("Capturando \(frames.count + 1)/\(desiredCount). Mantén la cámara inmóvil.")
         let settings: AVCapturePhotoSettings
-        if rawRequested, let rawFormat = output.availableRawPhotoPixelFormatTypes.first {
+        if rawRequested, let rawFormat = output.availableRawPhotoPixelFormatTypes.first(where: { AVCapturePhotoOutput.isBayerRAWPixelFormat($0) }) ?? output.availableRawPhotoPixelFormatTypes.first {
             settings = AVCapturePhotoSettings(rawPixelFormatType: rawFormat,
                 processedFormat: [AVVideoCodecKey: AVVideoCodecType.jpeg])
         } else {
@@ -814,6 +829,10 @@ final class CameraModel: NSObject, ObservableObject, AVCapturePhotoCaptureDelega
                         }
                         if timestamp >= 0 { self.lastNightTimestamp = timestamp }
                     }
+                    if self.processingOptions.nightStatic && self.processingOptions.nightMetalRAW {
+                        do { self.sensorFrames.append(try SensorBayerFrame.capture(photo,dng:data)) }
+                        catch { self.finishFailure(error);return }
+                    }
                     self.rawData = data
                 } else {
                     if self.processingOptions.hdrBracketing {
@@ -845,7 +864,7 @@ final class CameraModel: NSObject, ObservableObject, AVCapturePhotoCaptureDelega
                 return
             }
             if self.processingOptions.nightStatic, let raw = self.rawData {
-                self.nightRawFrames.append(raw)
+                if !self.processingOptions.nightMetalRAW || self.nightRawFrames.isEmpty { self.nightRawFrames.append(raw) }
                 self.rawData = nil
             }
             if self.frames.count < self.desiredCount {
@@ -868,6 +887,7 @@ final class CameraModel: NSObject, ObservableObject, AVCapturePhotoCaptureDelega
             let options = self.processingOptions
             let raw = self.rawData
             let rawBurst: [Data]? = self.nightRawFrames.isEmpty ? nil : self.nightRawFrames
+            let sensorBurst=self.sensorFrames;self.sensorFrames=[]
             self.nightRawFrames = []
             self.rawData = nil
             self.frames = []
@@ -899,7 +919,10 @@ final class CameraModel: NSObject, ObservableObject, AVCapturePhotoCaptureDelega
                             }
                         }
                         var result: CaptureResult
-                        if options.hdrBracketing {
+                        if options.nightStatic && options.nightMetalRAW {
+                            guard let jpeg=captured.first,let dng=rawBurst?.first,sensorBurst.count==captured.count else { throw CameraFailure.message("La pila Bayer está incompleta.") }
+                            result=try MetalBurstProcessor().processRAW(sensorBurst,referenceJPEG:jpeg,originalDNG:dng,options:options,cancellation:cancellation,progress:progress)
+                        } else if options.hdrBracketing {
                             result = try HDRProcessor().process(captured,exposures:bracketExposures,options:options,cancellation:cancellation,progress:progress)
                         } else {
                             result = try BurstProcessor().process(captured,options:options,rawFrames:rawBurst,cancellation:cancellation,progress:progress)
@@ -950,7 +973,50 @@ final class CameraModel: NSObject, ObservableObject, AVCapturePhotoCaptureDelega
                             self.status = "Captura preparada. Revisa el resultado antes de guardarlo."
                         }
                         self.inFlight = false
+                        self.previewAnalyzer.setActive(self.active && (self.previewTools.enabled || self.temporalFeed))
                     case .failure(let error): self.finishFailure(error)
+                    }
+                }
+            }
+        }
+    }
+
+    private func processZSL(_ images:[CGImage],options:ProcessingOptions,angle:Double,unmirror:Bool) {
+        let token=transaction,cancellation=ProcessingCancellation()
+        processingCancellation=cancellation;captureStage="processing"
+        publish { self.processingInProgress=true;self.status="Fusionando fotogramas previos…" }
+        queue.asyncAfter(deadline:.now()+90) {
+            guard self.inFlight,self.transaction==token,self.captureStage=="processing" else { return }
+            cancellation.cancel("La fusión ZSL superó el tiempo de procesado.")
+            self.queue.asyncAfter(deadline:.now()+10) {
+                guard self.inFlight,self.transaction==token,self.captureStage=="processing" else { return }
+                self.captureRecoveryRequired=true;self.publish { self.ready=false }
+                self.finishFailure(CameraFailure.message("La GPU no respondió a la cancelación. Reabre la app; no se ha repetido la captura."))
+            }
+        }
+        processing.async {
+            let result=Result { try autoreleasepool {
+                var result=try MetalBurstProcessor().processZSL(images,options:options,captureAngle:angle,unmirror:unmirror,cancellation:cancellation)
+                result.statistics=ImageStatistics.measure(result.jpeg);return result
+            } }
+            var primary:UIImage?,reference:UIImage?
+            if case let .success(value)=result {
+                primary=PreviewDecoder.image(value.jpeg).map { UIImage(cgImage:$0) }
+                reference=PreviewDecoder.image(value.reference).map { UIImage(cgImage:$0) }
+            }
+            self.queue.async {
+                guard self.inFlight,self.transaction==token else { return }
+                self.processingCancellation=nil
+                switch result {
+                case let .failure(error):self.finishFailure(error)
+                case let .success(value):
+                    self.result=value;self.savedKinds=[];self.exportedResult=nil;self.inFlight=false;self.captureStage="idle"
+                    self.previewAnalyzer.setActive(self.active && (self.previewTools.enabled || self.temporalFeed))
+                    self.publish {
+                        self.preview=primary;self.referencePreview=reference;self.processingInProgress=false
+                        self.resultDetails=value.details;self.resultStatistics=value.statistics;self.hasRAWResult=false
+                        self.hasSeparateReference=true;self.savedResult=false;self.savedJPEGOnly=false;self.busy=false
+                        self.status="Captura ZSL preparada. Revisa antes de guardar."
                     }
                 }
             }
@@ -997,7 +1063,8 @@ final class CameraModel: NSObject, ObservableObject, AVCapturePhotoCaptureDelega
         restoreDevice()
         processingCancellation?.cancel(); processingCancellation = nil
         frames = []
-        nightRawFrames = []
+        nightRawFrames = [];sensorFrames=[]
+        previewAnalyzer.setActive(active && !captureRecoveryRequired && (previewTools.enabled || temporalFeed))
         hdrPlan = []; hdrExposures = []; lastHDRTimestamp = nil
         rawData = nil
         inFlight = false

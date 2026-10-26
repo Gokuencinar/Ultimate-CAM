@@ -11,6 +11,12 @@ struct PreviewAnalysisFrame {
 
 final class PreviewAnalysisController:NSObject,AVCaptureVideoDataOutputSampleBufferDelegate {
     let output=AVCaptureVideoDataOutput()
+    let history=TemporalFrameBuffer<CGImage>()
+    let motion=PreviewMotionMeter()
+    private var previousBufferTime=0.0
+    private var buffering=false
+    private var motionEnabled=false
+    private var lastPTS=Double.nan
     private let queue=DispatchQueue(label:"com.gokuencinar.ultimatecam.preview-analysis",qos:.utility)
     private let context=CIContext(options:[.cacheIntermediates:false])
     private let lock=NSLock()
@@ -36,7 +42,7 @@ final class PreviewAnalysisController:NSObject,AVCaptureVideoDataOutputSampleBuf
     }
     func setActive(_ value:Bool) {
         lock.lock();active=value;generation=UUID();lock.unlock()
-        if !value { DispatchQueue.main.async { self.completion(nil) } }
+        if !value { history.reset();motion.reset();DispatchQueue.main.async { self.completion(nil) } }
     }
     func configure(_ options:PreviewAnalysisOptions,processing:ProcessingOptions) {
         lock.lock();generation=UUID();let token=generation;configurationGeneration=token;configurationReady=false;lock.unlock()
@@ -45,6 +51,9 @@ final class PreviewAnalysisController:NSObject,AVCaptureVideoDataOutputSampleBuf
             guard valid else { return }
             self.options=options;self.previousTime=0
             self.processing=processing;self.notice=nil
+            self.buffering=processing.zeroShutterLagFusion
+            self.motionEnabled=processing.nightStatic && processing.nightMotionMetering
+            self.history.reset();self.motion.reset();self.previousBufferTime=0;self.lastPTS = .nan
             do {
                 self.recipe=options.colorLook && processing.color.needsCube ? try ColorRecipeLUT.make(processing.color) : nil
                 self.customLUT=options.colorLook ? try processing.lutID.map { try ColorLUTStore.load($0) } : nil
@@ -55,8 +64,36 @@ final class PreviewAnalysisController:NSObject,AVCaptureVideoDataOutputSampleBuf
     }
     func captureOutput(_ output:AVCaptureOutput,didOutput sampleBuffer:CMSampleBuffer,from connection:AVCaptureConnection) {
         lock.lock();let enabled=active && configurationReady,token=generation,pending=deliveryPending;lock.unlock()
-        guard enabled,!pending,options.enabled,CACurrentMediaTime()-previousTime>=0.2,
-              let pixel=CMSampleBufferGetImageBuffer(sampleBuffer),CVPixelBufferGetPlaneCount(pixel)>0 else { return }
+        guard enabled,let pixel=CMSampleBufferGetImageBuffer(sampleBuffer),CVPixelBufferGetPlaneCount(pixel)>0 else { return }
+        let host=ProcessInfo.processInfo.systemUptime
+        if (buffering || motionEnabled) && host-previousBufferTime>=1.0/15 {
+            previousBufferTime=host
+            let pts=CMSampleBufferGetPresentationTimeStamp(sampleBuffer).seconds
+            if !pts.isFinite || (lastPTS.isFinite && pts<=lastPTS) { history.reset();motion.reset() }
+            lastPTS=pts
+            if pts.isFinite {
+                let image=CIImage(cvPixelBuffer:pixel)
+                if motionEnabled {
+                    let thumbnail=image.transformed(by:CGAffineTransform(scaleX:64/image.extent.width,y:48/image.extent.height))
+                    var values=[Float](repeating:0,count:64*48*4)
+                    values.withUnsafeMutableBytes { context.render(thumbnail,toBitmap:$0.baseAddress!,rowBytes:64*16,bounds:CGRect(x:0,y:0,width:64,height:48),format:.RGBAf,colorSpace:CGColorSpace(name:CGColorSpace.sRGB)!) }
+                    lock.lock()
+                    if active && generation==token { motion.append((0..<64*48).map { values[$0*4]*0.2126+values[$0*4+1]*0.7152+values[$0*4+2]*0.0722 },time:host) }
+                    lock.unlock()
+                }
+                if buffering {
+                    let scale=min(1,1280/max(image.extent.width,image.extent.height))
+                    let small=image.transformed(by:CGAffineTransform(scaleX:scale,y:scale))
+                    if let copy=context.createCGImage(small,from:small.extent,format:.RGBA8,colorSpace:CGColorSpace(name:CGColorSpace.sRGB)!) {
+                        // setActive(false) may have raced this render; never
+                        // repopulate a previous lens/session after invalidation.
+                        lock.lock();let valid=active && generation==token
+                        if valid { history.append(copy,time:host,bytes:copy.bytesPerRow*copy.height) };lock.unlock()
+                    }
+                }
+            }
+        }
+        guard !pending,options.enabled,CACurrentMediaTime()-previousTime>=0.2 else { return }
         previousTime=CACurrentMediaTime()
         let type=CVPixelBufferGetPixelFormatType(pixel)
         guard [kCVPixelFormatType_420YpCbCr8BiPlanarFullRange,kCVPixelFormatType_420YpCbCr8BiPlanarVideoRange].contains(type) else { return }
