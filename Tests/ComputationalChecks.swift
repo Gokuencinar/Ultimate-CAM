@@ -28,7 +28,7 @@ import Darwin
             try require(refused,"Metal accepted a non-RAW recipe")
             let calibration=BayerCalibration(pattern:[0,1,1,2],matrix:[3.2406,-1.5372,-0.4986,-0.9689,1.8758,0.0415,0.0557,-0.204,1.057],neutral:[1,1,1],illuminant:21,orientation:1)
             let values=(0..<64*48*4).map { Float16(0.18+Double($0%64)/1000).bitPattern.littleEndian }
-            let dng=try FusedDNG.encode(quads:values.withUnsafeBytes { Data($0) },width:64,height:48,calibration:calibration)
+            let dng=try FusedDNG.encode(quads:values.withUnsafeBufferPointer { Data(buffer:$0) },width:64,height:48,calibration:calibration)
             guard let source=CGImageSourceCreateWithData(dng as CFData,nil),
                   let props=CGImageSourceCopyPropertiesAtIndex(source,0,nil) as? [String:Any] else { throw CameraFailure.message("Working DNG is unreadable") }
             try require((props[kCGImagePropertyPixelWidth as String] as? Int)==128 && (props[kCGImagePropertyPixelHeight as String] as? Int)==96,"Working DNG geometry was lost")

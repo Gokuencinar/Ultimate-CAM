@@ -564,12 +564,14 @@ struct CameraView: View {
                         Text("Adaptación RGB de una referencia de investigación. Conserva frecuencias de la referencia cuando cambian entre fotos. Limita el lado largo a 2048 px y puede tardar más; necesita comparación real de ruido y detalle.").font(.footnote).foregroundStyle(.secondary)
                     }
                     Toggle("Fusión con pesos por píxel", isOn: $options.nightWeightedFusion).disabled(options.nightSpectralFusion)
-                    Text("Hasta 16 fotogramas, limitado por la medición y la lente. El tiempo total incluye entrega y procesado y será mayor. El límite de obturación es manual: aún no detecta movimiento de sujetos.")
+                    Text("Hasta 16 fotogramas, limitado por la medición y la lente. El tiempo total incluye entrega y procesado y será mayor. La medición del visor puede reducir el máximo elegido si detecta movimiento; en escenas sin textura no puede estimarlo con confianza.")
                         .font(.footnote).foregroundStyle(.secondary)
                 }
             }
             if options.hdrBracketing {
                 Section("HDR por horquillado") {
+                    Toggle("HDR Bayer con Metal",isOn:$options.hdrMetalRAW).disabled(!camera.supportsRAW).accessibilityIdentifier("hdr.metalRAW")
+                    if options.hdrMetalRAW { Text("Experimental: fusiona RAW lineal con rechazo de saturación y referencia de exposición corta. Salida hasta 2048 px; no utiliza el motor HDR+ de Google.").font(.footnote).foregroundStyle(.secondary) }
                     Picker("Separación respecto a la referencia",selection:$options.hdrSpan) { Text("±1 EV").tag(1.0);Text("±2 EV").tag(2.0);Text("±3 EV").tag(3.0) }
                     Text("Tres exposiciones JPEG distintas con fusión de radiancia aproximada. Puedes conservar el rango ampliado activando el mapa HDR en Color · Salida JPEG. Es experimental; no es el motor HDR+ de Google.").font(.footnote).foregroundStyle(.secondary)
                 }

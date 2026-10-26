@@ -629,7 +629,7 @@ final class CameraModel: NSObject, ObservableObject, AVCapturePhotoCaptureDelega
             self.lastNightTimestamp = nil
             self.desiredCount = hdr ? 3 : (burst ? min(9, max(3, count)) : 1)
             self.processingOptions = options
-            self.rawRequested = (raw || (night && options.nightRAW)) && !self.output.availableRawPhotoPixelFormatTypes.isEmpty
+            self.rawRequested = (raw || (night && options.nightRAW) || (hdr && options.hdrMetalRAW)) && !self.output.availableRawPhotoPixelFormatTypes.isEmpty
             self.rawData = nil
             let preRoll=options.zeroShutterLagFusion && !burst && !raw && flash == .off && options.portraitAmount==0
                 && device.exposureMode != .custom && device.exposureMode != .locked ? self.previewAnalyzer.history.snapshot(at:shutterTime).map(\.value):[]
@@ -652,7 +652,7 @@ final class CameraModel: NSObject, ObservableObject, AVCapturePhotoCaptureDelega
                     self.processZSL(preRoll,options:options,angle:angle,unmirror:device.position == .front && !mirror)
                     return
                 }
-                if options.nightMetalRAW && night && !self.rawRequested { throw CameraFailure.message("La lente no ofrece Bayer RAW para Metal.") }
+                if ((options.nightMetalRAW && night) || (options.hdrMetalRAW && hdr)) && !self.rawRequested { throw CameraFailure.message("La lente no ofrece Bayer RAW para Metal.") }
                 if burst {
                     guard !device.isAdjustingExposure, !device.isAdjustingWhiteBalance,
                           !device.isAdjustingFocus else {
@@ -829,7 +829,7 @@ final class CameraModel: NSObject, ObservableObject, AVCapturePhotoCaptureDelega
                         }
                         if timestamp >= 0 { self.lastNightTimestamp = timestamp }
                     }
-                    if self.processingOptions.nightStatic && self.processingOptions.nightMetalRAW {
+                    if (self.processingOptions.nightStatic && self.processingOptions.nightMetalRAW) || (self.processingOptions.hdrBracketing && self.processingOptions.hdrMetalRAW) {
                         do { self.sensorFrames.append(try SensorBayerFrame.capture(photo,dng:data)) }
                         catch { self.finishFailure(error);return }
                     }
@@ -863,7 +863,7 @@ final class CameraModel: NSObject, ObservableObject, AVCapturePhotoCaptureDelega
                 self.finishFailure(CameraFailure.message("No se recibió el DNG solicitado."))
                 return
             }
-            if self.processingOptions.nightStatic, let raw = self.rawData {
+            if self.processingOptions.nightStatic || self.processingOptions.hdrMetalRAW && self.processingOptions.hdrBracketing, let raw = self.rawData {
                 if !self.processingOptions.nightMetalRAW || self.nightRawFrames.isEmpty { self.nightRawFrames.append(raw) }
                 self.rawData = nil
             }
@@ -919,15 +919,17 @@ final class CameraModel: NSObject, ObservableObject, AVCapturePhotoCaptureDelega
                             }
                         }
                         var result: CaptureResult
-                        if options.nightStatic && options.nightMetalRAW {
-                            guard let jpeg=captured.first,let dng=rawBurst?.first,sensorBurst.count==captured.count else { throw CameraFailure.message("La pila Bayer está incompleta.") }
-                            result=try MetalBurstProcessor().processRAW(sensorBurst,referenceJPEG:jpeg,originalDNG:dng,options:options,cancellation:cancellation,progress:progress)
+                        if options.nightStatic && options.nightMetalRAW || options.hdrBracketing && options.hdrMetalRAW {
+                            guard let raws=rawBurst,sensorBurst.count==captured.count,!sensorBurst.isEmpty else { throw CameraFailure.message("La pila Bayer está incompleta.") }
+                            let anchor=options.hdrBracketing ? sensorBurst.indices.min(by:{sensorBurst[$0].exposure.product<sensorBurst[$1].exposure.product})!:0
+                            guard captured.indices.contains(anchor),raws.indices.contains(options.hdrBracketing ? anchor:0) else { throw CameraFailure.message("Falta la referencia RAW de la pila.") }
+                            result=try MetalBurstProcessor().processRAW(sensorBurst,referenceJPEG:captured[anchor],originalDNG:raws[options.hdrBracketing ? anchor:0],options:options,cancellation:cancellation,progress:progress)
                         } else if options.hdrBracketing {
                             result = try HDRProcessor().process(captured,exposures:bracketExposures,options:options,cancellation:cancellation,progress:progress)
                         } else {
                             result = try BurstProcessor().process(captured,options:options,rawFrames:rawBurst,cancellation:cancellation,progress:progress)
                         }
-                        if !options.nightStatic { result.raw = raw }
+                        if !options.nightStatic && !(options.hdrBracketing && options.hdrMetalRAW) { result.raw = raw }
                         result.statistics = ImageStatistics.measure(result.jpeg)
                         return result
                     } catch {

@@ -78,7 +78,14 @@ final class PreviewAnalysisController:NSObject,AVCaptureVideoDataOutputSampleBuf
                     var values=[Float](repeating:0,count:64*48*4)
                     values.withUnsafeMutableBytes { context.render(thumbnail,toBitmap:$0.baseAddress!,rowBytes:64*16,bounds:CGRect(x:0,y:0,width:64,height:48),format:.RGBAf,colorSpace:CGColorSpace(name:CGColorSpace.sRGB)!) }
                     lock.lock()
-                    if active && generation==token { motion.append((0..<64*48).map { values[$0*4]*0.2126+values[$0*4+1]*0.7152+values[$0*4+2]*0.0722 },time:host) }
+                    if active && generation==token {
+                        var luma=[Float](repeating:0,count:64*48)
+                        for index in luma.indices {
+                            let r=values[index*4],g=values[index*4+1],b=values[index*4+2]
+                            luma[index]=r*0.2126+g*0.7152+b*0.0722
+                        }
+                        motion.append(luma,time:host)
+                    }
                     lock.unlock()
                 }
                 if buffering {

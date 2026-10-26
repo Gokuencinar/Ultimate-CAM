@@ -4,7 +4,7 @@ import Metal
 private struct MetalFusionParameters {
     var size=SIMD4<UInt32>(0,0,16,0)
     var search=SIMD4<Int32>(0,0,0,0)
-    var control=SIMD4<Float>(0.000004,1,4,0)
+    var control=SIMD4<Float>(0.000004,1,4,1)
     var luma=SIMD4<Float>(0.2126,0.7152,0.0722,0)
 }
 
@@ -29,7 +29,7 @@ final class MetalBurstProcessor {
     }
     private func texture(_ width:Int,_ height:Int,format:MTLPixelFormat = .rgba16Float) throws -> MTLTexture {
         let descriptor=MTLTextureDescriptor.texture2DDescriptor(pixelFormat:format,width:width,height:height,mipmapped:false)
-        descriptor.storageMode = .shared;descriptor.usage=[.shaderRead,.shaderWrite,.renderTarget]
+        descriptor.storageMode = .shared;descriptor.usage=format == .rgba16Float ? [.shaderRead,.shaderWrite,.renderTarget]:[.shaderRead,.shaderWrite]
         guard let texture=device.makeTexture(descriptor:descriptor) else { throw CameraFailure.message("No hay memoria para el procesado Metal.") };return texture
     }
     private func command() throws -> MTLCommandBuffer {
@@ -89,7 +89,7 @@ final class MetalBurstProcessor {
     private func initialWeights(width:Int,height:Int) throws -> MTLTexture {
         let weights=try texture(width,height,format:.r16Float)
         let ones=[UInt16](repeating:Float16(1).bitPattern,count:width*height)
-        ones.withUnsafeBytes { weights.replace(region:MTLRegionMake2D(0,0,width,height),mipmapLevel:0,withBytes:$0.baseAddress!,bytesPerRow:width*2) };return weights
+        ones.withUnsafeBufferPointer { weights.replace(region:MTLRegionMake2D(0,0,width,height),mipmapLevel:0,withBytes:$0.baseAddress!,bytesPerRow:width*2) };return weights
     }
     private func tone(_ image:CIImage,maximumGain:Double,cancellation:ProcessingCancellation?) throws -> CIImage {
         let extent=image.extent.integral,w=Int(extent.width),h=Int(extent.height)
@@ -99,8 +99,14 @@ final class MetalBurstProcessor {
         let rw=max(1,Int(reduced.extent.width)),rh=max(1,Int(reduced.extent.height))
         var pixels=[Float](repeating:0,count:rw*rh*4)
         pixels.withUnsafeMutableBytes { context.render(reduced,toBitmap:$0.baseAddress!,rowBytes:rw*16,bounds:CGRect(x:0,y:0,width:rw,height:rh),format:.RGBAf,colorSpace:space) }
-        var values=(0..<rw*rh).map { max(0.00001,Double(pixels[$0*4]*0.2126+pixels[$0*4+1]*0.7152+pixels[$0*4+2]*0.0722)) }
-        guard values.allSatisfy(\.isFinite) else { throw CameraFailure.message("Medición tonal no válida.") }
+        var values=[Double]()
+        for index in 0..<rw*rh {
+            let r=pixels[index*4],g=pixels[index*4+1],b=pixels[index*4+2]
+            let luminance:Float=r*0.2126+g*0.7152+b*0.0722
+            let value=max(0.00001,Double(luminance))
+            guard value.isFinite else { throw CameraFailure.message("Medición tonal no válida.") }
+            values.append(value)
+        }
         values.sort();let middle=values[values.count/2],high=values[min(values.count-1,Int(Double(values.count)*0.98))]
         var params=MetalFusionParameters();params.control.y=Float(min(maximumGain,max(1,0.18/middle)));params.control.z=Float(max(1,high*Double(params.control.y)))
         let command=try command();try encode("uc_night_tone",command,textures:[input,output],parameters:params);try finish(command,cancellation:cancellation)
@@ -110,20 +116,26 @@ final class MetalBurstProcessor {
 
     func processRAW(_ frames:[SensorBayerFrame],referenceJPEG:Data,originalDNG:Data,options:ProcessingOptions,
                     cancellation:ProcessingCancellation?,progress:((String)->Void)?) throws -> CaptureResult {
-        guard let first=frames.first,(2...16).contains(frames.count) else { throw CameraFailure.message("Metal RAW necesita entre 2 y 16 fotogramas.") }
+        guard !frames.isEmpty,(2...16).contains(frames.count) else { throw CameraFailure.message("Metal RAW necesita entre 2 y 16 fotogramas.") }
+        let anchorIndex=options.hdrBracketing ? frames.indices.min(by:{frames[$0].exposure.product<frames[$1].exposure.product})!:0
+        let first=frames[anchorIndex]
+        guard frames.allSatisfy({$0.exposure.isValid}),zip(frames,frames.dropFirst()).allSatisfy({$0.timestamp<$1.timestamp}) else { throw CameraFailure.message("La pila RAW no está ordenada temporalmente.") }
         let reference=try upload(first);var mean=reference,weights=try initialWeights(width:first.width,height:first.height)
         var params=MetalFusionParameters();params.size.w=1
         params.luma=SIMD4<Float>(first.calibration.pattern[0]==1 ? 0.5:0,first.calibration.pattern[1]==1 ? 0.5:0,
             first.calibration.pattern[2]==1 ? 0.5:0,first.calibration.pattern[3]==1 ? 0.5:0)
-        var timestamp=first.timestamp
-        for (index,frame) in frames.enumerated().dropFirst() {
+        params.search.z=options.hdrBracketing ? 1:0
+        for (index,frame) in frames.enumerated() where index != anchorIndex {
             try cancellation?.check()
-            guard frame.width==first.width,frame.height==first.height,frame.calibration==first.calibration,frame.timestamp>timestamp,
-                  abs(frame.exposure.seconds/first.exposure.seconds-1)<0.05,abs(frame.exposure.iso/first.exposure.iso-1)<0.05 else {
+            guard frame.width==first.width,frame.height==first.height,frame.calibration==first.calibration,
+                  options.hdrBracketing || (abs(frame.exposure.seconds/first.exposure.seconds-1)<0.05 && abs(frame.exposure.iso/first.exposure.iso-1)<0.05) else {
                 throw CameraFailure.message("La pila RAW cambió de geometría, calibración, exposición o secuencia temporal.")
             }
-            timestamp=frame.timestamp;progress?("Metal RAW · alineando y fusionando \(index+1)/\(frames.count)…")
-            params.control.x=Self.noise(reference:first.quads,sample:frame.quads)
+            progress?("Metal RAW · alineando y fusionando \(index+1)/\(frames.count)…")
+            let scale=first.exposure.product/frame.exposure.product
+            guard scale.isFinite,(1.0/256...256).contains(scale) else { throw CameraFailure.message("Separación RAW fuera de rango.") }
+            params.control.w=Float(scale)
+            params.control.x=Self.noise(reference:first.quads,sample:frame.quads,scale:Float(scale))
             (mean,weights)=try autoreleasepool { try fuse(reference:reference,mean:mean,weights:weights,sample:upload(frame),parameters:params,cancellation:cancellation) }
         }
         let dng=try FusedDNG.encode(quads:download(mean),width:first.width,height:first.height,calibration:first.calibration)
@@ -133,9 +145,9 @@ final class MetalBurstProcessor {
         if decoder.isLuminanceNoiseReductionSupported { decoder.luminanceNoiseReductionAmount=0 }
         guard let developed=decoder.outputImage else { throw CameraFailure.message("El DNG de trabajo no se pudo revelar.") }
         progress?("Metal RAW · tono y color…")
-        let mapped=try tone(developed,maximumGain:32,cancellation:cancellation)
+        let mapped=try tone(developed,maximumGain:options.hdrBracketing ? 64:32,cancellation:cancellation)
         let jpeg=try JPEGRenderer.render(mapped,extent:mapped.extent,options:options,context:context,metadataReference:referenceJPEG,frames:frames.count)
-        return CaptureResult(jpeg:jpeg.data,reference:referenceJPEG,details:"Noche RAW Metal · \(frames.count) tomas · Bayer por teselas · \(jpeg.width) × \(jpeg.height) px.",mergedFrames:frames.count,raw:originalDNG,source:"Bayer-Metal")
+        return CaptureResult(jpeg:jpeg.data,reference:referenceJPEG,details:"\(options.hdrBracketing ? "HDR RAW Metal":"Noche RAW Metal") · \(frames.count) tomas · Bayer por teselas · \(jpeg.width) × \(jpeg.height) px.",mergedFrames:frames.count,raw:originalDNG,source:"Bayer-Metal")
     }
     func processZSL(_ images:[CGImage],options:ProcessingOptions,captureAngle:Double,unmirror:Bool,
                     cancellation:ProcessingCancellation?) throws -> CaptureResult {
@@ -160,14 +172,14 @@ final class MetalBurstProcessor {
         let referenceJPEG=try JPEGRenderer.render(original,extent:original.extent,options:ProcessingOptions(),context:context)
         return CaptureResult(jpeg:jpeg.data,reference:referenceJPEG.data,details:"ZSL del visor · \(images.count) fotogramas previos · \(jpeg.width) × \(jpeg.height) px · RGB procesado, sin RAW ni recuperación de luces recortadas.",mergedFrames:images.count,source:"preview-ZSL-Metal")
     }
-    private static func noise(reference:Data,sample:Data) -> Float {
+    private static func noise(reference:Data,sample:Data,scale:Float=1) -> Float {
         let count=min(reference.count,sample.count)/2
         guard count>8 else { return 0.000004 }
         var residuals=[Float]();let step=max(4,(count/4000)/4*4)
         reference.withUnsafeBytes { a in sample.withUnsafeBytes { b in
             func value(_ bytes:UnsafeRawBufferPointer,_ i:Int)->Float { Float(Float16(bitPattern:UInt16(littleEndian:bytes.loadUnaligned(fromByteOffset:i*2,as:UInt16.self)))) }
             for i in stride(from:0,to:count-8,by:step) {
-                for c in 0..<4 { residuals.append(abs((value(b,i+c)-value(a,i+c))-(value(b,i+4+c)-value(a,i+4+c)))) }
+                for c in 0..<4 { residuals.append(abs((value(b,i+c)*scale-value(a,i+c))-(value(b,i+4+c)*scale-value(a,i+4+c)))) }
             }
         } }
         residuals.sort();let sigma=residuals[residuals.count/2]/1.3489795

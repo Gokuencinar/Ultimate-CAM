@@ -7,6 +7,8 @@ struct BayerCalibration:Equatable {
     let neutral:[Double]
     let illuminant:UInt16
     let orientation:UInt32
+    var extraColor:[UInt16:[Double]] = [:]
+    var illuminant2:UInt16 = 0
 }
 
 /// A compact quad texture: RGGB/GRBG/BGGR/GBRG phases remain four separate
@@ -43,7 +45,7 @@ struct SensorBayerFrame {
               neutral.count==3,neutral.allSatisfy({$0.isFinite && $0>0 && $0<32}),
               [1,4].contains(black.count),black.allSatisfy({$0.isFinite && $0>=0}),
               white.count==1,let white=white.first,white.isFinite,white<=16383,
-              black.allSatisfy({white>$0+64}),illumination>=1,illumination<=255 else {
+              black.allSatisfy({white>$0+64}),illumination>=1,illumination<=255,illumination.rounded()==illumination else {
             throw CameraFailure.message("Calibración RAW incompleta; no se inventan niveles de negro, blanco o matrices de color.")
         }
         let w=CVPixelBufferGetWidth(pixel),h=CVPixelBufferGetHeight(pixel)
@@ -84,10 +86,20 @@ struct SensorBayerFrame {
         let exposure=FrameExposure(seconds:(exif[kCGImagePropertyExifExposureTime as String] as? NSNumber)?.doubleValue ?? 0,
             iso:(exif[kCGImagePropertyExifISOSpeedRatings as String] as? [NSNumber])?.first?.doubleValue ?? 0)
         guard exposure.isValid,photo.timestamp.seconds.isFinite else { throw CameraFailure.message("El RAW no incluye exposición y tiempo válidos.") }
+        var extra=[UInt16:[Double]]()
+        for (key,tag,count) in [("ColorMatrix2",UInt16(50722),9),("CameraCalibration1",UInt16(50723),9),("CameraCalibration2",UInt16(50724),9),("AnalogBalance",UInt16(50727),3)] {
+            let values=numbers(key)
+            guard values.isEmpty || (values.count==count && values.allSatisfy({$0.isFinite && abs($0)<32}) && (tag != 50727 || values.allSatisfy({$0>0}))) else { throw CameraFailure.message("Calibración de color RAW inválida.") }
+            if !values.isEmpty { extra[tag]=values }
+        }
+        let secondIlluminant=numbers("CalibrationIlluminant2").first ?? 0
+        guard extra[50722]==nil || (secondIlluminant>=1 && secondIlluminant<=255 && secondIlluminant.rounded()==secondIlluminant) else { throw CameraFailure.message("Falta el segundo iluminante del DNG.") }
         let orientation=(props[kCGImagePropertyOrientation as String] as? NSNumber)?.uint32Value ?? 1
         guard (1...8).contains(orientation) else { throw CameraFailure.message("Orientación RAW inválida.") }
+        var calibration=BayerCalibration(pattern:croppedPattern,matrix:matrix,neutral:neutral,illuminant:UInt16(illumination),orientation:orientation)
+        calibration.extraColor=extra;calibration.illuminant2=extra[50722]==nil ? 0:UInt16(secondIlluminant)
         return SensorBayerFrame(width:qw,height:qh,quads:packed.withUnsafeBufferPointer { Data(buffer:$0) },
-            calibration:BayerCalibration(pattern:croppedPattern,matrix:matrix,neutral:neutral,illuminant:UInt16(illumination),orientation:orientation),exposure:exposure,timestamp:photo.timestamp.seconds)
+            calibration:calibration,exposure:exposure,timestamp:photo.timestamp.seconds)
     }
 }
 
@@ -96,7 +108,9 @@ struct SensorBayerFrame {
 enum FusedDNG {
     static func encode(quads:Data,width:Int,height:Int,calibration c:BayerCalibration) throws -> Data {
         guard width>0,height>0,width<=1024,height<=1024,quads.count==width*height*8,c.pattern.count==4,
-              c.matrix.count==9,c.neutral.count==3 else { throw CameraFailure.message("Mosaico fusionado inválido.") }
+              c.matrix.count==9,c.matrix.allSatisfy({$0.isFinite && abs($0)<32}),
+              c.neutral.count==3,c.neutral.allSatisfy({$0.isFinite && $0>0 && $0<32}),
+              c.pattern.sorted()==[0,1,1,2],(1...8).contains(c.orientation),(1...255).contains(c.illuminant) else { throw CameraFailure.message("Mosaico fusionado inválido.") }
         func u16(_ n:UInt16)->Data { var x=n.littleEndian;return withUnsafeBytes(of:&x) { Data($0) } }
         func u32(_ n:UInt32)->Data { var x=n.littleEndian;return withUnsafeBytes(of:&x) { Data($0) } }
         func rational(_ n:Double,signed:Bool=false)->Data {
@@ -118,6 +132,11 @@ enum FusedDNG {
         add(50713,3,2,u16(1)+u16(1));add(50714,5,1,rational(4096));add(50717,4,1,u32(61439))
         add(50721,10,9,c.matrix.reduce(Data()) { $0+rational($1,signed:true) })
         add(50728,5,3,c.neutral.reduce(Data()) { $0+rational($1) });add(50778,3,1,u16(c.illuminant))
+        for (tag,values) in c.extraColor {
+            guard [50722,50723,50724,50727].contains(tag),values.count==(tag==50727 ? 3:9),values.allSatisfy({$0.isFinite && abs($0)<32}) else { throw CameraFailure.message("Etiquetas de color DNG fuera de rango.") }
+            add(tag,tag==50727 ? 5:10,UInt32(values.count),values.reduce(Data()) { $0+rational($1) })
+        }
+        if c.illuminant2>0 { add(50779,3,1,u16(c.illuminant2)) }
         tags.sort { $0.key<$1.key }
         let base=8+2+tags.count*12+4
         var extra=Data(),entries=Data()

@@ -38,7 +38,7 @@ kernel void uc_tile_flow(texture2d<float,access::sample> reference [[texture(0)]
             float2 p=float2(tile*16+uint2(x,y))+0.5f,q=p+float2(shift);
             if (p.x>=reference.get_width() || p.y>=reference.get_height() || q.x<0.5f || q.y<0.5f ||
                 q.x>sample.get_width()-0.5f || q.y>sample.get_height()-0.5f) continue;
-            float a=dot(reference.sample(pixels,p),params.luma),b=dot(sample.sample(pixels,q),params.luma);
+            float a=dot(reference.sample(pixels,p),params.luma),b=dot(sample.sample(pixels,q),params.luma)*params.control.w;
             cost+=min(abs(a-b),0.25f);++count;
         }
         cost=count>=12 ? cost/float(count):INFINITY;
@@ -68,7 +68,8 @@ kernel void uc_fuse_tiles(texture2d<float,access::read> reference [[texture(0)]]
         uint2 index=uint2(clamp(base+int2(corner),int2(0),int2(flow.get_width()-1,flow.get_height()-1)));
         float4 motion=flow.read(index);float2 q=float2(p)+0.5f+motion.xy;
         if (q.x<0.5f || q.y<0.5f || q.x>sample.get_width()-0.5f || q.y>sample.get_height()-0.5f) continue;
-        float4 candidate=sample.sample(pixels,q);
+        float4 sensor=sample.sample(pixels,q);
+        float4 candidate=sensor*params.control.w;
         float4 residual=candidate-anchor;
         float energy=params.size.w ? dot(residual*residual,float4(0.25f)):dot(residual.rgb*residual.rgb,float3(1.0f/3));
         float variance=max(params.control.x,1e-7f);
@@ -77,7 +78,13 @@ kernel void uc_fuse_tiles(texture2d<float,access::read> reference [[texture(0)]]
         // match is rejected. The reference always supplies weight one.
         float reliable=motion.z<3.0f*sqrt(variance) ? 1.0f:motion.w;
         float spatial=(corner.x ? fraction.x:1-fraction.x)*(corner.y ? fraction.y:1-fraction.y);
-        float weight=spatial*robust*reliable;
+        float exposureWeight=1.0f;
+        if (params.search.z) {
+            float low=min(min(sensor.r,sensor.g),min(sensor.b,sensor.a));
+            float high=max(max(sensor.r,sensor.g),max(sensor.b,sensor.a));
+            exposureWeight=smoothstep(0.001f,0.012f,low)*(1.0f-smoothstep(0.94f,0.995f,high));
+        }
+        float weight=spatial*robust*reliable*exposureWeight;
         contribution+=candidate*weight;accepted+=weight;
     }
     float weight=oldWeight+accepted;
