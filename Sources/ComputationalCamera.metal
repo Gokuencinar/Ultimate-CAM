@@ -9,6 +9,10 @@ struct FusionParameters {
 };
 constexpr sampler pixels(coord::pixel,address::clamp_to_edge,filter::linear);
 
+kernel void uc_initial_weights(texture2d<float,access::write> output [[texture(0)]],uint2 p [[thread_position_in_grid]]) {
+    if (p.x<output.get_width() && p.y<output.get_height()) output.write(float4(1.0f),p);
+}
+
 kernel void uc_pyramid(texture2d<float,access::read> input [[texture(0)]],
                        texture2d<float,access::write> output [[texture(1)]],uint2 p [[thread_position_in_grid]]) {
     if (p.x>=output.get_width() || p.y>=output.get_height()) return;

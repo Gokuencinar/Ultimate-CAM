@@ -46,6 +46,24 @@ import Darwin
             print("Core format: DNG developer")
             guard let decoder=CIRAWFilter(imageData:dng,identifierHint:"com.adobe.raw-image"),let image=decoder.outputImage else { throw CameraFailure.message("CIRAWFilter refused the fused working mosaic") }
             try require(image.extent.width>0 && image.extent.height>0,"Working mosaic did not develop")
+            print("Core format: native 12MP packing")
+            var sensor=[UInt16](repeating:1000,count:4032*3024)
+            sensor[0]=1100;sensor[1]=1200;sensor[4032]=1300;sensor[4033]=1400
+            let native=try sensor.withUnsafeBufferPointer { try BayerQuadPacking.pack($0,rowElements:4032,originX:0,originY:0,cropWidth:4032,cropHeight:3024,step:1,black:[100,100,100,100],white:16000) }
+            try require(native.count==4032*3024*2,"Native Bayer data was downsampled")
+            try native.withUnsafeBytes { bytes in
+                for phase in 0..<4 {
+                    let value=Float(Float16(bitPattern:bytes.loadUnaligned(fromByteOffset:phase*2,as:UInt16.self)))
+                    try require(abs(value-Float(1000+phase*100)/15900)<0.0001,"Bayer phase or black normalization mismatch")
+                }
+            }
+            let mapped=try BayerScratchStorage.store(native)
+            mapped.storage.discardResidentPages()
+            try require(mapped.data==native,"Mapped burst payload changed after page discard")
+            let nativeDNG=try FusedDNG.encode(quads:mapped.data,width:2016,height:1512,calibration:calibration)
+            guard let nativeSource=CGImageSourceCreateWithData(nativeDNG as CFData,nil),
+                  let nativeProps=CGImageSourceCopyPropertiesAtIndex(nativeSource,0,nil) as? [String:Any] else { throw CameraFailure.message("Native DNG unreadable") }
+            try require((nativeProps[kCGImagePropertyPixelWidth as String] as? Int)==4032 && (nativeProps[kCGImagePropertyPixelHeight as String] as? Int)==3024,"Native DNG lost 12MP geometry")
             print("Computational source checks passed; no capture session, app launch or GPU execution.")
         } catch { fputs("\(error)\n",stderr);exit(1) }
     }

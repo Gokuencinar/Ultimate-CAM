@@ -657,6 +657,11 @@ final class CameraModel: NSObject, ObservableObject, AVCapturePhotoCaptureDelega
                     return
                 }
                 if ((options.nightMetalRAW && night) || (options.hdrMetalRAW && hdr)) && !self.rawRequested { throw CameraFailure.message("La lente no ofrece Bayer RAW para Metal.") }
+                if (night && options.nightMetalRAW) || (hdr && options.hdrMetalRAW) {
+                    let dimensions=self.output.maxPhotoDimensions
+                    let bytes=Int64(dimensions.width)*Int64(dimensions.height)*2*Int64(night ? 16:3)+64*1024*1024
+                    try BayerScratchStorage.ensureCapacity(required:bytes)
+                }
                 if burst {
                     guard !device.isAdjustingExposure, !device.isAdjustingWhiteBalance,
                           !device.isAdjustingFocus else {
