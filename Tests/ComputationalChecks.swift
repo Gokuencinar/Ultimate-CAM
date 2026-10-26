@@ -34,11 +34,11 @@ import Darwin
             try require(refused,"Metal accepted a non-RAW recipe")
             print("Core format: DNG writer")
             let calibration=BayerCalibration(pattern:[0,1,1,2],matrix:[3.2406,-1.5372,-0.4986,-0.9689,1.8758,0.0415,0.0557,-0.204,1.057],neutral:[1,1,1],illuminant:21,orientation:1)
-            let values=(0..<64*48*4).map { Float16(0.18+Double($0%64)/1000).bitPattern.littleEndian }
+            let values=(0..<256*192*4).map { Float16(0.18+Double($0%64)/1000).bitPattern.littleEndian }
             print("Core format: half values",values.count)
             let quadData=values.withUnsafeBufferPointer { Data(buffer:$0) }
             print("Core format: half bytes",quadData.count)
-            let dng=try FusedDNG.encode(quads:quadData,width:64,height:48,calibration:calibration)
+            let dng=try FusedDNG.encode(quads:quadData,width:256,height:192,calibration:calibration)
             print("Core format: DNG ImageIO reader",dng.count)
             print("Core DNG header:",dng.prefix(1024).base64EncodedString())
             guard let source=CGImageSourceCreateWithData(dng as CFData,[kCGImageSourceTypeIdentifierHint:"com.adobe.raw-image"] as CFDictionary),
@@ -46,7 +46,8 @@ import Darwin
             try require((props[kCGImagePropertyPixelWidth as String] as? Int) != nil,"DNG properties missing")
             print("Core format: DNG developer")
             guard let decoder=CIRAWFilter(imageData:dng,identifierHint:"com.adobe.raw-image"),let image=decoder.outputImage else { throw CameraFailure.message("CIRAWFilter refused the fused working mosaic") }
-            try require(image.extent.width==128 && image.extent.height==96,"Working mosaic did not develop")
+            print("Developed DNG:",decoder.nativeSize,image.extent,decoder.scaleFactor)
+            try require(image.extent.width==512 && image.extent.height==384,"Working mosaic did not develop")
             print("Core format: native 12MP packing")
             var sensor=[UInt16](repeating:1000,count:4032*3024)
             sensor[0]=1100;sensor[1]=1200;sensor[4032]=1300;sensor[4033]=1400
