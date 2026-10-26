@@ -111,7 +111,8 @@ struct CameraView: View {
     private var zoom: Double { camera.zoomFactor }
     private var lens: CameraLens { camera.selectedLens }
     private var controlsEnabled: Bool { !camera.busy && !loadingPhoto && !nativeNight.opening && !openingVideo && countdown == 0 }
-    private var intrinsicAdaptiveFusion:Bool { options.nightStatic && (options.nightWeightedFusion || options.nightSpectralFusion) }
+    private var intrinsicMetalFusion:Bool { (options.nightStatic && options.nightMetalRAW) || (options.hdrBracketing && options.hdrMetalRAW) }
+    private var intrinsicAdaptiveFusion:Bool { intrinsicMetalFusion || (options.nightStatic && (options.nightWeightedFusion || options.nightSpectralFusion)) }
     private var hardwareCaptureReady:Bool {
         hardwareButtons && camera.ready && !camera.busy && !loadingPhoto && !nativeNight.opening && !openingVideo &&
         scenePhase == .active && auxiliaryMode==nil && !showControls && !showResult && !showPhotoPicker &&
@@ -513,7 +514,7 @@ struct CameraView: View {
             Section("Captura") {
                 Picker("Procesado de foto individual", selection: $options.singlePhotoQuality) {
                     ForEach(SinglePhotoQuality.allCases) { Text($0.label).tag($0) }
-                }.disabled(stack || rawEnabled || manualExposure || camera.isFocusLocked)
+                }.disabled(stack || rawEnabled || manualExposure || camera.isFocusLocked || options.zeroShutterLagFusion)
                 Text("Calidad iOS pide el mejor procesado disponible al sistema. No activa el modo Noche de Cámara. Con RAW, bloqueo AE, exposición manual o pilas se usa rapidez para respetar cada exposición.")
                     .font(.footnote).foregroundStyle(.secondary)
                 Toggle("RAW + JPEG", isOn: $rawEnabled).disabled(!camera.supportsRAW || stack)
@@ -526,7 +527,8 @@ struct CameraView: View {
                 if options.nightStatic {
                     Text(camera.supportsRAW ? "Noche usa JPEG de cámara por defecto. La fusión DNG experimental se activa en Procesado y conserva el DNG de referencia." : "Esta lente usa la alternativa JPEG nocturna; no dispone de RAW.")
                         .font(.footnote).foregroundStyle(.secondary)
-                } else if stack { Text("La pila usa JPEG. RAW se captura en modo Foto.").font(.footnote).foregroundStyle(.secondary) }
+                } else if options.hdrBracketing && options.hdrMetalRAW { Text("HDR capturará tres RAW y conservará el DNG original de exposición corta.").font(.footnote).foregroundStyle(.secondary) }
+                else if stack { Text("La pila usa JPEG. RAW se captura en Foto, Noche o HDR Bayer con Metal.").font(.footnote).foregroundStyle(.secondary) }
                 Picker("Flash", selection: $flash) {
                     ForEach(CameraFlash.allCases) { item in Text(item.label).tag(item) }
                 }.disabled(!camera.supportsFlash || stack || rawEnabled)
@@ -544,7 +546,7 @@ struct CameraView: View {
                     Toggle("Fusión Bayer con Metal",isOn:Binding(get:{options.nightMetalRAW},set:{ value in
                         options.nightMetalRAW=value
                         if value { options.nightRAW=true;options.nightSpectralFusion=false }
-                    })).disabled(!camera.supportsRAW).accessibilityIdentifier("night.metalRAW")
+                    })).disabled(!camera.supportsRAW && !options.nightMetalRAW).accessibilityIdentifier("night.metalRAW")
                     if options.nightMetalRAW {
                         Text("Experimental: Bayer de 14 bits, alineación por teselas y tono en GPU; salida hasta 2048 px. El DNG guardado sigue siendo el original. Requiere calibración DNG compatible.").font(.footnote).foregroundStyle(.secondary)
                     }
@@ -563,17 +565,17 @@ struct CameraView: View {
                         Text("Mayor mezcla favorece el promedio; menor conserva más la referencia.").font(.caption).foregroundStyle(.secondary)
                         Text("Adaptación RGB de una referencia de investigación. Conserva frecuencias de la referencia cuando cambian entre fotos. Limita el lado largo a 2048 px y puede tardar más; necesita comparación real de ruido y detalle.").font(.footnote).foregroundStyle(.secondary)
                     }
-                    Toggle("Fusión con pesos por píxel", isOn: $options.nightWeightedFusion).disabled(options.nightSpectralFusion)
+                    Toggle("Fusión con pesos por píxel", isOn: $options.nightWeightedFusion).disabled(options.nightSpectralFusion || intrinsicMetalFusion)
                     Text("Hasta 16 fotogramas, limitado por la medición y la lente. El tiempo total incluye entrega y procesado y será mayor. La medición del visor puede reducir el máximo elegido si detecta movimiento; en escenas sin textura no puede estimarlo con confianza.")
                         .font(.footnote).foregroundStyle(.secondary)
                 }
             }
             if options.hdrBracketing {
                 Section("HDR por horquillado") {
-                    Toggle("HDR Bayer con Metal",isOn:$options.hdrMetalRAW).disabled(!camera.supportsRAW).accessibilityIdentifier("hdr.metalRAW")
+                    Toggle("HDR Bayer con Metal",isOn:$options.hdrMetalRAW).disabled(!camera.supportsRAW && !options.hdrMetalRAW).accessibilityIdentifier("hdr.metalRAW")
                     if options.hdrMetalRAW { Text("Experimental: fusiona RAW lineal con rechazo de saturación y referencia de exposición corta. Salida hasta 2048 px; no utiliza el motor HDR+ de Google.").font(.footnote).foregroundStyle(.secondary) }
                     Picker("Separación respecto a la referencia",selection:$options.hdrSpan) { Text("±1 EV").tag(1.0);Text("±2 EV").tag(2.0);Text("±3 EV").tag(3.0) }
-                    Text("Tres exposiciones JPEG distintas con fusión de radiancia aproximada. Puedes conservar el rango ampliado activando el mapa HDR en Color · Salida JPEG. Es experimental; no es el motor HDR+ de Google.").font(.footnote).foregroundStyle(.secondary)
+                    Text("Tres exposiciones distintas; JPEG por defecto o Bayer con Metal. Puedes conservar el rango ampliado activando el mapa HDR en Color · Salida JPEG. Es experimental; no es el motor HDR+ de Google.").font(.footnote).foregroundStyle(.secondary)
                 }
             }
             Section("Pila de imágenes") {
@@ -581,14 +583,15 @@ struct CameraView: View {
                 Picker("Lado largo máximo", selection: $options.maximumDimension) {
                     Text("2048 px · ligera").tag(2048.0); Text("2560 px · equilibrada").tag(2560.0); Text("4096 px · más memoria").tag(4096.0)
                 }
-                Toggle("Referencia más nítida", isOn: $options.chooseSharpestReference)
-                Toggle("Rechazo de movimiento", isOn: $options.rejectMotion).disabled(options.nightStatic && options.nightSpectralFusion)
-                Toggle("Alineación local experimental", isOn: $options.localAlignment)
-                Toggle("Rechazo adaptativo experimental",isOn:Binding(get:{options.rejectMotion && (intrinsicAdaptiveFusion || options.adaptiveMotionRejection)},set:{options.adaptiveMotionRejection=$0}))
+                Toggle("Referencia más nítida", isOn: $options.chooseSharpestReference).disabled(intrinsicMetalFusion)
+                Toggle("Rechazo de movimiento",isOn:Binding(get:{options.rejectMotion || intrinsicMetalFusion},set:{options.rejectMotion=$0})).disabled(intrinsicMetalFusion || (options.nightStatic && options.nightSpectralFusion))
+                Toggle("Alineación local experimental", isOn: $options.localAlignment).disabled(intrinsicMetalFusion)
+                Toggle("Rechazo adaptativo experimental",isOn:Binding(get:{intrinsicMetalFusion || (options.rejectMotion && (intrinsicAdaptiveFusion || options.adaptiveMotionRejection))},set:{options.adaptiveMotionRejection=$0}))
                     .disabled(!options.rejectMotion || intrinsicAdaptiveFusion)
-                if options.rejectMotion && !(options.nightStatic && options.nightSpectralFusion) && (options.adaptiveMotionRejection || intrinsicAdaptiveFusion) {
+                if options.rejectMotion && !intrinsicMetalFusion && !(options.nightStatic && options.nightSpectralFusion) && (options.adaptiveMotionRejection || intrinsicAdaptiveFusion) {
                     optionSlider("Tolerancia al movimiento", value: $options.motionSigma, range: 1.5...6)
                 }
+                if intrinsicMetalFusion { Text("Metal utiliza su propia alineación piramidal por teselas y rechazo según el ruido. Los controles de la ruta RGB no se aplican.").font(.footnote).foregroundStyle(.secondary) }
                 Text("La alineación local consume más tiempo. El rechazo adaptativo estima diferencias RGB; necesita una escena mayoritariamente inmóvil.").font(.footnote).foregroundStyle(.secondary)
                 Text("Mantén el teléfono estable. La app descarta imágenes que no consigue alinear.").font(.footnote).foregroundStyle(.secondary)
             }

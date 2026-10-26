@@ -20,6 +20,7 @@ struct SensorBayerFrame {
     let exposure:FrameExposure
     let timestamp:Double
 
+    #if os(iOS)
     static func capture(_ photo:AVCapturePhoto,dng:Data) throws -> SensorBayerFrame {
         guard photo.isRawPhoto,let pixel=photo.pixelBuffer,
               let source=CGImageSourceCreateWithData(dng as CFData,nil),
@@ -61,7 +62,11 @@ struct SensorBayerFrame {
         let cw=crop.isEmpty ? right-left-ox:Int(crop[0]),ch=crop.isEmpty ? bottom-top-oy:Int(crop[1])
         guard top<bottom,left<right,bottom<=h,right<=w,cw>=4,ch>=4,ox+cw<=right-left,oy+ch<=bottom-top else { throw CameraFailure.message("El recorte DNG excede el plano del sensor.") }
         let offsetX=left+ox,offsetY=top+oy
-        let phaseMap=(0..<4).map { (((offsetY+($0>>1))&1)*2)+((offsetX+($0&1))&1) }
+        var phaseMap=[Int]()
+        for phase in 0..<4 {
+            let row=(offsetY+phase/2)%2,col=(offsetX+phase%2)%2
+            phaseMap.append(row*2+col)
+        }
         let croppedPattern=phaseMap.map { pattern[$0] }
         let step=max(1,Int(ceil(Double(max(cw,ch))/2048)))
         let qw=cw/(2*step),qh=ch/(2*step)
@@ -101,6 +106,7 @@ struct SensorBayerFrame {
         return SensorBayerFrame(width:qw,height:qh,quads:packed.withUnsafeBufferPointer { Data(buffer:$0) },
             calibration:calibration,exposure:exposure,timestamp:photo.timestamp.seconds)
     }
+    #endif
 }
 
 /// Minimal uncompressed DNG for CIRAWFilter demosaicing/color conversion of the
@@ -156,6 +162,8 @@ enum FusedDNG {
                 mosaic[(y*2+(phase>>1))*w+x*2+(phase&1)]=UInt16(min(65535,max(0,(value*57343+4096).rounded()))).littleEndian
             } } }
         }
-        return Data([0x49,0x49,42,0])+u32(8)+u16(UInt16(tags.count))+entries+u32(0)+extra+mosaic.withUnsafeBufferPointer { Data(buffer:$0) }
+        var result=Data([0x49,0x49,42,0])
+        result+=u32(8);result+=u16(UInt16(tags.count));result+=entries;result+=u32(0);result+=extra
+        result+=mosaic.withUnsafeBufferPointer { Data(buffer:$0) };return result
     }
 }

@@ -65,6 +65,11 @@ final class MetalBurstProcessor {
         var data=Data(count:texture.width*texture.height*8)
         data.withUnsafeMutableBytes { bytes in texture.getBytes(bytes.baseAddress!,bytesPerRow:texture.width*8,from:MTLRegionMake2D(0,0,texture.width,texture.height),mipmapLevel:0) };return data
     }
+    private func noisePatch(_ texture:MTLTexture) -> Data {
+        let w=min(96,texture.width),h=min(64,texture.height)
+        var bytes=Data(count:w*h*8)
+        bytes.withUnsafeMutableBytes { texture.getBytes($0.baseAddress!,bytesPerRow:w*8,from:MTLRegionMake2D((texture.width-w)/2,(texture.height-h)/2,w,h),mipmapLevel:0) };return bytes
+    }
     private func fuse(reference:MTLTexture,mean:MTLTexture,weights:MTLTexture,sample:MTLTexture,
                       parameters:MetalFusionParameters,cancellation:ProcessingCancellation?) throws -> (MTLTexture,MTLTexture) {
         var refs=[reference],samples=[sample];let command=try command()
@@ -78,7 +83,7 @@ final class MetalBurstProcessor {
         for level in stride(from:2,through:0,by:-1) {
             try cancellation?.check()
             let r=refs[level],s=samples[level],flow=try texture((r.width+15)/16,(r.height+15)/16,format:.rgba32Float)
-            var params=parameters;params.search=SIMD4<Int32>(level==2 ? 6:2,seed==nil ? 0:1,0,0)
+            var params=parameters;params.search=SIMD4<Int32>(level==2 ? 6:2,seed==nil ? 0:1,parameters.search.z,level==0 ? 1:0)
             try encode("uc_tile_flow",command,textures:[r,s,seed ?? r,flow],parameters:params);seed=flow
         }
         let nextMean=try texture(reference.width,reference.height),nextWeights=try texture(reference.width,reference.height,format:.r16Float)
@@ -91,7 +96,7 @@ final class MetalBurstProcessor {
         let ones=[UInt16](repeating:Float16(1).bitPattern,count:width*height)
         ones.withUnsafeBufferPointer { weights.replace(region:MTLRegionMake2D(0,0,width,height),mipmapLevel:0,withBytes:$0.baseAddress!,bytesPerRow:width*2) };return weights
     }
-    private func tone(_ image:CIImage,maximumGain:Double,cancellation:ProcessingCancellation?) throws -> CIImage {
+    private func tone(_ image:CIImage,maximumGain:Double,cancellation:ProcessingCancellation?) throws -> (sdr:CIImage,hdr:CIImage) {
         let extent=image.extent.integral,w=Int(extent.width),h=Int(extent.height)
         let normalized=image.transformed(by:CGAffineTransform(translationX:-extent.minX,y:-extent.minY))
         let input=try load(normalized,width:w,height:h,cancellation:cancellation),output=try texture(w,h)
@@ -111,7 +116,8 @@ final class MetalBurstProcessor {
         var params=MetalFusionParameters();params.control.y=Float(min(maximumGain,max(1,0.18/middle)));params.control.z=Float(max(1,high*Double(params.control.y)))
         let command=try command();try encode("uc_night_tone",command,textures:[input,output],parameters:params);try finish(command,cancellation:cancellation)
         guard let result=CIImage(mtlTexture:output,options:[.colorSpace:space]) else { throw CameraFailure.message("La GPU no devolvió la imagen tonal.") }
-        return result
+        let expanded=normalized.applyingFilter("CIExposureAdjust",parameters:[kCIInputEVKey:log2(Double(params.control.y))])
+        return (result,expanded)
     }
 
     func processRAW(_ frames:[SensorBayerFrame],referenceJPEG:Data,originalDNG:Data,options:ProcessingOptions,
@@ -146,7 +152,7 @@ final class MetalBurstProcessor {
         guard let developed=decoder.outputImage else { throw CameraFailure.message("El DNG de trabajo no se pudo revelar.") }
         progress?("Metal RAW · tono y color…")
         let mapped=try tone(developed,maximumGain:options.hdrBracketing ? 64:32,cancellation:cancellation)
-        let jpeg=try JPEGRenderer.render(mapped,extent:mapped.extent,options:options,context:context,metadataReference:referenceJPEG,frames:frames.count)
+        let jpeg=try JPEGRenderer.render(mapped.sdr,extent:mapped.sdr.extent,options:options,context:context,hdrSource:options.preserveHDR ? mapped.hdr:nil,metadataReference:referenceJPEG,frames:frames.count)
         return CaptureResult(jpeg:jpeg.data,reference:referenceJPEG,details:"\(options.hdrBracketing ? "HDR RAW Metal":"Noche RAW Metal") · \(frames.count) tomas · Bayer por teselas · \(jpeg.width) × \(jpeg.height) px.",mergedFrames:frames.count,raw:originalDNG,source:"Bayer-Metal")
     }
     func processZSL(_ images:[CGImage],options:ProcessingOptions,captureAngle:Double,unmirror:Bool,
@@ -154,11 +160,14 @@ final class MetalBurstProcessor {
         guard (3...8).contains(images.count),let first=images.last else { throw CameraFailure.message("El búfer ZSL todavía no está preparado.") }
         let reference=try load(CIImage(cgImage:first),width:first.width,height:first.height,cancellation:cancellation)
         var mean=reference,weights=try initialWeights(width:first.width,height:first.height)
-        let params=MetalFusionParameters()
+        let referenceNoise=noisePatch(reference)
         for image in images.dropLast().reversed() {
             guard image.width==first.width,image.height==first.height else { throw CameraFailure.message("Cambió la geometría del búfer ZSL.") }
-            (mean,weights)=try autoreleasepool { try fuse(reference:reference,mean:mean,weights:weights,
-                sample:load(CIImage(cgImage:image),width:image.width,height:image.height,cancellation:cancellation),parameters:params,cancellation:cancellation) }
+            (mean,weights)=try autoreleasepool {
+                let sample=try load(CIImage(cgImage:image),width:image.width,height:image.height,cancellation:cancellation)
+                var params=MetalFusionParameters();params.control.x=Self.noise(reference:referenceNoise,sample:noisePatch(sample),channels:3)
+                return try fuse(reference:reference,mean:mean,weights:weights,sample:sample,parameters:params,cancellation:cancellation)
+            }
         }
         guard var result=CIImage(mtlTexture:mean,options:[.colorSpace:space]) else { throw CameraFailure.message("El búfer ZSL no produjo imagen.") }
         var original=CIImage(cgImage:first)
@@ -172,14 +181,14 @@ final class MetalBurstProcessor {
         let referenceJPEG=try JPEGRenderer.render(original,extent:original.extent,options:ProcessingOptions(),context:context)
         return CaptureResult(jpeg:jpeg.data,reference:referenceJPEG.data,details:"ZSL del visor · \(images.count) fotogramas previos · \(jpeg.width) × \(jpeg.height) px · RGB procesado, sin RAW ni recuperación de luces recortadas.",mergedFrames:images.count,source:"preview-ZSL-Metal")
     }
-    private static func noise(reference:Data,sample:Data,scale:Float=1) -> Float {
+    private static func noise(reference:Data,sample:Data,scale:Float=1,channels:Int=4) -> Float {
         let count=min(reference.count,sample.count)/2
         guard count>8 else { return 0.000004 }
         var residuals=[Float]();let step=max(4,(count/4000)/4*4)
         reference.withUnsafeBytes { a in sample.withUnsafeBytes { b in
             func value(_ bytes:UnsafeRawBufferPointer,_ i:Int)->Float { Float(Float16(bitPattern:UInt16(littleEndian:bytes.loadUnaligned(fromByteOffset:i*2,as:UInt16.self)))) }
             for i in stride(from:0,to:count-8,by:step) {
-                for c in 0..<4 { residuals.append(abs((value(b,i+c)*scale-value(a,i+c))-(value(b,i+4+c)*scale-value(a,i+4+c)))) }
+                for c in 0..<channels { residuals.append(abs((value(b,i+c)*scale-value(a,i+c))-(value(b,i+4+c)*scale-value(a,i+4+c)))) }
             }
         } }
         residuals.sort();let sigma=residuals[residuals.count/2]/1.3489795

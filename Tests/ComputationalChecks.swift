@@ -20,6 +20,8 @@ import Darwin
             meter.append([Float](repeating:0.2,count:64*48),time:1)
             meter.append([Float](repeating:0.2,count:64*48),time:1.1)
             try require(meter.estimate(at:1.2)==nil,"Textureless metering claimed stability")
+            let plan=try NightCapturePlan.make(iso:400,seconds:1.0/30,isoRange:25...6400,durationRange:0.0001...1,budget:8,shutterLimit:1,motionLimit:1.0/250)
+            try require(plan.seconds<=1.0/250 && plan.count<=16,"Motion cap did not constrain night exposure")
             var options=ProcessingOptions();options.zeroShutterLagFusion=true;options.nightStatic=true;options.nightRAW=true;options.nightMetalRAW=true
             try require(try JSONDecoder().decode(ProcessingOptions.self,from:JSONEncoder().encode(options))==options,"New recipe fields did not persist")
             _=try options.validated()

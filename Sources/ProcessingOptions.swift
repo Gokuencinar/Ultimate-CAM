@@ -15,7 +15,7 @@ struct ProcessingOptions: Codable, Equatable {
     var zeroShutterLagFusion:Bool = false
     var nightMetalRAW:Bool = false
     var hdrMetalRAW:Bool = false
-    var nightMotionMetering:Bool = true
+    var nightMotionMetering:Bool = false
     var singlePhotoQuality: SinglePhotoQuality = .quality
     var nightBudget: Double = 8
     var nightShutterLimit: Double = 1

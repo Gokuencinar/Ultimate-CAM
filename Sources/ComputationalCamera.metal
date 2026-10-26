@@ -17,6 +17,20 @@ kernel void uc_pyramid(texture2d<float,access::read> input [[texture(0)]],
                   input.read(min(q+uint2(0,1),edge))+input.read(min(q+1,edge)))*0.25f,p);
 }
 
+inline float uc_tile_cost(texture2d<float,access::sample> reference,
+                          texture2d<float,access::sample> sample,uint2 tile,float2 shift,
+                          constant FusionParameters &params) {
+    float cost=0;uint count=0;
+    for (uint y=0;y<16;y+=2) for (uint x=0;x<16;x+=2) {
+        float2 p=float2(tile*16+uint2(x,y))+0.5f,q=p+shift;
+        if (p.x>=reference.get_width() || p.y>=reference.get_height() || q.x<0.5f || q.y<0.5f ||
+            q.x>sample.get_width()-0.5f || q.y>sample.get_height()-0.5f) continue;
+        float a=dot(reference.sample(pixels,p),params.luma),b=dot(sample.sample(pixels,q),params.luma)*params.control.w;
+        cost+=min(abs(a-b),0.25f);++count;
+    }
+    return count>=12 ? cost/float(count):INFINITY;
+}
+
 // One thread per tile. Coarse-to-fine bounded search; phase channels are never
 // shuffled by Bayer interpolation. Flow is in the current level's quad pixels.
 kernel void uc_tile_flow(texture2d<float,access::sample> reference [[texture(0)]],
@@ -33,19 +47,20 @@ kernel void uc_tile_flow(texture2d<float,access::sample> reference [[texture(0)]
     }
     float best=INFINITY,second=INFINITY;int2 chosen=prediction;
     for (int dy=-params.search.x;dy<=params.search.x;++dy) for (int dx=-params.search.x;dx<=params.search.x;++dx) {
-        int2 shift=prediction+int2(dx,dy);float cost=0;uint count=0;
-        for (uint y=0;y<16;y+=2) for (uint x=0;x<16;x+=2) {
-            float2 p=float2(tile*16+uint2(x,y))+0.5f,q=p+float2(shift);
-            if (p.x>=reference.get_width() || p.y>=reference.get_height() || q.x<0.5f || q.y<0.5f ||
-                q.x>sample.get_width()-0.5f || q.y>sample.get_height()-0.5f) continue;
-            float a=dot(reference.sample(pixels,p),params.luma),b=dot(sample.sample(pixels,q),params.luma)*params.control.w;
-            cost+=min(abs(a-b),0.25f);++count;
-        }
-        cost=count>=12 ? cost/float(count):INFINITY;
+        int2 shift=prediction+int2(dx,dy);
+        float cost=uc_tile_cost(reference,sample,tile,float2(shift),params);
         if (cost<best) { second=best;best=cost;chosen=shift; } else second=min(second,cost);
     }
+    float2 refined=float2(chosen);
+    if (params.search.w && isfinite(best)) {
+        for (int y=-2;y<=2;++y) for (int x=-2;x<=2;++x) {
+            float2 shift=float2(chosen)+float2(x,y)*0.25f;
+            float cost=uc_tile_cost(reference,sample,tile,shift,params);
+            if (cost<best) { best=cost;refined=shift; }
+        }
+    }
     float confidence=isfinite(best) ? clamp((second-best)/max(second,1e-6f)*4.0f,0.0f,1.0f):0.0f;
-    output.write(float4(float2(chosen),isfinite(best) ? best:1.0f,confidence),tile);
+    output.write(float4(refined,isfinite(best) ? best:1.0f,confidence),tile);
 }
 
 kernel void uc_fuse_tiles(texture2d<float,access::read> reference [[texture(0)]],

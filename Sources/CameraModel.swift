@@ -274,6 +274,7 @@ final class CameraModel: NSObject, ObservableObject, AVCapturePhotoCaptureDelega
     @objc private func sessionInterrupted() {
         queue.async {
             self.interrupted = true
+            self.previewAnalyzer.setActive(false)
             self.publish { self.ready = false }
             self.message("Cámara interrumpida. Espera a que vuelva a estar disponible.")
         }
@@ -296,6 +297,7 @@ final class CameraModel: NSObject, ObservableObject, AVCapturePhotoCaptureDelega
         queue.async {
             CaptureTrace.record("session.error", ["description": description])
             self.publish { self.ready = false }
+            self.previewAnalyzer.setActive(false)
             if self.captureID != nil { self.finishFailure(CameraFailure.message(description)) }
             else { self.message(description) }
         }
@@ -399,7 +401,9 @@ final class CameraModel: NSObject, ObservableObject, AVCapturePhotoCaptureDelega
             self.previewTools=tools;self.previewAnalyzer.configure(tools,processing:processing)
             guard self.configured,!self.inFlight else { return }
             if graphChanged { self.session.beginConfiguration();self.configurePreviewOutput();self.session.commitConfiguration() }
-            self.previewAnalyzer.setActive(self.active && (tools.enabled || self.temporalFeed))
+            self.previewAnalyzer.setActive(self.active && !self.interrupted && (tools.enabled || self.temporalFeed))
+            let rawAvailable = !self.output.availableRawPhotoPixelFormatTypes.isEmpty
+            self.publish { self.supportsRAW=rawAvailable }
         }
     }
     private func configurePreviewOutput() {
@@ -668,7 +672,7 @@ final class CameraModel: NSObject, ObservableObject, AVCapturePhotoCaptureDelega
                         isoRange: Double(device.activeFormat.minISO)...Double(device.activeFormat.maxISO),
                         durationRange: device.activeFormat.minExposureDuration.seconds...device.activeFormat.maxExposureDuration.seconds,
                         targetOffset: Double(device.exposureTargetOffset), budget: options.nightBudget,
-                        shutterLimit: min(options.nightShutterLimit,motion?.shutterLimit ?? 1)) : nil
+                        shutterLimit: options.nightShutterLimit,motionLimit:motion?.shutterLimit) : nil
                     let bracket = hdr ? try HDRCapturePlan.make(iso:Double(device.iso),seconds:device.exposureDuration.seconds,span:options.hdrSpan,
                         isoRange:Double(device.activeFormat.minISO)...Double(device.activeFormat.maxISO),
                         durationRange:device.activeFormat.minExposureDuration.seconds...device.activeFormat.maxExposureDuration.seconds) : nil
@@ -864,7 +868,7 @@ final class CameraModel: NSObject, ObservableObject, AVCapturePhotoCaptureDelega
                 return
             }
             if self.processingOptions.nightStatic || self.processingOptions.hdrMetalRAW && self.processingOptions.hdrBracketing, let raw = self.rawData {
-                if !self.processingOptions.nightMetalRAW || self.nightRawFrames.isEmpty { self.nightRawFrames.append(raw) }
+                if self.processingOptions.hdrBracketing || !self.processingOptions.nightMetalRAW || self.nightRawFrames.isEmpty { self.nightRawFrames.append(raw) }
                 self.rawData = nil
             }
             if self.frames.count < self.desiredCount {

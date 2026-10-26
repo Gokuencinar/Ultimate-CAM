@@ -41,7 +41,7 @@ struct PreviewMotionEstimate {
     let confidence:Double
     var shutterLimit:Double? {
         guard confidence>=0.25 else { return nil }
-        return min(1,max(1.0/30,0.35/max(0.35,pixelsPerSecond)))
+        return min(1,max(1.0/250,0.35/max(0.35,pixelsPerSecond)))
     }
 }
 final class PreviewMotionMeter {

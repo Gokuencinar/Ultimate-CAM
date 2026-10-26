@@ -1,7 +1,7 @@
 import Foundation
 
 /// Static scene only. Trade ISO for photons and account for bounded AE shortfall.
-/// This is not motion metering and does not claim Night Sight equivalence.
+/// Accepts a separate, confidence-gated preview motion cap; no Night Sight model.
 struct NightCapturePlan {
     let seconds: Double
     let iso: Double
@@ -10,7 +10,7 @@ struct NightCapturePlan {
 
     static func make(iso: Double, seconds: Double, isoRange: ClosedRange<Double>,
                      durationRange: ClosedRange<Double>, targetOffset: Double = 0,
-                     budget: Double = 8, shutterLimit: Double = 1) throws -> NightCapturePlan {
+                     budget: Double = 8, shutterLimit: Double = 1,motionLimit:Double?=nil) throws -> NightCapturePlan {
         let values = [iso, seconds, isoRange.lowerBound, isoRange.upperBound,
                       durationRange.lowerBound, durationRange.upperBound]
         guard budget.isFinite, (1...16).contains(budget), shutterLimit.isFinite, (1.0/30...1).contains(shutterLimit),
@@ -18,6 +18,7 @@ struct NightCapturePlan {
               isoRange.contains(iso), durationRange.contains(seconds) else {
             throw CameraFailure.message("La medición nocturna no es válida. Vuelve a medir la escena.")
         }
+        if let motionLimit { guard motionLimit.isFinite,(1.0/1000...1).contains(motionLimit) else { throw CameraFailure.message("Medición de movimiento fuera de rango.") } }
         // AE can hit its preview ISO/shutter ceiling before reaching its target.
         // Compensate only measured underexposure at high ISO, with a 2 EV cap.
         let compensation = iso >= isoRange.upperBound * 0.8 && seconds >= 1.0 / 30
@@ -26,7 +27,7 @@ struct NightCapturePlan {
         guard meteredProduct.isFinite, seconds <= 1 else {
             throw CameraFailure.message("La medición supera el presupuesto de captura nocturna.")
         }
-        let limit = min(shutterLimit, durationRange.upperBound, budget/3)
+        let limit = min(shutterLimit,motionLimit ?? 1, durationRange.upperBound, budget/3)
         guard limit >= durationRange.lowerBound else { throw CameraFailure.message("El formato no permite el límite nocturno elegido.") }
         // At minimum ISO, extending an already bright exposure would clip it.
         let desired = min(limit, meteredProduct / isoRange.lowerBound)
