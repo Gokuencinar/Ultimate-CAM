@@ -170,6 +170,12 @@ enum FusedDNG {
               c.matrix.count==9,c.matrix.allSatisfy({$0.isFinite && abs($0)<32}),
               c.neutral.count==3,c.neutral.allSatisfy({$0.isFinite && $0>0 && $0<32}),
               c.pattern.sorted()==[0,1,1,2],(1...8).contains(c.orientation),(1...255).contains(c.illuminant) else { throw CameraFailure.message("Mosaico fusionado inválido.") }
+        func stage(_ name:String) {
+            #if os(macOS)
+            if ProcessInfo.processInfo.environment["UC_DNG_TRACE"]=="1" { print("DNG:",name) }
+            #endif
+        }
+        stage("validated")
         func u16(_ n:UInt16)->Data { var x=n.littleEndian;return withUnsafeBytes(of:&x) { Data($0) } }
         func u32(_ n:UInt32)->Data { var x=n.littleEndian;return withUnsafeBytes(of:&x) { Data($0) } }
         func rational(_ n:Double,signed:Bool=false)->Data {
@@ -196,6 +202,7 @@ enum FusedDNG {
             add(tag,tag==50727 ? 5:10,UInt32(values.count),values.reduce(Data()) { $0+rational($1) })
         }
         if c.illuminant2>0 { add(50779,3,1,u16(c.illuminant2)) }
+        stage("tags built")
         tags.sort { $0.key<$1.key }
         let base=8+2+tags.count*12+4
         var extra=Data(),entries=Data()
@@ -210,12 +217,14 @@ enum FusedDNG {
         var header=Data([0x49,0x49,42,0])
         header+=u32(8);header+=u16(UInt16(tags.count));header+=entries;header+=u32(0);header+=extra
         guard header.count==stripOffset,stripOffset%2==0 else { throw CameraFailure.message("Cabecera DNG desalineada.") }
+        stage("header built")
         let length=header.count+w*h*2
         let allocation=UnsafeMutableRawPointer.allocate(byteCount:length,alignment:16)
         var transferred=false
         defer { if !transferred { allocation.deallocate() } }
         header.withUnsafeBytes { allocation.copyMemory(from:$0.baseAddress!,byteCount:header.count) }
         let mosaic=allocation.advanced(by:stripOffset).assumingMemoryBound(to:UInt16.self)
+        stage("allocated output")
         try quads.withUnsafeBytes { bytes in
             guard let address=bytes.baseAddress,Int(bitPattern:address)%2==0 else { throw CameraFailure.message("Cuartetos RAW desalineados.") }
             let input=UnsafeBufferPointer(start:address.assumingMemoryBound(to:UInt16.self),count:width*height*4)
@@ -225,6 +234,7 @@ enum FusedDNG {
                 let sample=min(Float(65535),max(0,(value*57343+4096).rounded()))
                 return UInt16(sample).littleEndian
             }
+            stage("typed input")
             for y in 0..<height {
                 let top=mosaic.advanced(by:y*2*w),bottom=top.advanced(by:w)
                 let row=input.baseAddress!.advanced(by:y*width*4)
@@ -235,6 +245,7 @@ enum FusedDNG {
                 }
             }
         }
+        stage("pixels written")
         let result=Data(bytesNoCopy:allocation,count:length,deallocator:.custom { pointer,_ in pointer.deallocate() })
         transferred=true;return result
     }

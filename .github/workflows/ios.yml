@@ -37,8 +37,11 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p build
-          xcrun --sdk macosx swiftc -O Sources/CameraFailure.swift Sources/TemporalFrameBuffer.swift Sources/SensorBayerFrame.swift Sources/HDRCapturePlan.swift Sources/NightCapturePlan.swift Sources/ProcessingOptions.swift Sources/PhotoCapturePolicy.swift Sources/ColorRecipe.swift Sources/CubeLUT.swift Tests/ComputationalChecks.swift -o build/computational-checks
-          build/computational-checks
+          xcrun --sdk macosx swiftc -g -O Sources/CameraFailure.swift Sources/TemporalFrameBuffer.swift Sources/SensorBayerFrame.swift Sources/HDRCapturePlan.swift Sources/NightCapturePlan.swift Sources/ProcessingOptions.swift Sources/PhotoCapturePolicy.swift Sources/ColorRecipe.swift Sources/CubeLUT.swift Tests/ComputationalChecks.swift -o build/computational-checks
+          if ! UC_DNG_TRACE=1 SWIFT_BACKTRACE=enable=yes,interactive=no build/computational-checks; then
+            xcrun lldb --batch -o run -o 'thread backtrace all' -- build/computational-checks || true
+            exit 1
+          fi
       - name: Build for iPhone without signing
         run: |
           set -euo pipefail
