@@ -582,7 +582,7 @@ struct CameraView: View {
                 Picker("Fotogramas", selection: $stackCount) { ForEach([3,5,7,9], id: \.self) { Text("\($0) fotos").tag($0) } }
                 Picker("Lado largo máximo", selection: $options.maximumDimension) {
                     Text("2048 px · ligera").tag(2048.0); Text("2560 px · equilibrada").tag(2560.0); Text("4096 px · más memoria").tag(4096.0)
-                }
+                }.disabled(intrinsicMetalFusion)
                 Toggle("Referencia más nítida", isOn: $options.chooseSharpestReference).disabled(intrinsicMetalFusion)
                 Toggle("Rechazo de movimiento",isOn:Binding(get:{options.rejectMotion || intrinsicMetalFusion},set:{options.rejectMotion=$0})).disabled(intrinsicMetalFusion || (options.nightStatic && options.nightSpectralFusion))
                 Toggle("Alineación local experimental", isOn: $options.localAlignment).disabled(intrinsicMetalFusion)

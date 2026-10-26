@@ -606,129 +606,132 @@ final class CameraModel: NSObject, ObservableObject, AVCapturePhotoCaptureDelega
 
     func capture(stack: Bool, count: Int = 3, raw: Bool = false, flash: CameraFlash = .off, options: ProcessingOptions = ProcessingOptions(),mirrorSelfie:Bool=false) {
         let shutterTime=ProcessInfo.processInfo.systemUptime
-        queue.async {
-            guard self.active, self.session.isRunning, !self.interrupted, !self.inFlight, !self.captureRecoveryRequired,
-                  let device = self.input?.device else { return }
-            do { _ = try options.validated() } catch { self.message(error.localizedDescription); return }
-            let night = options.nightStatic, hdr = options.hdrBracketing
-            let burst = stack || night || hdr
-            guard !raw || (!burst && !self.output.availableRawPhotoPixelFormatTypes.isEmpty) else {
-                self.message(burst ? "HDR y Pila usan JPEG; RAW se activa en Foto o en Noche experimental." : "Esta cámara no admite RAW.")
-                CaptureTrace.record("capture.rejected", ["reason": "RAW unavailable in this configuration"])
+        queue.async { self.beginCapture(stack:stack,count:count,raw:raw,flash:flash,options:options,mirrorSelfie:mirrorSelfie,shutterTime:shutterTime) }
+    }
+    private func beginCapture(stack:Bool,count:Int,raw:Bool,flash:CameraFlash,options:ProcessingOptions,mirrorSelfie:Bool,shutterTime:Double) {
+        guard self.active, self.session.isRunning, !self.interrupted, !self.inFlight, !self.captureRecoveryRequired,
+              let device = self.input?.device else { return }
+        do { _ = try options.validated() } catch { self.message(error.localizedDescription); return }
+        let night = options.nightStatic, hdr = options.hdrBracketing
+        let burst = stack || night || hdr
+        guard !raw || (!burst && !self.output.availableRawPhotoPixelFormatTypes.isEmpty) else {
+            self.message(burst ? "HDR y Pila usan JPEG; RAW se activa en Foto o en Noche experimental." : "Esta cámara no admite RAW.")
+            CaptureTrace.record("capture.rejected", ["reason": "RAW unavailable in this configuration"])
+            return
+        }
+        guard flash == .off || (!burst && !raw && device.hasFlash && device.isFlashAvailable &&
+              self.output.supportedFlashModes.contains(flash.mode)) else {
+            self.message("El flash no está disponible. Usa Foto JPEG y una cámara con flash preparado.")
+            CaptureTrace.record("capture.rejected", ["reason": "flash unavailable in this configuration"])
+            return
+        }
+        self.requestedFlash = flash
+        self.inFlight = true
+        self.transaction = UUID()
+        self.frames = []
+        self.nightRawFrames = [];self.sensorFrames=[]
+        self.hdrPlan = []; self.hdrExposures = []; self.lastHDRTimestamp = nil
+        self.nightFrameSeconds = 0
+        self.lastNightTimestamp = nil
+        self.desiredCount = hdr ? 3 : (burst ? min(9, max(3, count)) : 1)
+        self.processingOptions = options
+        self.rawRequested = (raw || (night && options.nightRAW) || (hdr && options.hdrMetalRAW)) && !self.output.availableRawPhotoPixelFormatTypes.isEmpty
+        self.rawData = nil
+        let preRoll=options.zeroShutterLagFusion && !burst && !raw && flash == .off && options.portraitAmount==0
+            && device.exposureMode != .custom && device.exposureMode != .locked ? self.previewAnalyzer.history.snapshot(at:shutterTime).map(\.value):[]
+        let motion=options.nightMotionMetering ? self.previewAnalyzer.motion.estimate(at:shutterTime):nil
+        self.previewAnalyzer.setActive(false)
+        self.publish { self.busy = true }
+        do {
+            // Snapshot once for the whole transaction. A turn during a
+            // temporal stack/HDR bracket must not change its pixel axes.
+            guard let connection=self.output.connection(with:.video),let rotation=self.rotationCoordinator else {
+                throw CameraFailure.message("No se pudo preparar la orientación. Vuelve a abrir la cámara.")
+            }
+            let angle=try CaptureRotation.cardinal(Double(rotation.videoRotationAngleForHorizonLevelCapture))
+            guard connection.isVideoRotationAngleSupported(CGFloat(angle)) else { throw CameraFailure.message("La cámara no admite esa orientación de foto.") }
+            connection.videoRotationAngle=CGFloat(angle)
+            let mirror=mirrorSelfie && device.position == .front
+            if connection.isVideoMirroringSupported { connection.automaticallyAdjustsVideoMirroring=false;connection.isVideoMirrored=mirror }
+            else if mirror { throw CameraFailure.message("Esta cámara no admite guardar la selfie reflejada.") }
+            if preRoll.count>=3 {
+                self.processZSL(preRoll,options:options,angle:angle,previewMirrored:device.position == .front,mirrorOutput:mirror)
                 return
             }
-            guard flash == .off || (!burst && !raw && device.hasFlash && device.isFlashAvailable &&
-                  self.output.supportedFlashModes.contains(flash.mode)) else {
-                self.message("El flash no está disponible. Usa Foto JPEG y una cámara con flash preparado.")
-                CaptureTrace.record("capture.rejected", ["reason": "flash unavailable in this configuration"])
-                return
+            if ((options.nightMetalRAW && night) || (options.hdrMetalRAW && hdr)) && !self.rawRequested { throw CameraFailure.message("La lente no ofrece Bayer RAW para Metal.") }
+            if (night && options.nightMetalRAW) || (hdr && options.hdrMetalRAW) {
+                let dimensions=self.output.maxPhotoDimensions
+                let pixels:Int64=Int64(dimensions.width)*Int64(dimensions.height)
+                let frames:Int64=night ? 16:3
+                let required:Int64=pixels*2*frames+Int64(64*1024*1024)
+                try BayerScratchStorage.ensureCapacity(required:required)
             }
-            self.requestedFlash = flash
-            self.inFlight = true
-            self.transaction = UUID()
-            self.frames = []
-            self.nightRawFrames = [];self.sensorFrames=[]
-            self.hdrPlan = []; self.hdrExposures = []; self.lastHDRTimestamp = nil
-            self.nightFrameSeconds = 0
-            self.lastNightTimestamp = nil
-            self.desiredCount = hdr ? 3 : (burst ? min(9, max(3, count)) : 1)
-            self.processingOptions = options
-            self.rawRequested = (raw || (night && options.nightRAW) || (hdr && options.hdrMetalRAW)) && !self.output.availableRawPhotoPixelFormatTypes.isEmpty
-            self.rawData = nil
-            let preRoll=options.zeroShutterLagFusion && !burst && !raw && flash == .off && options.portraitAmount==0
-                && device.exposureMode != .custom && device.exposureMode != .locked ? self.previewAnalyzer.history.snapshot(at:shutterTime).map(\.value):[]
-            let motion=options.nightMotionMetering ? self.previewAnalyzer.motion.estimate(at:shutterTime):nil
-            self.previewAnalyzer.setActive(false)
-            self.publish { self.busy = true }
-            do {
-                // Snapshot once for the whole transaction. A turn during a
-                // temporal stack/HDR bracket must not change its pixel axes.
-                guard let connection=self.output.connection(with:.video),let rotation=self.rotationCoordinator else {
-                    throw CameraFailure.message("No se pudo preparar la orientación. Vuelve a abrir la cámara.")
+            if burst {
+                guard !device.isAdjustingExposure, !device.isAdjustingWhiteBalance,
+                      !device.isAdjustingFocus else {
+                    throw CameraFailure.message("Espera a que terminen el enfoque y la exposición y vuelve a capturar.")
                 }
-                let angle=try CaptureRotation.cardinal(Double(rotation.videoRotationAngleForHorizonLevelCapture))
-                guard connection.isVideoRotationAngleSupported(CGFloat(angle)) else { throw CameraFailure.message("La cámara no admite esa orientación de foto.") }
-                connection.videoRotationAngle=CGFloat(angle)
-                let mirror=mirrorSelfie && device.position == .front
-                if connection.isVideoMirroringSupported { connection.automaticallyAdjustsVideoMirroring=false;connection.isVideoMirrored=mirror }
-                else if mirror { throw CameraFailure.message("Esta cámara no admite guardar la selfie reflejada.") }
-                if preRoll.count>=3 {
-                    self.processZSL(preRoll,options:options,angle:angle,previewMirrored:device.position == .front,mirrorOutput:mirror)
+                guard device.isExposureModeSupported(.locked), device.isWhiteBalanceModeSupported(.locked) else {
+                    throw CameraFailure.message("Esta cámara no admite los bloqueos necesarios para la pila.")
+                }
+                if (night || hdr) && (device.exposureMode == .custom || device.exposureMode == .locked || !device.isExposureModeSupported(.custom)) {
+                    throw CameraFailure.message("Noche y HDR necesitan exposición automática: desactiva ISO manual o toca el visor para liberar AE. Puedes fijar solo el enfoque con el control manual.")
+                }
+                let plan = night ? try NightCapturePlan.make(iso: Double(device.iso), seconds: device.exposureDuration.seconds,
+                    isoRange: Double(device.activeFormat.minISO)...Double(device.activeFormat.maxISO),
+                    durationRange: device.activeFormat.minExposureDuration.seconds...device.activeFormat.maxExposureDuration.seconds,
+                    targetOffset: Double(device.exposureTargetOffset), budget: options.nightBudget,
+                    shutterLimit: options.nightShutterLimit,motionLimit:motion?.shutterLimit) : nil
+                let bracket = hdr ? try HDRCapturePlan.make(iso:Double(device.iso),seconds:device.exposureDuration.seconds,span:options.hdrSpan,
+                    isoRange:Double(device.activeFormat.minISO)...Double(device.activeFormat.maxISO),
+                    durationRange:device.activeFormat.minExposureDuration.seconds...device.activeFormat.maxExposureDuration.seconds) : nil
+                try device.lockForConfiguration()
+                defer { device.unlockForConfiguration() }
+                if device.exposureMode != .custom { self.savedExposure = device.exposureMode }
+                self.savedWhiteBalance = device.whiteBalanceMode
+                device.whiteBalanceMode = .locked
+                if device.isFocusModeSupported(.locked) {
+                    self.savedFocus = device.focusMode
+                    device.focusMode = .locked
+                }
+                if let bracket {
+                    self.hdrPlan = bracket
+                    self.savedFrameDurations = (device.activeVideoMinFrameDuration,device.activeVideoMaxFrameDuration)
+                    self.queue.async { self.prepareHDRFrame() }
                     return
                 }
-                if ((options.nightMetalRAW && night) || (options.hdrMetalRAW && hdr)) && !self.rawRequested { throw CameraFailure.message("La lente no ofrece Bayer RAW para Metal.") }
-                if (night && options.nightMetalRAW) || (hdr && options.hdrMetalRAW) {
-                    let dimensions=self.output.maxPhotoDimensions
-                    let bytes=Int64(dimensions.width)*Int64(dimensions.height)*2*Int64(night ? 16:3)+64*1024*1024
-                    try BayerScratchStorage.ensureCapacity(required:bytes)
-                }
-                if burst {
-                    guard !device.isAdjustingExposure, !device.isAdjustingWhiteBalance,
-                          !device.isAdjustingFocus else {
-                        throw CameraFailure.message("Espera a que terminen el enfoque y la exposición y vuelve a capturar.")
-                    }
-                    guard device.isExposureModeSupported(.locked), device.isWhiteBalanceModeSupported(.locked) else {
-                        throw CameraFailure.message("Esta cámara no admite los bloqueos necesarios para la pila.")
-                    }
-                    if (night || hdr) && (device.exposureMode == .custom || device.exposureMode == .locked || !device.isExposureModeSupported(.custom)) {
-                        throw CameraFailure.message("Noche y HDR necesitan exposición automática: desactiva ISO manual o toca el visor para liberar AE. Puedes fijar solo el enfoque con el control manual.")
-                    }
-                    let plan = night ? try NightCapturePlan.make(iso: Double(device.iso), seconds: device.exposureDuration.seconds,
-                        isoRange: Double(device.activeFormat.minISO)...Double(device.activeFormat.maxISO),
-                        durationRange: device.activeFormat.minExposureDuration.seconds...device.activeFormat.maxExposureDuration.seconds,
-                        targetOffset: Double(device.exposureTargetOffset), budget: options.nightBudget,
-                        shutterLimit: options.nightShutterLimit,motionLimit:motion?.shutterLimit) : nil
-                    let bracket = hdr ? try HDRCapturePlan.make(iso:Double(device.iso),seconds:device.exposureDuration.seconds,span:options.hdrSpan,
-                        isoRange:Double(device.activeFormat.minISO)...Double(device.activeFormat.maxISO),
-                        durationRange:device.activeFormat.minExposureDuration.seconds...device.activeFormat.maxExposureDuration.seconds) : nil
-                    try device.lockForConfiguration()
-                    defer { device.unlockForConfiguration() }
-                    if device.exposureMode != .custom { self.savedExposure = device.exposureMode }
-                    self.savedWhiteBalance = device.whiteBalanceMode
-                    device.whiteBalanceMode = .locked
-                    if device.isFocusModeSupported(.locked) {
-                        self.savedFocus = device.focusMode
-                        device.focusMode = .locked
-                    }
-                    if let bracket {
-                        self.hdrPlan = bracket
-                        self.savedFrameDurations = (device.activeVideoMinFrameDuration,device.activeVideoMaxFrameDuration)
-                        self.queue.async { self.prepareHDRFrame() }
-                        return
-                    }
-                    if let plan {
-                        self.savedFrameDurations = (device.activeVideoMinFrameDuration, device.activeVideoMaxFrameDuration)
-                        self.desiredCount = plan.count
-                        let token = self.transaction
-                        CaptureTrace.record("night.plan", ["seconds": plan.seconds, "iso": plan.iso,
-                            "count": plan.count, "source": self.rawRequested ? "RAW" : "JPEG",
-                            "totalExposureSeconds": plan.seconds * Double(plan.count),
-                            "compensationEV": plan.compensationEV, "meteredOffsetEV": device.exposureTargetOffset,
-                            "minFrameSeconds": device.activeVideoMinFrameDuration.seconds, "maxFrameSeconds": device.activeVideoMaxFrameDuration.seconds])
-                        self.message("Noche estática: \(plan.count) fotos. Apoya el iPhone hasta terminar.")
-                        self.captureStage = "night-setup"
-                        device.setExposureModeCustom(duration: CMTime(seconds: plan.seconds, preferredTimescale: 1_000_000),
-                            iso: Float(plan.iso)) { _ in
-                            self.queue.async {
-                                guard self.inFlight, self.transaction == token else { return }
-                                self.nightFrameSeconds = device.exposureDuration.seconds
-                                CaptureTrace.record("night.exposure.applied", ["seconds": device.exposureDuration.seconds, "iso": device.iso])
-                                self.captureNext()
-                            }
+                if let plan {
+                    self.savedFrameDurations = (device.activeVideoMinFrameDuration, device.activeVideoMaxFrameDuration)
+                    self.desiredCount = plan.count
+                    let token = self.transaction
+                    CaptureTrace.record("night.plan", ["seconds": plan.seconds, "iso": plan.iso,
+                        "count": plan.count, "source": self.rawRequested ? "RAW" : "JPEG",
+                        "totalExposureSeconds": plan.seconds * Double(plan.count),
+                        "compensationEV": plan.compensationEV, "meteredOffsetEV": device.exposureTargetOffset,
+                        "minFrameSeconds": device.activeVideoMinFrameDuration.seconds, "maxFrameSeconds": device.activeVideoMaxFrameDuration.seconds])
+                    self.message("Noche estática: \(plan.count) fotos. Apoya el iPhone hasta terminar.")
+                    self.captureStage = "night-setup"
+                    device.setExposureModeCustom(duration: CMTime(seconds: plan.seconds, preferredTimescale: 1_000_000),
+                        iso: Float(plan.iso)) { _ in
+                        self.queue.async {
+                            guard self.inFlight, self.transaction == token else { return }
+                            self.nightFrameSeconds = device.exposureDuration.seconds
+                            CaptureTrace.record("night.exposure.applied", ["seconds": device.exposureDuration.seconds, "iso": device.iso])
+                            self.captureNext()
                         }
-                        self.queue.asyncAfter(deadline: .now() + 5) {
-                            guard self.inFlight, self.transaction == token, self.captureStage == "night-setup" else { return }
-                            self.captureRecoveryRequired = true
-                            self.publish { self.ready = false }
-                            self.finishFailure(CameraFailure.message("No se confirmó la exposición nocturna. Cierra y abre Ultimate CAM; no se ha repetido la captura."))
-                        }
-                        return
                     }
-                    if device.exposureMode != .custom { device.exposureMode = .locked }
+                    self.queue.asyncAfter(deadline: .now() + 5) {
+                        guard self.inFlight, self.transaction == token, self.captureStage == "night-setup" else { return }
+                        self.captureRecoveryRequired = true
+                        self.publish { self.ready = false }
+                        self.finishFailure(CameraFailure.message("No se confirmó la exposición nocturna. Cierra y abre Ultimate CAM; no se ha repetido la captura."))
+                    }
+                    return
                 }
-                self.captureNext()
-            } catch { self.finishFailure(error) }
-        }
+                if device.exposureMode != .custom { device.exposureMode = .locked }
+            }
+            self.captureNext()
+        } catch { self.finishFailure(error) }
     }
 
     private func prepareHDRFrame() {

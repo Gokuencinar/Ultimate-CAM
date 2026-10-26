@@ -40,7 +40,6 @@ import Darwin
             print("Core format: half bytes",quadData.count)
             let dng=try FusedDNG.encode(quads:quadData,width:256,height:192,calibration:calibration)
             print("Core format: DNG ImageIO reader",dng.count)
-            print("Core DNG header:",dng.prefix(1024).base64EncodedString())
             guard let source=CGImageSourceCreateWithData(dng as CFData,[kCGImageSourceTypeIdentifierHint:"com.adobe.raw-image"] as CFDictionary),
                   let props=CGImageSourceCopyPropertiesAtIndex(source,0,nil) as? [String:Any] else { throw CameraFailure.message("Working DNG is unreadable") }
             try require((props[kCGImagePropertyPixelWidth as String] as? Int) != nil,"DNG properties missing")
