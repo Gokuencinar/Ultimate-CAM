@@ -213,7 +213,8 @@ enum FusedDNG {
         if c.illuminant2>0 { add(50779,3,1,u16(c.illuminant2)) }
         // Canonical TIFF/EP layout: reduced RGB IFD0 plus full Bayer SubIFD.
         // Keep global DNG/color tags in IFD0 as well as the raw directory.
-        var preview=tags.filter { $0.key>=50706 }
+        let globalTags:Set<UInt16>=[50706,50707,50708,50721,50722,50723,50724,50727,50728,50778,50779]
+        var preview=tags.filter { globalTags.contains($0.key) }
         func thumb(_ key:UInt16,_ type:UInt16,_ count:UInt32,_ data:Data) { preview.append(Tag(key:key,type:type,count:count,data:data)) }
         thumb(254,4,1,u32(1));thumb(256,4,1,u32(16));thumb(257,4,1,u32(16))
         thumb(258,3,3,u16(8)+u16(8)+u16(8));thumb(259,3,1,u16(1));thumb(262,3,1,u16(2))
