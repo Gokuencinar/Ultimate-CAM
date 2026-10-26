@@ -40,7 +40,7 @@ import Darwin
             print("Core format: half bytes",quadData.count)
             let dng=try FusedDNG.encode(quads:quadData,width:64,height:48,calibration:calibration)
             print("Core format: DNG ImageIO reader",dng.count)
-            guard let source=CGImageSourceCreateWithData(dng as CFData,nil),
+            guard let source=CGImageSourceCreateWithData(dng as CFData,[kCGImageSourceTypeIdentifierHint:"com.adobe.raw-image"] as CFDictionary),
                   let props=CGImageSourceCopyPropertiesAtIndex(source,0,nil) as? [String:Any] else { throw CameraFailure.message("Working DNG is unreadable") }
             try require((props[kCGImagePropertyPixelWidth as String] as? Int)==128 && (props[kCGImagePropertyPixelHeight as String] as? Int)==96,"Working DNG geometry was lost")
             print("Core format: DNG developer")
@@ -61,7 +61,7 @@ import Darwin
             mapped.storage.discardResidentPages()
             try require(mapped.data==native,"Mapped burst payload changed after page discard")
             let nativeDNG=try FusedDNG.encode(quads:mapped.data,width:2016,height:1512,calibration:calibration)
-            guard let nativeSource=CGImageSourceCreateWithData(nativeDNG as CFData,nil),
+            guard let nativeSource=CGImageSourceCreateWithData(nativeDNG as CFData,[kCGImageSourceTypeIdentifierHint:"com.adobe.raw-image"] as CFDictionary),
                   let nativeProps=CGImageSourceCopyPropertiesAtIndex(nativeSource,0,nil) as? [String:Any] else { throw CameraFailure.message("Native DNG unreadable") }
             try require((nativeProps[kCGImagePropertyPixelWidth as String] as? Int)==4032 && (nativeProps[kCGImagePropertyPixelHeight as String] as? Int)==3024,"Native DNG lost 12MP geometry")
             print("Computational source checks passed; no capture session, app launch or GPU execution.")
