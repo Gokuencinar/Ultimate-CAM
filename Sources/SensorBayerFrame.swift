@@ -19,6 +19,8 @@ struct SensorBayerFrame {
     let calibration:BayerCalibration
     let exposure:FrameExposure
     let timestamp:Double
+    var backing:BayerScratchStorage? = nil
+    func discardResidentPages() { backing?.discardResidentPages() }
 
     #if os(iOS)
     static func capture(_ photo:AVCapturePhoto,dng:Data) throws -> SensorBayerFrame {
@@ -106,8 +108,9 @@ struct SensorBayerFrame {
         guard (1...8).contains(orientation) else { throw CameraFailure.message("Orientación RAW inválida.") }
         var calibration=BayerCalibration(pattern:croppedPattern,matrix:matrix,neutral:neutral,illuminant:UInt16(illumination),orientation:orientation)
         calibration.extraColor=extra;calibration.illuminant2=extra[50722]==nil ? 0:UInt16(secondIlluminant)
-        return SensorBayerFrame(width:qw,height:qh,quads:packed,
-            calibration:calibration,exposure:exposure,timestamp:photo.timestamp.seconds)
+        let mapped=try BayerScratchStorage.store(packed)
+        var frame=SensorBayerFrame(width:qw,height:qh,quads:mapped.data,calibration:calibration,exposure:exposure,timestamp:photo.timestamp.seconds)
+        frame.backing=mapped.storage;return frame
     }
     #endif
 }
@@ -179,8 +182,9 @@ enum FusedDNG {
         func u16(_ n:UInt16)->Data { var x=n.littleEndian;return withUnsafeBytes(of:&x) { Data($0) } }
         func u32(_ n:UInt32)->Data { var x=n.littleEndian;return withUnsafeBytes(of:&x) { Data($0) } }
         func rational(_ n:Double,signed:Bool=false)->Data {
-            let numerator=Int32((n*1_000_000).rounded())
-            return u32(UInt32(bitPattern:numerator))+u32(1_000_000)
+            let scaled=(n*1_000_000).rounded()
+            let numerator=signed ? UInt32(bitPattern:Int32(scaled)):UInt32(scaled)
+            return u32(numerator)+u32(1_000_000)
         }
         struct Tag { let key:UInt16,type:UInt16,count:UInt32,data:Data }
         var tags=[Tag]()
@@ -198,8 +202,8 @@ enum FusedDNG {
         add(50721,10,9,c.matrix.reduce(Data()) { $0+rational($1,signed:true) })
         add(50728,5,3,c.neutral.reduce(Data()) { $0+rational($1) });add(50778,3,1,u16(c.illuminant))
         for (tag,values) in c.extraColor {
-            guard [50722,50723,50724,50727].contains(tag),values.count==(tag==50727 ? 3:9),values.allSatisfy({$0.isFinite && abs($0)<32}) else { throw CameraFailure.message("Etiquetas de color DNG fuera de rango.") }
-            add(tag,tag==50727 ? 5:10,UInt32(values.count),values.reduce(Data()) { $0+rational($1) })
+            guard [50722,50723,50724,50727].contains(tag),values.count==(tag==50727 ? 3:9),values.allSatisfy({$0.isFinite && abs($0)<32}),tag != 50727 || values.allSatisfy({$0>0}) else { throw CameraFailure.message("Etiquetas de color DNG fuera de rango.") }
+            add(tag,tag==50727 ? 5:10,UInt32(values.count),values.reduce(Data()) { $0+rational($1,signed:tag != 50727) })
         }
         if c.illuminant2>0 { add(50779,3,1,u16(c.illuminant2)) }
         stage("tags built")
