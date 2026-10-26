@@ -182,6 +182,10 @@ enum FusedDNG {
         func u16(_ n:UInt16)->Data { var x=n.littleEndian;return withUnsafeBytes(of:&x) { Data($0) } }
         func u32(_ n:UInt32)->Data { var x=n.littleEndian;return withUnsafeBytes(of:&x) { Data($0) } }
         func rational(_ n:Double,signed:Bool=false)->Data {
+            if n.rounded()==n {
+                let numerator=signed ? UInt32(bitPattern:Int32(n)):UInt32(n)
+                return u32(numerator)+u32(1)
+            }
             let scaled=(n*1_000_000).rounded()
             let numerator=signed ? UInt32(bitPattern:Int32(scaled)):UInt32(scaled)
             return u32(numerator)+u32(1_000_000)
@@ -190,6 +194,7 @@ enum FusedDNG {
         var tags=[Tag]()
         func add(_ key:UInt16,_ type:UInt16,_ count:UInt32,_ data:Data) { tags.append(Tag(key:key,type:type,count:count,data:data)) }
         let w=width*2,h=height*2
+        add(254,4,1,u32(0))
         add(256,4,1,u32(UInt32(w)));add(257,4,1,u32(UInt32(h)))
         add(258,3,1,u16(16));add(259,3,1,u16(1));add(262,3,1,u16(32803))
         add(273,4,1,u32(0));add(274,3,1,u16(UInt16(c.orientation)))
@@ -206,20 +211,35 @@ enum FusedDNG {
             add(tag,tag==50727 ? 5:10,UInt32(values.count),values.reduce(Data()) { $0+rational($1,signed:tag != 50727) })
         }
         if c.illuminant2>0 { add(50779,3,1,u16(c.illuminant2)) }
-        stage("tags built")
-        tags.sort { $0.key<$1.key }
-        let base=8+2+tags.count*12+4
-        var extra=Data(),entries=Data()
-        let extraBytes=tags.reduce(0) { $0+($1.data.count>4 ? ($1.data.count+1)/2*2:0) }
-        let stripOffset=base+extraBytes
-        for tag in tags {
-            entries+=u16(tag.key)+u16(tag.type)+u32(tag.count)
-            if tag.key==273 { entries+=u32(UInt32(stripOffset)) }
-            else if tag.data.count<=4 { entries+=tag.data+Data(repeating:0,count:4-tag.data.count) }
-            else { entries+=u32(UInt32(base+extra.count));extra+=tag.data;if extra.count%2==1 { extra.append(0) } }
+        // Canonical TIFF/EP layout: reduced RGB IFD0 plus full Bayer SubIFD.
+        // Keep global DNG/color tags in IFD0 as well as the raw directory.
+        var preview=tags.filter { $0.key>=50706 }
+        func thumb(_ key:UInt16,_ type:UInt16,_ count:UInt32,_ data:Data) { preview.append(Tag(key:key,type:type,count:count,data:data)) }
+        thumb(254,4,1,u32(1));thumb(256,4,1,u32(16));thumb(257,4,1,u32(16))
+        thumb(258,3,3,u16(8)+u16(8)+u16(8));thumb(259,3,1,u16(1));thumb(262,3,1,u16(2))
+        thumb(273,4,1,u32(0));thumb(274,3,1,u16(UInt16(c.orientation)));thumb(277,3,1,u16(3))
+        thumb(278,4,1,u32(16));thumb(279,4,1,u32(16*16*3));thumb(284,3,1,u16(1));thumb(330,4,1,u32(0))
+        tags.sort { $0.key<$1.key };preview.sort { $0.key<$1.key }
+        func directorySize(_ tags:[Tag])->Int { 2+tags.count*12+4+tags.reduce(0) { $0+($1.data.count>4 ? ($1.data.count+1)/2*2:0) } }
+        let rawOffset=8+directorySize(preview),thumbnailOffset=rawOffset+directorySize(tags)
+        let stripOffset=thumbnailOffset+16*16*3
+        func directory(_ tags:[Tag],offset:Int,strip:Int)->Data {
+            let base=offset+2+tags.count*12+4
+            var extra=Data(),entries=Data()
+            for tag in tags {
+                entries+=u16(tag.key)+u16(tag.type)+u32(tag.count)
+                if tag.key==273 { entries+=u32(UInt32(strip)) }
+                else if tag.key==330 { entries+=u32(UInt32(rawOffset)) }
+                else if tag.data.count<=4 { entries+=tag.data+Data(repeating:0,count:4-tag.data.count) }
+                else { entries+=u32(UInt32(base+extra.count));extra+=tag.data;if extra.count%2==1 { extra.append(0) } }
+            }
+            var output=u16(UInt16(tags.count));output+=entries;output+=u32(0);output+=extra;return output
         }
-        var header=Data([0x49,0x49,42,0])
-        header+=u32(8);header+=u16(UInt16(tags.count));header+=entries;header+=u32(0);header+=extra
+        var header=Data([0x49,0x49,42,0]);header+=u32(8)
+        header+=directory(preview,offset:8,strip:thumbnailOffset)
+        header+=directory(tags,offset:rawOffset,strip:stripOffset)
+        // Private working DNG only: the placeholder is never saved as a photo.
+        header+=Data(repeating:46,count:16*16*3)
         guard header.count==stripOffset,stripOffset%2==0 else { throw CameraFailure.message("Cabecera DNG desalineada.") }
         stage("header built")
         let length=header.count+w*h*2

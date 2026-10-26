@@ -42,10 +42,10 @@ import Darwin
             print("Core format: DNG ImageIO reader",dng.count)
             guard let source=CGImageSourceCreateWithData(dng as CFData,[kCGImageSourceTypeIdentifierHint:"com.adobe.raw-image"] as CFDictionary),
                   let props=CGImageSourceCopyPropertiesAtIndex(source,0,nil) as? [String:Any] else { throw CameraFailure.message("Working DNG is unreadable") }
-            try require((props[kCGImagePropertyPixelWidth as String] as? Int)==128 && (props[kCGImagePropertyPixelHeight as String] as? Int)==96,"Working DNG geometry was lost")
+            try require((props[kCGImagePropertyPixelWidth as String] as? Int) != nil,"DNG properties missing")
             print("Core format: DNG developer")
             guard let decoder=CIRAWFilter(imageData:dng,identifierHint:"com.adobe.raw-image"),let image=decoder.outputImage else { throw CameraFailure.message("CIRAWFilter refused the fused working mosaic") }
-            try require(image.extent.width>0 && image.extent.height>0,"Working mosaic did not develop")
+            try require(image.extent.width==128 && image.extent.height==96,"Working mosaic did not develop")
             print("Core format: native 12MP packing")
             var sensor=[UInt16](repeating:1000,count:4032*3024)
             sensor[0]=1100;sensor[1]=1200;sensor[4032]=1300;sensor[4033]=1400
@@ -63,7 +63,9 @@ import Darwin
             let nativeDNG=try FusedDNG.encode(quads:mapped.data,width:2016,height:1512,calibration:calibration)
             guard let nativeSource=CGImageSourceCreateWithData(nativeDNG as CFData,[kCGImageSourceTypeIdentifierHint:"com.adobe.raw-image"] as CFDictionary),
                   let nativeProps=CGImageSourceCopyPropertiesAtIndex(nativeSource,0,nil) as? [String:Any] else { throw CameraFailure.message("Native DNG unreadable") }
-            try require((nativeProps[kCGImagePropertyPixelWidth as String] as? Int)==4032 && (nativeProps[kCGImagePropertyPixelHeight as String] as? Int)==3024,"Native DNG lost 12MP geometry")
+            try require((nativeProps[kCGImagePropertyPixelWidth as String] as? Int) != nil,"Native DNG properties missing")
+            guard let nativeDecoder=CIRAWFilter(imageData:nativeDNG,identifierHint:"com.adobe.raw-image"),let nativeImage=nativeDecoder.outputImage else { throw CameraFailure.message("Native Bayer DNG did not develop") }
+            try require(nativeImage.extent.width==4032 && nativeImage.extent.height==3024,"Native DNG lost 12MP geometry")
             print("Computational source checks passed; no capture session, app launch or GPU execution.")
         } catch { fputs("\(error)\n",stderr);exit(1) }
     }
