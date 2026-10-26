@@ -51,7 +51,7 @@ final class PreviewAnalysisController:NSObject,AVCaptureVideoDataOutputSampleBuf
             guard valid else { return }
             self.options=options;self.previousTime=0
             self.processing=processing;self.notice=nil
-            self.buffering=processing.zeroShutterLagFusion
+            self.buffering=processing.zeroShutterLagFusion && !processing.nightStatic && !processing.hdrBracketing && processing.portraitAmount==0
             self.motionEnabled=processing.nightStatic && processing.nightMotionMetering
             self.history.reset();self.motion.reset();self.previousBufferTime=0;self.lastPTS = .nan
             do {

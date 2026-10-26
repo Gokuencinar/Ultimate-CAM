@@ -517,7 +517,7 @@ struct CameraView: View {
                 }.disabled(stack || rawEnabled || manualExposure || camera.isFocusLocked || options.zeroShutterLagFusion)
                 Text("Calidad iOS pide el mejor procesado disponible al sistema. No activa el modo Noche de Cámara. Con RAW, bloqueo AE, exposición manual o pilas se usa rapidez para respetar cada exposición.")
                     .font(.footnote).foregroundStyle(.secondary)
-                Toggle("RAW + JPEG", isOn: $rawEnabled).disabled(!camera.supportsRAW || stack)
+                Toggle("RAW + JPEG",isOn:Binding(get:{rawEnabled},set:{rawEnabled=$0;if $0 { options.zeroShutterLagFusion=false }})).disabled(!camera.supportsRAW || stack)
                 Toggle("ZSL con fusión del visor",isOn:$options.zeroShutterLagFusion)
                     .disabled(rawEnabled || stack || options.portraitAmount>0).accessibilityIdentifier("capture.zsl")
                 if options.zeroShutterLagFusion {

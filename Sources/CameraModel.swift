@@ -396,7 +396,7 @@ final class CameraModel: NSObject, ObservableObject, AVCapturePhotoCaptureDelega
 
     func setPreviewTools(_ tools:PreviewAnalysisOptions,processing:ProcessingOptions) {
         queue.async {
-            self.temporalFeed=processing.zeroShutterLagFusion || (processing.nightStatic && processing.nightMotionMetering)
+            self.temporalFeed=(processing.zeroShutterLagFusion && !processing.nightStatic && !processing.hdrBracketing && processing.portraitAmount==0) || (processing.nightStatic && processing.nightMotionMetering)
             let graphChanged=self.session.outputs.contains(where:{$0===self.previewAnalyzer.output}) != (tools.enabled || self.temporalFeed)
             self.previewTools=tools;self.previewAnalyzer.configure(tools,processing:processing)
             guard self.configured,!self.inFlight else { return }
@@ -653,7 +653,7 @@ final class CameraModel: NSObject, ObservableObject, AVCapturePhotoCaptureDelega
                 if connection.isVideoMirroringSupported { connection.automaticallyAdjustsVideoMirroring=false;connection.isVideoMirrored=mirror }
                 else if mirror { throw CameraFailure.message("Esta cámara no admite guardar la selfie reflejada.") }
                 if preRoll.count>=3 {
-                    self.processZSL(preRoll,options:options,angle:angle,unmirror:device.position == .front && !mirror)
+                    self.processZSL(preRoll,options:options,angle:angle,previewMirrored:device.position == .front,mirrorOutput:mirror)
                     return
                 }
                 if ((options.nightMetalRAW && night) || (options.hdrMetalRAW && hdr)) && !self.rawRequested { throw CameraFailure.message("La lente no ofrece Bayer RAW para Metal.") }
@@ -987,7 +987,7 @@ final class CameraModel: NSObject, ObservableObject, AVCapturePhotoCaptureDelega
         }
     }
 
-    private func processZSL(_ images:[CGImage],options:ProcessingOptions,angle:Double,unmirror:Bool) {
+    private func processZSL(_ images:[CGImage],options:ProcessingOptions,angle:Double,previewMirrored:Bool,mirrorOutput:Bool) {
         let token=transaction,cancellation=ProcessingCancellation()
         processingCancellation=cancellation;captureStage="processing"
         publish { self.processingInProgress=true;self.status="Fusionando fotogramas previos…" }
@@ -1002,7 +1002,7 @@ final class CameraModel: NSObject, ObservableObject, AVCapturePhotoCaptureDelega
         }
         processing.async {
             let result=Result { try autoreleasepool {
-                var result=try MetalBurstProcessor().processZSL(images,options:options,captureAngle:angle,unmirror:unmirror,cancellation:cancellation)
+                var result=try MetalBurstProcessor().processZSL(images,options:options,captureAngle:angle,previewMirrored:previewMirrored,mirrorOutput:mirrorOutput,cancellation:cancellation)
                 result.statistics=ImageStatistics.measure(result.jpeg);return result
             } }
             var primary:UIImage?,reference:UIImage?

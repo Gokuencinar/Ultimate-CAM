@@ -12,14 +12,6 @@ struct CaptureResult {
     var statistics: ImageStatistics? = nil
 }
 
-enum CameraFailure: LocalizedError {
-    case message(String)
-    var errorDescription: String? {
-        if case let .message(text) = self { return text }
-        return nil
-    }
-}
-
 /// RAW / JPEG burst processing with a noise-aware reference selection, translational
 /// alignment and conservative rejection of changed areas. The optional spectral
 /// stage adapts Apache-licensed Google research; no proprietary Camera binaries.

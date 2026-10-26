@@ -155,7 +155,7 @@ final class MetalBurstProcessor {
         let jpeg=try JPEGRenderer.render(mapped.sdr,extent:mapped.sdr.extent,options:options,context:context,hdrSource:options.preserveHDR ? mapped.hdr:nil,metadataReference:referenceJPEG,frames:frames.count)
         return CaptureResult(jpeg:jpeg.data,reference:referenceJPEG,details:"\(options.hdrBracketing ? "HDR RAW Metal":"Noche RAW Metal") · \(frames.count) tomas · Bayer por teselas · \(jpeg.width) × \(jpeg.height) px.",mergedFrames:frames.count,raw:originalDNG,source:"Bayer-Metal")
     }
-    func processZSL(_ images:[CGImage],options:ProcessingOptions,captureAngle:Double,unmirror:Bool,
+    func processZSL(_ images:[CGImage],options:ProcessingOptions,captureAngle:Double,previewMirrored:Bool,mirrorOutput:Bool,
                     cancellation:ProcessingCancellation?) throws -> CaptureResult {
         guard (3...8).contains(images.count),let first=images.last else { throw CameraFailure.message("El búfer ZSL todavía no está preparado.") }
         let reference=try load(CIImage(cgImage:first),width:first.width,height:first.height,cancellation:cancellation)
@@ -172,9 +172,16 @@ final class MetalBurstProcessor {
         guard var result=CIImage(mtlTexture:mean,options:[.colorSpace:space]) else { throw CameraFailure.message("El búfer ZSL no produjo imagen.") }
         var original=CIImage(cgImage:first)
         func geometry(_ image:CIImage) -> CIImage {
-            let rotated=image.transformed(by:CGAffineTransform(rotationAngle:CGFloat((90-captureAngle)*Double.pi/180)))
-            var image=rotated.transformed(by:CGAffineTransform(translationX:-rotated.extent.minX,y:-rotated.extent.minY))
-            if unmirror { image=image.transformed(by:CGAffineTransform(a:-1,b:0,c:0,d:1,tx:image.extent.width,ty:0)) };return image
+            // Undo the portrait preview mirror before rotating; then apply the
+            // requested output mirror in the final image's coordinate system.
+            var image=previewMirrored ? image.oriented(.upMirrored):image
+            switch Int(captureAngle) {
+            case 0:image=image.oriented(.left)
+            case 180:image=image.oriented(.right)
+            case 270:image=image.oriented(.down)
+            default:break
+            }
+            if mirrorOutput { image=image.oriented(.upMirrored) };return image
         }
         result=geometry(result);original=geometry(original)
         let jpeg=try JPEGRenderer.render(result,extent:result.extent,options:options,context:context,frames:images.count)

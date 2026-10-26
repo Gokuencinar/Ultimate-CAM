@@ -49,6 +49,12 @@ struct SensorBayerFrame {
               black.allSatisfy({white>$0+64}),illumination>=1,illumination<=255,illumination.rounded()==illumination else {
             throw CameraFailure.message("Calibración RAW incompleta; no se inventan niveles de negro, blanco o matrices de color.")
         }
+        let repeatDim=numbers("BlackLevelRepeatDim")
+        guard (black.count==1 && (repeatDim.isEmpty || repeatDim==[1,1])) || (black.count==4 && repeatDim==[2,2]),
+              numbers("LinearizationTable").isEmpty,
+              (numbers("BlackLevelDeltaH")+numbers("BlackLevelDeltaV")).allSatisfy({$0==0}) else {
+            throw CameraFailure.message("El RAW requiere linealización o corrección de negro adicional.")
+        }
         let w=CVPixelBufferGetWidth(pixel),h=CVPixelBufferGetHeight(pixel)
         guard w>=4,h>=4,w<=10000,h<=10000,CVPixelBufferGetPlaneCount(pixel)==0 else { throw CameraFailure.message("Geometría Bayer no admitida.") }
         // ActiveArea and DefaultCrop use sensor coordinates, before EXIF
@@ -56,6 +62,11 @@ struct SensorBayerFrame {
         let active=numbers("ActiveArea"),origin=numbers("DefaultCropOrigin"),crop=numbers("DefaultCropSize")
         guard (active.isEmpty || active.count==4),(origin.isEmpty || origin.count==2),(crop.isEmpty || crop.count==2),
               (active+origin+crop).allSatisfy({$0.isFinite && $0>=0 && $0.rounded()==$0 && $0<=10000}) else { throw CameraFailure.message("Recorte DNG inválido.") }
+        if active.isEmpty && origin.isEmpty && crop.isEmpty {
+            let declaredWidth=(props[kCGImagePropertyPixelWidth as String] as? NSNumber)?.intValue
+            let declaredHeight=(props[kCGImagePropertyPixelHeight as String] as? NSNumber)?.intValue
+            guard declaredWidth==w,declaredHeight==h else { throw CameraFailure.message("Falta la relación de recorte entre el plano RAW y el DNG.") }
+        }
         let top=active.isEmpty ? 0:Int(active[0]),left=active.isEmpty ? 0:Int(active[1])
         let bottom=active.isEmpty ? h:Int(active[2]),right=active.isEmpty ? w:Int(active[3])
         let ox=origin.isEmpty ? 0:Int(origin[0]),oy=origin.isEmpty ? 0:Int(origin[1])
@@ -77,15 +88,26 @@ struct SensorBayerFrame {
         let rowBytes=CVPixelBufferGetBytesPerRow(pixel)
         var packed=[UInt16](repeating:0,count:qw*qh*4)
         for y in 0..<qh { for x in 0..<qw { for phase in 0..<4 {
+            // Resample each CFA plane at the physical center of the output
+            // mosaic pixel. Averaging same-phase 2x2 cells without this offset
+            // would place R/G/B at inconsistent positions after decimation.
+            let px=phase&1,py=phase>>1
+            let sourceX=Double(x*step)+Double(px*(step-1))/2+Double(step-1)/4
+            let sourceY=Double(y*step)+Double(py*(step-1))/2+Double(step-1)/4
+            let ix=Int(floor(sourceX)),iy=Int(floor(sourceY))
+            let fx=sourceX-Double(ix),fy=sourceY-Double(iy)
+            let maxX=(cw-1-px)/2,maxY=(ch-1-py)/2
             var sum:Double=0
-            for by in 0..<step { for bx in 0..<step {
-                let sx=offsetX+(x*step+bx)*2+(phase&1),sy=offsetY+(y*step+by)*2+(phase>>1)
+            for by in 0...1 { for bx in 0...1 {
+                let sx=offsetX+min(maxX,max(0,ix+bx))*2+px
+                let sy=offsetY+min(maxY,max(0,iy+by))*2+py
                 let value=base.loadUnaligned(fromByteOffset:sy*rowBytes+sx*2,as:UInt16.self).littleEndian
                 guard value<=16383 else { throw CameraFailure.message("El plano RAW no respeta el empaquetado de 14 bits esperado.") }
-                sum+=Double(value)
+                let weightX=bx==0 ? 1-fx:fx,weightY=by==0 ? 1-fy:fy
+                sum+=Double(value)*weightX*weightY
             } }
             let level=black[black.count==1 ? 0:phaseMap[phase]]
-            packed[(y*qw+x)*4+phase]=Float16((sum/Double(step*step)-level)/(white-level)).bitPattern.littleEndian
+            packed[(y*qw+x)*4+phase]=Float16((sum-level)/(white-level)).bitPattern.littleEndian
         } } }
         let exif=props[kCGImagePropertyExifDictionary as String] as? [String:Any] ?? [:]
         let exposure=FrameExposure(seconds:(exif[kCGImagePropertyExifExposureTime as String] as? NSNumber)?.doubleValue ?? 0,

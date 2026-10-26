@@ -33,6 +33,12 @@ jobs:
             fi
           done
           xcodegen generate
+      - name: Check computational formats
+        run: |
+          set -euo pipefail
+          mkdir -p build
+          xcrun --sdk macosx swiftc -O Sources/CameraFailure.swift Sources/TemporalFrameBuffer.swift Sources/SensorBayerFrame.swift Sources/HDRCapturePlan.swift Sources/NightCapturePlan.swift Sources/ProcessingOptions.swift Sources/PhotoCapturePolicy.swift Sources/ColorRecipe.swift Sources/CubeLUT.swift Tests/ComputationalChecks.swift -o build/computational-checks
+          build/computational-checks
       - name: Build for iPhone without signing
         run: |
           set -euo pipefail
@@ -46,7 +52,7 @@ jobs:
       - name: Check image alignment and noise averaging
         run: |
           set -euo pipefail
-          SOURCES=(Sources/ResearchWiener.swift Sources/CaptureRotation.swift Sources/CaptureMetadata.swift Sources/SphereViewerRenderer.swift Sources/SphereGeometry.swift Sources/SphereMetadata.swift Sources/SphereProcessor.swift Sources/PanoramaProcessor.swift Sources/PortraitProcessor.swift Sources/PreviewAnalysis.swift Sources/MovieConfiguration.swift Sources/MovieRecordedAsset.swift Sources/AdaptiveHDR.swift Sources/PNGLUT.swift Sources/PhotoCapturePolicy.swift Sources/WeightedTemporalMerger.swift Sources/ImportedPhotoProcessor.swift Sources/ColorRecipe.swift Sources/HDRCapturePlan.swift Sources/HDRProcessor.swift Sources/JPEGRenderer.swift Sources/NightCapturePlan.swift Sources/ProcessingCancellation.swift Sources/PreviewDecoder.swift Sources/ProcessingOptions.swift Sources/CubeLUT.swift Sources/ProcessingProfiles.swift Sources/AdvancedProcessor.swift Sources/LocalAlignment.swift Sources/NoiseAwareMerger.swift Sources/ImageStatistics.swift Sources/BurstProcessor.swift)
+          SOURCES=(Sources/CameraFailure.swift Sources/ResearchWiener.swift Sources/CaptureRotation.swift Sources/CaptureMetadata.swift Sources/SphereViewerRenderer.swift Sources/SphereGeometry.swift Sources/SphereMetadata.swift Sources/SphereProcessor.swift Sources/PanoramaProcessor.swift Sources/PortraitProcessor.swift Sources/PreviewAnalysis.swift Sources/MovieConfiguration.swift Sources/MovieRecordedAsset.swift Sources/AdaptiveHDR.swift Sources/PNGLUT.swift Sources/PhotoCapturePolicy.swift Sources/WeightedTemporalMerger.swift Sources/ImportedPhotoProcessor.swift Sources/ColorRecipe.swift Sources/HDRCapturePlan.swift Sources/HDRProcessor.swift Sources/JPEGRenderer.swift Sources/NightCapturePlan.swift Sources/ProcessingCancellation.swift Sources/PreviewDecoder.swift Sources/ProcessingOptions.swift Sources/CubeLUT.swift Sources/ProcessingProfiles.swift Sources/AdvancedProcessor.swift Sources/LocalAlignment.swift Sources/NoiseAwareMerger.swift Sources/ImageStatistics.swift Sources/BurstProcessor.swift)
           xcrun --sdk macosx swiftc -O "${SOURCES[@]}" Tests/PortChecks.swift -o build/port-checks
           build/port-checks
           xcrun --sdk macosx swiftc -O "${SOURCES[@]}" Tests/ProcessorChecks.swift -o build/processor-checks
@@ -59,8 +65,6 @@ jobs:
           build/sphere-checks
           xcrun --sdk macosx swiftc -O "${SOURCES[@]}" Tests/SpectralChecks.swift -o build/spectral-checks
           build/spectral-checks
-          xcrun --sdk macosx swiftc -O "${SOURCES[@]}" Sources/TemporalFrameBuffer.swift Sources/SensorBayerFrame.swift Tests/ComputationalChecks.swift -o build/computational-checks
-          build/computational-checks
       - name: Package rootless DEB
         run: bash scripts/package_deb.sh
       - name: Package RootHide DEB
