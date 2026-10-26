@@ -78,6 +78,8 @@ final class NativeNightCoordinator: ObservableObject {
         CaptureTrace.record("nativeNight.return",["ackMatches":reply==expected,"status":code,"nativeMode":nativeMode])
         if lastConfirmed==expected {
             report("El complemento confirmó el ajuste Noche máximo en Cámara de Apple. La foto y su calidad no se comprueban por esta señal. Puedes importar el resultado desde la galería.")
+        } else if code==8 {
+            report("El complemento ha bloqueado una build de iOS no revisada. El diagnóstico distingue este caso de una firma de métodos incompatible.")
         } else if code==2 || code==3 {
             report("El complemento de Noche nativa no admite este dispositivo, sistema o firma de métodos.")
         } else {

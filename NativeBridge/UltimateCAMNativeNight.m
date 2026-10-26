@@ -40,13 +40,11 @@ static uint64_t Intent(void) { uint64_t value=0; notify_get_state(intentToken,&v
 static void Status(uint64_t request, enum UCNStatus status) {
     notify_set_state(ackToken,request); notify_set_state(statusToken,status);
 }
-static BOOL TargetMatches(void) {
-    char model[64]={0},build[64]={0}; size_t m=sizeof(model),b=sizeof(build);
-    return sysctlbyname("hw.machine",model,&m,NULL,0)==0 && sysctlbyname("kern.osversion",build,&b,NULL,0)==0 &&
-        strcmp(model,UCN_TESTED_MODEL)==0 && strcmp(build,UCN_TESTED_BUILD)==0;
+static BOOL TargetMatches(const char *model,const char *build) {
+    return model && build && strcmp(model,UCN_TESTED_MODEL)==0 && strcmp(build,UCN_TESTED_BUILD)==0;
 }
 static BOOL Signature(Class cls, const char *name, const char *encoding) {
-    Method method=class_getInstanceMethod(cls,sel_registerName(name));
+    Method method=cls ? class_getInstanceMethod(cls,sel_registerName(name)):NULL;
     const char *actual=method ? method_getTypeEncoding(method):NULL;
     BOOL valid=actual && strcmp(actual,encoding)==0;
     if (!valid) NSLog(@"UltimateCAM NativeNight ABI selector=%s actual=%s expected=%s",name,actual ?: "<missing>",encoding);
@@ -130,10 +128,10 @@ __attribute__((constructor)) static void Install(void) {
         for (size_t i=0;i<sizeof(selectors)/sizeof(selectors[0]);++i) {
             if (!Signature(cls,selectors[i],encodings[i])) abi=NO;
         }
-        if (!TargetMatches()) {
-            char model[64]={0},build[64]={0};size_t m=sizeof(model),b=sizeof(build);
-            int modelError=sysctlbyname("hw.machine",model,&m,NULL,0),buildError=sysctlbyname("kern.osversion",build,&b,NULL,0);
-            model[sizeof(model)-1]=0;build[sizeof(build)-1]=0;
+        char model[64]={0},build[64]={0};size_t m=sizeof(model),b=sizeof(build);
+        int modelError=sysctlbyname("hw.machine",model,&m,NULL,0),buildError=sysctlbyname("kern.osversion",build,&b,NULL,0);
+        model[sizeof(model)-1]=0;build[sizeof(build)-1]=0;
+        if (modelError || buildError || !TargetMatches(model,build)) {
             enum UCNStatus reason=modelError || buildError ? UCNStatusUnsupported:UCNTargetPolicy(model,build,abi);
             // Refuse an unreviewed build even when signatures match, but report
             // both facts exactly so a future update need not guess the cause.

@@ -18,7 +18,7 @@ final class BayerScratchStorage {
             // Only expired UUID directories in this app-owned cache. Never
             // inspect or remove a user-selected path or another active session.
             for child in (try? manager.contentsOfDirectory(at:root,includingPropertiesForKeys:[.isDirectoryKey,.isSymbolicLinkKey,.contentModificationDateKey])) ?? [] {
-                guard child!=current,UUID(uuidString:child.lastPathComponent) != nil,
+                guard child != current,UUID(uuidString:child.lastPathComponent) != nil,
                       let values=try? child.resourceValues(forKeys:[.isDirectoryKey,.isSymbolicLinkKey,.contentModificationDateKey]),
                       values.isDirectory==true,values.isSymbolicLink==false,let date=values.contentModificationDate,
                       Date().timeIntervalSince(date)>86400 else { continue }
