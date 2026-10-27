@@ -20,6 +20,7 @@ struct SensorBayerFrame {
     let exposure:FrameExposure
     let timestamp:Double
     var backing:BayerScratchStorage? = nil
+    var noiseProfile:[Double] = []
     func discardResidentPages() { backing?.discardResidentPages() }
 
     #if os(iOS)
@@ -110,9 +111,38 @@ struct SensorBayerFrame {
         calibration.extraColor=extra;calibration.illuminant2=extra[50722]==nil ? 0:UInt16(secondIlluminant)
         let mapped=try BayerScratchStorage.store(packed)
         var frame=SensorBayerFrame(width:qw,height:qh,quads:mapped.data,calibration:calibration,exposure:exposure,timestamp:photo.timestamp.seconds)
+        frame.noiseProfile=SensorNoiseModel.validProfile(numbers("NoiseProfile")) ?? []
         frame.backing=mapped.storage;return frame
     }
     #endif
+}
+
+/// DNG normalized linear-domain variance = shot * signal + read variance.
+/// ISO fallback follows the DNG baseline ISO-100 model; a real profile already
+/// includes gain and must not be multiplied by ISO a second time.
+enum SensorNoiseModel {
+    static func validProfile(_ values:[Double])->[Double]? {
+        guard [2,6].contains(values.count) else { return nil }
+        for pair in stride(from:0,to:values.count,by:2) {
+            guard values[pair].isFinite,values[pair]>0,values[pair]<=1,
+                  values[pair+1].isFinite,values[pair+1]>=0,values[pair+1]<=1 else { return nil }
+        }
+        return values
+    }
+    static func coefficients(iso:Double,profile:[Double])->SIMD2<Float> {
+        if let profile=validProfile(profile) {
+            var shot=0.0,read=0.0
+            for pair in stride(from:0,to:profile.count,by:2) { shot+=profile[pair];read+=profile[pair+1] }
+            let planes=Double(profile.count/2)
+            return SIMD2<Float>(Float(shot/planes),Float(read/planes))
+        }
+        let gain=Float(min(128,max(0.25,iso.isFinite ? iso/100:1)))
+        return SIMD2<Float>(2e-5*gain,4.5e-7*gain*gain)
+    }
+    static func pair(reference:FrameExposure,referenceProfile:[Double],sample:FrameExposure,sampleProfile:[Double],scale:Float)->SIMD2<Float> {
+        let a=coefficients(iso:reference.iso,profile:referenceProfile),b=coefficients(iso:sample.iso,profile:sampleProfile)
+        return SIMD2<Float>(a.x+b.x*scale,a.y+b.y*scale*scale)
+    }
 }
 
 enum BayerQuadPacking {

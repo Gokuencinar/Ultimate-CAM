@@ -34,14 +34,23 @@ final class BayerScratchStorage {
     static func store(_ bytes:Data) throws -> (data:Data,storage:BayerScratchStorage) {
         guard !bytes.isEmpty else { throw CameraFailure.message("Plano Bayer vacío.") }
         let url=try directory().appendingPathComponent(UUID().uuidString+".bayer")
+        let descriptor=open(url.path,O_CREAT|O_EXCL|O_RDWR|O_CLOEXEC,0o600)
+        guard descriptor>=0 else { throw CameraFailure.message("No se pudo crear el RAW temporal.") }
+        defer { close(descriptor) }
         do {
-            try bytes.write(to:url,options:.atomic)
+            try bytes.withUnsafeBytes { payload in
+                guard let base=payload.baseAddress else { throw CameraFailure.message("Plano Bayer vacío.") }
+                var offset=0
+                while offset<payload.count {
+                    let written=Darwin.write(descriptor,base.advanced(by:offset),payload.count-offset)
+                    if written<0 && errno==EINTR { continue }
+                    guard written>0 else { throw CameraFailure.message("No se pudo escribir el RAW temporal.") }
+                    offset+=written
+                }
+            }
             #if os(iOS)
             try FileManager.default.setAttributes([.protectionKey:FileProtectionType.completeUntilFirstUserAuthentication],ofItemAtPath:url.path)
             #endif
-            let descriptor=open(url.path,O_RDONLY|O_CLOEXEC)
-            guard descriptor>=0 else { throw CameraFailure.message("No se pudo abrir el RAW temporal.") }
-            defer { close(descriptor) }
             guard let address=mmap(nil,bytes.count,PROT_READ,MAP_PRIVATE,descriptor,0),address != MAP_FAILED else { throw CameraFailure.message("No se pudo mapear el RAW temporal.") }
             let storage=BayerScratchStorage(url:url,address:address,length:bytes.count)
             let data=Data(bytesNoCopy:address,count:bytes.count,deallocator:.custom { _,_ in withExtendedLifetime(storage) {} })

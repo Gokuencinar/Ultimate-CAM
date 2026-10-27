@@ -4,8 +4,9 @@ import Metal
 private struct MetalFusionParameters {
     var size=SIMD4<UInt32>(0,0,16,0)
     var search=SIMD4<Int32>(0,0,0,0)
-    var control=SIMD4<Float>(0.000004,1,4,1)
+    var control=SIMD4<Float>(1e-7,1,4,1)
     var luma=SIMD4<Float>(0.2126,0.7152,0.0722,0)
+    var noise=SIMD4<Float>(0,0,0,0)
 }
 
 /// Own compute kernels, not the private Apple ISP or Google's proprietary HDR+.
@@ -189,7 +190,12 @@ final class MetalBurstProcessor {
             let scale=first.exposure.product/frame.exposure.product
             guard scale.isFinite,(1.0/256...256).contains(scale) else { throw CameraFailure.message("Separación RAW fuera de rango.") }
             params.control.w=Float(scale)
-            params.control.x=Self.noise(reference:first.quads,sample:frame.quads,scale:Float(scale))
+            let model=SensorNoiseModel.pair(reference:first.exposure,referenceProfile:first.noiseProfile,
+                sample:frame.exposure,sampleProfile:frame.noiseProfile,scale:Float(scale))
+            let expected=max(1e-8,model.x*0.18+model.y)
+            let measured=Self.noise(reference:first.quads,sample:frame.quads,scale:Float(scale))
+            params.control.x=max(expected,min(measured,expected*4))
+            params.noise=SIMD4<Float>(model.x,model.y,0,0)
             _=try upload(frame,into:work.sample)
             try fuse(work,parameters:params,cancellation:cancellation)
             }
@@ -244,7 +250,7 @@ final class MetalBurstProcessor {
     }
     private static func noise(reference:Data,sample:Data,scale:Float=1,channels:Int=4) -> Float {
         let count=min(reference.count,sample.count)/2
-        guard count>8 else { return 0.000004 }
+        guard count>8 else { return 1e-7 }
         var residuals=[Float]();let step=max(4,(count/4000)/4*4)
         reference.withUnsafeBytes { a in sample.withUnsafeBytes { b in
             func value(_ bytes:UnsafeRawBufferPointer,_ i:Int)->Float { Float(Float16(bitPattern:UInt16(littleEndian:bytes.loadUnaligned(fromByteOffset:i*2,as:UInt16.self)))) }

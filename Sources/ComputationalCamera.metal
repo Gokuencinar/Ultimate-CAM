@@ -6,6 +6,7 @@ struct FusionParameters {
     int4 search; // radius, has seed, spare, spare
     float4 control; // noise variance, tone gain, white point, spare
     float4 luma;
+    float4 noise; // Pair shot/read variance in the reference exposure domain.
 };
 constexpr sampler pixels(coord::pixel,address::clamp_to_edge,filter::linear);
 
@@ -99,6 +100,12 @@ kernel void uc_fuse_tiles(texture2d<float,access::read> reference [[texture(0)]]
         float4 residual=candidate-anchor;
         float energy=params.size.w ? dot(residual*residual,float4(0.25f)):dot(residual.rgb*residual.rgb,float3(1.0f/3));
         float variance=max(params.control.x,1e-7f);
+        if (params.size.w) {
+            float signal=max(dot(anchor,float4(0.25f)),0.0f);
+            float nominal=max(params.noise.x*0.18f+params.noise.y,1e-8f);
+            float correction=clamp(params.control.x/nominal,1.0f,4.0f);
+            variance=max((params.noise.x*signal+params.noise.y)*correction,1e-8f);
+        }
         float robust=exp(-energy/(18.0f*variance));
         // A low-cost zero match is valid in smooth areas; a high-cost ambiguous
         // match is rejected. The reference always supplies weight one.

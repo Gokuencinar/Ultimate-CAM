@@ -67,6 +67,14 @@ import Darwin
             try require((nativeProps[kCGImagePropertyPixelWidth as String] as? Int) != nil,"Native DNG properties missing")
             guard let nativeDecoder=CIRAWFilter(imageData:nativeDNG,identifierHint:"com.adobe.raw-image"),let nativeImage=nativeDecoder.outputImage else { throw CameraFailure.message("Native Bayer DNG did not develop") }
             try require(nativeImage.extent.width==4032 && nativeImage.extent.height==3024,"Native DNG lost 12MP geometry")
+            let low=SensorNoiseModel.coefficients(iso:100,profile:[])
+            let high=SensorNoiseModel.coefficients(iso:1600,profile:[])
+            try require(high.x>low.x && high.y>low.y,"ISO does not scale fallback shot/read noise")
+            let profile=[0.001,0.00002]
+            try require(SensorNoiseModel.coefficients(iso:100,profile:profile)==SensorNoiseModel.coefficients(iso:1600,profile:profile),"DNG noise profile applied ISO twice")
+            try require(SensorNoiseModel.validProfile([Double.nan,0])==nil,"Invalid noise profile accepted")
+            let pair=SensorNoiseModel.pair(reference:FrameExposure(seconds:0.01,iso:100),referenceProfile:profile,sample:FrameExposure(seconds:0.04,iso:100),sampleProfile:profile,scale:0.25)
+            try require(abs(pair.x-0.00125)<1e-8 && abs(pair.y-0.00002125)<1e-9,"Exposure-normalized noise variance is wrong")
             print("Computational source checks passed; no capture session, app launch or GPU execution.")
         } catch { fputs("\(error)\n",stderr);exit(1) }
     }
