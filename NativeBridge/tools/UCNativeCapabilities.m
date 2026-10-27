@@ -38,6 +38,7 @@ static NSArray *Methods(Class cls, BOOL meta) {
 static NSDictionary *Code(NSString *className, NSString *selector) {
     Class cls = objc_lookUpClass(className.UTF8String);
     Method method = cls ? class_getInstanceMethod(cls, sel_registerName(selector.UTF8String)) : NULL;
+    if (!method && cls) method=class_getClassMethod(cls,sel_registerName(selector.UTF8String));
     if (!method) return @{@"class":className,@"selector":selector,@"present":@NO};
     IMP implementation = method_getImplementation(method);
 #if __has_feature(ptrauth_calls)
@@ -124,7 +125,11 @@ int main(void) {
         }
         [code addObject:Code(@"CAMStillImageCaptureRequest",@"_configurePhotoSettings:shouldIgnoreInitiationSettingsProperties:context:")];
         for (NSArray *pair in @[@[@"AVCapturePhotoSettings",@"setDigitalFlashMode:"],
-            @[@"AVCapturePhotoSettings",@"digitalFlashMode"],@[@"CUCaptureController",@"changeToLowLightMode:"],
+            @[@"AVCapturePhotoSettings",@"digitalFlashMode"],
+            @[@"CAMCaptureConversions",@"captureDigitalFlashModeForLowLightMode:"],
+            @[@"AVCapturePhotoOutput",@"setDigitalFlashCaptureEnabled:"],
+            @[@"AVCapturePhotoOutput",@"supportedDigitalFlashModes"],
+            @[@"AVCaptureDevice",@"setDigitalFlashMode:"],@[@"CUCaptureController",@"changeToLowLightMode:"],
             @[@"AVCapturePhotoOutput",@"_figCaptureIrisStillImageSettingsForAVCapturePhotoSettings:captureRequestIdentifier:delegate:connections:"]])
             [code addObject:Code(pair[0],pair[1])];
         NSDictionary *report = @{@"schema":@2,@"hardware":SystemString("hw.machine"),@"system_build":SystemString("kern.osversion"),@"system_version":NSProcessInfo.processInfo.operatingSystemVersionString,@"loads":loads,@"classes":classes,@"code_inspection":code,@"camera_objects_instantiated":@0,@"private_selectors_invoked":@0,@"capture_requests":@0};
