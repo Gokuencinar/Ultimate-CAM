@@ -309,9 +309,12 @@ final class MovieCameraModel: NSObject, ObservableObject, AVCaptureFileOutputRec
             if d.isFocusModeSupported(f) { d.focusMode=f };if d.isExposureModeSupported(e) { d.exposureMode=e }
         }
     }
-    func setZoom(_ value:Double) {
+    func setZoom(_ value:Double,smooth:Bool=false) {
         queue.async { guard value.isFinite,let d=self.device,(try? d.lockForConfiguration()) != nil else { return }
-            let selected=min(max(1,value),min(8,Double(d.activeFormat.videoMaxZoomFactor)));d.videoZoomFactor=CGFloat(selected);d.unlockForConfiguration();self.ui { self.zoom=selected } }
+            let selected=min(max(1,value),min(8,Double(d.activeFormat.videoMaxZoomFactor)))
+            if smooth { d.ramp(toVideoZoomFactor:CGFloat(selected),withRate:4) }
+            else { d.cancelVideoZoomRamp();d.videoZoomFactor=CGFloat(selected) }
+            d.unlockForConfiguration();self.ui { self.zoom=selected } }
     }
     func toggleTorch() {
         queue.async { guard let d=self.device,d.hasTorch,d.isTorchAvailable,(try? d.lockForConfiguration()) != nil else { return }

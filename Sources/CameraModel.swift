@@ -93,6 +93,7 @@ final class CameraModel: NSObject, ObservableObject, AVCapturePhotoCaptureDelega
     private var rawRequested = false
     private var rawData: Data?
     private var nightRawFrames = [Data]()
+    private var bayerReferences = BayerReferenceArchive()
     private var sensorFrames=[SensorBayerFrame]()
     private var captureZoom:Double=1
     private var opticalProgress=OpticalCaptureProgress()
@@ -229,7 +230,7 @@ final class CameraModel: NSObject, ObservableObject, AVCapturePhotoCaptureDelega
                         self.publish {
                             self.preview = previews.0; self.referencePreview = previews.1
                             self.resultDetails = result.details; self.resultStatistics = result.statistics
-                            self.hasRAWResult = false;self.hasFusedRAWResult=false; self.hasSeparateReference = result.jpeg != result.reference
+                            self.hasRAWResult = result.raw != nil;self.hasFusedRAWResult=result.rawIsFused; self.hasSeparateReference = result.jpeg != result.reference
                             self.savedResult = false; self.savedJPEGOnly = false
                             self.processingInProgress = false; self.busy = false
                             self.importedPhotoID = UUID()
@@ -401,7 +402,7 @@ final class CameraModel: NSObject, ObservableObject, AVCapturePhotoCaptureDelega
 
     func setPreviewTools(_ tools:PreviewAnalysisOptions,processing:ProcessingOptions) {
         queue.async {
-            self.temporalFeed=(processing.zeroShutterLagFusion && !processing.nightStatic && !processing.hdrBracketing && processing.portraitAmount==0) || (processing.nightStatic && processing.nightMotionMetering)
+            self.temporalFeed=(processing.usesPreviewZSL && !processing.nightStatic && !processing.hdrBracketing && processing.portraitAmount==0) || (processing.nightStatic && processing.nightMotionMetering)
             let graphChanged=self.session.outputs.contains(where:{$0===self.previewAnalyzer.output}) != (tools.enabled || self.temporalFeed)
             self.previewTools=tools;self.previewAnalyzer.configure(tools,processing:processing)
             guard self.configured,!self.inFlight else { return }
@@ -566,14 +567,16 @@ final class CameraModel: NSObject, ObservableObject, AVCapturePhotoCaptureDelega
         } catch { message(error.localizedDescription) }
     }
 
-    func setZoom(_ zoom: Double) {
+    func setZoom(_ zoom: Double,smooth:Bool=false) {
         queue.async {
             guard zoom.isFinite, !self.inFlight, let device = self.input?.device else { return }
             do {
                 try device.lockForConfiguration()
                 defer { device.unlockForConfiguration() }
-                device.videoZoomFactor = min(min(8, device.maxAvailableVideoZoomFactor), max(max(1, device.minAvailableVideoZoomFactor), CGFloat(zoom)))
-                let applied = Double(device.videoZoomFactor)
+                let target=min(min(8,device.maxAvailableVideoZoomFactor),max(max(1,device.minAvailableVideoZoomFactor),CGFloat(zoom)))
+                if smooth { device.ramp(toVideoZoomFactor:target,withRate:4) }
+                else { device.cancelVideoZoomRamp();device.videoZoomFactor=target }
+                let applied = smooth ? Double(target):Double(device.videoZoomFactor)
                 self.publish { self.zoomFactor = applied }
                 CaptureTrace.record("control.zoom", ["requested": zoom, "applied": device.videoZoomFactor])
             } catch { self.message(error.localizedDescription) }
@@ -636,7 +639,7 @@ final class CameraModel: NSObject, ObservableObject, AVCapturePhotoCaptureDelega
         self.inFlight = true
         self.transaction = UUID()
         self.frames = []
-        self.nightRawFrames = [];self.sensorFrames=[]
+        self.nightRawFrames = [];self.sensorFrames=[];self.bayerReferences.reset()
         self.hdrPlan = []; self.hdrExposures = []; self.lastHDRTimestamp = nil
         self.nightFrameSeconds = 0
         self.lastNightTimestamp = nil
@@ -644,7 +647,7 @@ final class CameraModel: NSObject, ObservableObject, AVCapturePhotoCaptureDelega
         self.processingOptions = options
         self.rawRequested = (raw || (night && options.nightRAW) || (hdr && options.hdrMetalRAW)) && !self.output.availableRawPhotoPixelFormatTypes.isEmpty
         self.rawData = nil
-        let preRoll=options.zeroShutterLagFusion && !burst && !raw && flash == .off && options.portraitAmount==0
+        let preRoll=options.usesPreviewZSL && !burst && !raw && flash == .off && options.portraitAmount==0
             && device.exposureMode != .custom && device.exposureMode != .locked ? self.previewAnalyzer.history.snapshot(at:shutterTime).map(\.value):[]
         let motion=options.nightMotionMetering ? self.previewAnalyzer.motion.estimate(at:shutterTime):nil
         self.previewAnalyzer.setActive(false)
@@ -670,7 +673,7 @@ final class CameraModel: NSObject, ObservableObject, AVCapturePhotoCaptureDelega
                 let dimensions=self.output.maxPhotoDimensions
                 let pixels:Int64=Int64(dimensions.width)*Int64(dimensions.height)
                 let frames:Int64=night ? 16:3
-                let required:Int64=pixels*2*frames+Int64(64*1024*1024)
+                let required:Int64=pixels*4*frames+Int64(64*1024*1024)
                 try BayerScratchStorage.ensureCapacity(required:required)
             }
             if burst {
@@ -884,7 +887,11 @@ final class CameraModel: NSObject, ObservableObject, AVCapturePhotoCaptureDelega
                 return
             }
             if self.processingOptions.nightStatic || self.processingOptions.hdrMetalRAW && self.processingOptions.hdrBracketing, let raw = self.rawData {
-                if self.processingOptions.hdrBracketing || !self.processingOptions.nightMetalRAW || self.nightRawFrames.isEmpty { self.nightRawFrames.append(raw) }
+                let metal = self.processingOptions.nightStatic && self.processingOptions.nightMetalRAW || self.processingOptions.hdrBracketing && self.processingOptions.hdrMetalRAW
+                if metal {
+                    do { try self.bayerReferences.append(raw,index:self.sensorFrames.count-1) }
+                    catch { self.finishFailure(error);return }
+                } else { self.nightRawFrames.append(raw) }
                 self.rawData = nil
             }
             if self.frames.count < self.desiredCount {
@@ -908,6 +915,7 @@ final class CameraModel: NSObject, ObservableObject, AVCapturePhotoCaptureDelega
             let raw = self.rawData
             let rawBurst: [Data]? = self.nightRawFrames.isEmpty ? nil : self.nightRawFrames
             let sensorBurst=self.sensorFrames;self.sensorFrames=[]
+            let bayerReferences=self.bayerReferences;self.bayerReferences.reset()
             self.nightRawFrames = []
             self.rawData = nil
             self.frames = []
@@ -941,10 +949,10 @@ final class CameraModel: NSObject, ObservableObject, AVCapturePhotoCaptureDelega
                         }
                         var result: CaptureResult
                         if options.nightStatic && options.nightMetalRAW || options.hdrBracketing && options.hdrMetalRAW {
-                            guard let raws=rawBurst,sensorBurst.count==captured.count,!sensorBurst.isEmpty else { throw CameraFailure.message("La pila Bayer está incompleta.") }
-                            let anchor=options.hdrBracketing ? sensorBurst.indices.min(by:{sensorBurst[$0].exposure.product<sensorBurst[$1].exposure.product})!:0
-                            guard captured.indices.contains(anchor),raws.indices.contains(options.hdrBracketing ? anchor:0) else { throw CameraFailure.message("Falta la referencia RAW de la pila.") }
-                            result=try MetalBurstProcessor().processRAW(sensorBurst,referenceJPEG:captured[anchor],originalDNG:raws[options.hdrBracketing ? anchor:0],options:options,cancellation:cancellation,progress:progress)
+                            guard sensorBurst.count==captured.count,
+                                  let anchor=SensorBayerFrame.referenceIndex(in:sensorBurst,hdr:options.hdrBracketing),
+                                  captured.indices.contains(anchor),let original=bayerReferences.original(at:anchor) else { throw CameraFailure.message("Falta la referencia RAW de la pila.") }
+                            result=try MetalBurstProcessor().processRAW(sensorBurst,referenceJPEG:captured[anchor],originalDNG:original,options:options,cancellation:cancellation,progress:progress)
                         } else if options.hdrBracketing {
                             result = try HDRProcessor().process(captured,exposures:bracketExposures,options:options,cancellation:cancellation,progress:progress)
                         } else {
@@ -958,7 +966,7 @@ final class CameraModel: NSObject, ObservableObject, AVCapturePhotoCaptureDelega
                         CaptureTrace.record("capture.processing.fallback", ["error": error.localizedDescription])
                         return CaptureResult(jpeg: first, reference: first,
                             details: "Procesado no aplicado: se conserva la referencia. " + error.localizedDescription,
-                            mergedFrames: 1, raw: rawBurst?.first ?? raw, source: "reference-fallback", statistics: ImageStatistics.measure(first))
+                            mergedFrames: 1, raw: bayerReferences.original(at:0) ?? rawBurst?.first ?? raw, source: "reference-fallback", statistics: ImageStatistics.measure(first))
                     }
                 } }
                 let reviewImages: (UIImage?, UIImage?)
@@ -1088,7 +1096,7 @@ final class CameraModel: NSObject, ObservableObject, AVCapturePhotoCaptureDelega
         restoreDevice()
         processingCancellation?.cancel(); processingCancellation = nil
         frames = []
-        nightRawFrames = [];sensorFrames=[]
+        nightRawFrames = [];sensorFrames=[];bayerReferences.reset()
         previewAnalyzer.setActive(active && !captureRecoveryRequired && (previewTools.enabled || temporalFeed))
         hdrPlan = []; hdrExposures = []; lastHDRTimestamp = nil
         rawData = nil

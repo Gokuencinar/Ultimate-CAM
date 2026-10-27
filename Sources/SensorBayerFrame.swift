@@ -47,6 +47,62 @@ enum BayerZoomCrop {
     }
 }
 
+/// Half-open quad ROI, including two 16-quad tiles for warp/regularizer support.
+struct BayerFusionRegion:Equatable {
+    let minX:Int,minY:Int,maxX:Int,maxY:Int
+    var vector:SIMD4<UInt32> { SIMD4(UInt32(minX),UInt32(minY),UInt32(maxX),UInt32(maxY)) }
+    func level(_ level:Int)->BayerFusionRegion {
+        let divisor=1<<level
+        return Self(minX:minX/divisor,minY:minY/divisor,maxX:(maxX+divisor-1)/divisor,maxY:(maxY+divisor-1)/divisor)
+    }
+    static func make(width:Int,height:Int,geometry:DNGSensorGeometry?,zoom:Double) throws -> Self {
+        guard width>0,height>0 else { throw CameraFailure.message("ROI Bayer inválida.") }
+        if zoom<=1.001 { return Self(minX:0,minY:0,maxX:width,maxY:height) }
+        let crop=try BayerZoomCrop.geometry(width:width*2,height:height*2,original:geometry,zoom:zoom)
+        let left=Double(crop.activeArea[1])+crop.cropOrigin[0],top=Double(crop.activeArea[0])+crop.cropOrigin[1]
+        let x=max(0,Int(floor(left/32))*16-32),y=max(0,Int(floor(top/32))*16-32)
+        let right=min(width,Int(ceil((left+crop.cropSize[0])/32))*16+32)
+        let bottom=min(height,Int(ceil((top+crop.cropSize[1])/32))*16+32)
+        return Self(minX:x,minY:y,maxX:right,maxY:bottom)
+    }
+}
+
+struct DNGCaptureInfo {
+    let exposure:FrameExposure
+    var aperture:Double? = nil
+    var focalLength:Double? = nil
+    var lensModel:String? = nil
+    var make:String? = nil
+    var model:String? = nil
+    static func read(reference:Data,exposure:FrameExposure)->Self {
+        var result=Self(exposure:exposure)
+        guard let source=CGImageSourceCreateWithData(reference as CFData,nil),
+              let props=CGImageSourceCopyPropertiesAtIndex(source,0,nil) as? [String:Any] else { return result }
+        let exif=props[kCGImagePropertyExifDictionary as String] as? [String:Any] ?? [:]
+        let tiff=props[kCGImagePropertyTIFFDictionary as String] as? [String:Any] ?? [:]
+        result.aperture=(exif[kCGImagePropertyExifFNumber as String] as? NSNumber)?.doubleValue
+        result.focalLength=(exif[kCGImagePropertyExifFocalLength as String] as? NSNumber)?.doubleValue
+        result.lensModel=exif[kCGImagePropertyExifLensModel as String] as? String
+        result.make=tiff[kCGImagePropertyTIFFMake as String] as? String
+        result.model=tiff[kCGImagePropertyTIFFModel as String] as? String
+        return result
+    }
+}
+
+/// DNG payloads stay file-backed, not as a second 16-frame dirty heap burst.
+/// Keeping indexed mappings also handles a late change of the dominant exposure
+/// cohort: comparison JPEG and original DNG always use the final same anchor.
+struct BayerReferenceArchive {
+    private var originals:[Int:Data] = [:]
+    mutating func append(_ dng:Data,index:Int) throws {
+        let mapped=try BayerScratchStorage.store(dng)
+        originals[index]=mapped.data
+        mapped.storage.discardResidentPages()
+    }
+    func original(at index:Int)->Data? { originals[index] }
+    mutating func reset() { originals.removeAll() }
+}
+
 /// A compact quad texture: RGGB/GRBG/BGGR/GBRG phases remain four separate
 /// channels through alignment and fusion. No interpolation across CFA colors.
 struct SensorBayerFrame {
@@ -334,7 +390,7 @@ enum BayerQuadPacking {
 /// Calibrated uncompressed DNG for CIRAWFilter and optional computational RAW
 /// export. The original camera DNG remains the default export choice.
 enum FusedDNG {
-    static func encode(quads:Data,width:Int,height:Int,calibration c:BayerCalibration,noiseProfile:[Double]=[],zoom:Double=1) throws -> Data {
+    static func encode(quads:Data,width:Int,height:Int,calibration c:BayerCalibration,noiseProfile:[Double]=[],zoom:Double=1,capture:DNGCaptureInfo?=nil) throws -> Data {
         guard width>0,height>0,width<=2048,height<=2048,quads.count==width*height*8,c.pattern.count==4,
               c.matrix.count==9,c.matrix.allSatisfy({$0.isFinite && abs($0)<32}),
               c.neutral.count==3,c.neutral.allSatisfy({$0.isFinite && $0>0 && $0<32}),
@@ -403,6 +459,25 @@ enum FusedDNG {
         // Keep global DNG/color tags in IFD0 as well as the raw directory.
         let globalTags:Set<UInt16>=[50706,50707,50708,50721,50722,50723,50724,50727,50728,50730,50778,50779,50964,50965]
         var preview=tags.filter { globalTags.contains($0.key) }
+        var exif=[Tag]()
+        if let capture {
+            guard capture.exposure.isValid,capture.exposure.seconds<=3600,capture.exposure.iso<=65535 else { throw CameraFailure.message("EXIF RAW inválido.") }
+            exif.append(Tag(key:33434,type:5,count:1,data:rational(capture.exposure.seconds)))
+            exif.append(Tag(key:34855,type:3,count:1,data:u16(UInt16(capture.exposure.iso.rounded()))))
+            for (key,value) in [(UInt16(33437),capture.aperture),(UInt16(37386),capture.focalLength)] {
+                if let value,value.isFinite,value>0,value<10000 { exif.append(Tag(key:key,type:5,count:1,data:rational(value))) }
+            }
+            func ascii(_ value:String?)->Data? {
+                guard let value,!value.isEmpty,value.utf8.count<=256,let data=value.data(using:.ascii) else { return nil }
+                return data+Data([0])
+            }
+            if let value=ascii(capture.lensModel) { exif.append(Tag(key:42036,type:2,count:UInt32(value.count),data:value)) }
+            for (key,text) in [(UInt16(271),capture.make),(UInt16(272),capture.model)] {
+                if let value=ascii(text) { preview.append(Tag(key:key,type:2,count:UInt32(value.count),data:value)) }
+            }
+            preview.append(Tag(key:34665,type:4,count:1,data:u32(0)))
+        }
+        exif.sort { $0.key<$1.key }
         func thumb(_ key:UInt16,_ type:UInt16,_ count:UInt32,_ data:Data) { preview.append(Tag(key:key,type:type,count:count,data:data)) }
         thumb(254,4,1,u32(1));thumb(256,4,1,u32(16));thumb(257,4,1,u32(16))
         thumb(258,3,3,u16(8)+u16(8)+u16(8));thumb(259,3,1,u16(1));thumb(262,3,1,u16(2))
@@ -410,7 +485,8 @@ enum FusedDNG {
         thumb(278,4,1,u32(16));thumb(279,4,1,u32(16*16*3));thumb(284,3,1,u16(1));thumb(330,4,1,u32(0))
         tags.sort { $0.key<$1.key };preview.sort { $0.key<$1.key }
         func directorySize(_ tags:[Tag])->Int { 2+tags.count*12+4+tags.reduce(0) { $0+($1.data.count>4 ? ($1.data.count+1)/2*2:0) } }
-        let rawOffset=8+directorySize(preview),thumbnailOffset=rawOffset+directorySize(tags)
+        let rawOffset=8+directorySize(preview),exifOffset=rawOffset+directorySize(tags)
+        let thumbnailOffset=exifOffset+(exif.isEmpty ? 0:directorySize(exif))
         let stripOffset=thumbnailOffset+16*16*3
         func directory(_ tags:[Tag],offset:Int,strip:Int)->Data {
             let base=offset+2+tags.count*12+4
@@ -419,6 +495,7 @@ enum FusedDNG {
                 entries+=u16(tag.key)+u16(tag.type)+u32(tag.count)
                 if tag.key==273 { entries+=u32(UInt32(strip)) }
                 else if tag.key==330 { entries+=u32(UInt32(rawOffset)) }
+                else if tag.key==34665 { entries+=u32(UInt32(exifOffset)) }
                 else if tag.data.count<=4 { entries+=tag.data+Data(repeating:0,count:4-tag.data.count) }
                 else { entries+=u32(UInt32(base+extra.count));extra+=tag.data;if extra.count%2==1 { extra.append(0) } }
             }
@@ -427,7 +504,8 @@ enum FusedDNG {
         var header=Data([0x49,0x49,42,0]);header+=u32(8)
         header+=directory(preview,offset:8,strip:thumbnailOffset)
         header+=directory(tags,offset:rawOffset,strip:stripOffset)
-        // Private working DNG only: the placeholder is never saved as a photo.
+        if !exif.isEmpty { header+=directory(exif,offset:exifOffset,strip:0) }
+        // Reduced placeholder; the exported RAW is paired with its rendered JPEG.
         header+=Data(repeating:46,count:16*16*3)
         guard header.count==stripOffset,stripOffset%2==0 else { throw CameraFailure.message("Cabecera DNG desalineada.") }
         let length=header.count+w*h*2

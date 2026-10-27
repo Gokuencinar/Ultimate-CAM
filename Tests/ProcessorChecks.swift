@@ -295,6 +295,18 @@ struct ProcessorChecks {
             previous=pixel[0]
         }
         log("METAL FINISHING / HDR ROLL-OFF CHECKS PASSED · synthetic host images")
+
+        let calibration=BayerCalibration(pattern:[0,1,1,2],matrix:[3.2406,-1.5372,-0.4986,-0.9689,1.8758,0.0415,0.0557,-0.204,1.057],neutral:[1,1,1],illuminant:21,orientation:1)
+        let halves=(0..<128*128*4).map { Float16(0.04+Double($0%128)/1500).bitPattern.littleEndian }
+        let quads=halves.withUnsafeBufferPointer { Data(buffer:$0) }
+        let dng=try FusedDNG.encode(quads:quads,width:128,height:128,calibration:calibration,capture:DNGCaptureInfo(exposure:FrameExposure(seconds:0.25,iso:800)))
+        let neutralRAW=try ImportedPhotoProcessor.process(dng,options:ProcessingOptions())
+        var rawEdit=ProcessingOptions();rawEdit.nightStatic=true;rawEdit.postExposure=0.7;rawEdit.saturation=0.4;rawEdit.fineDetail=0.3
+        let editedRAW=try ImportedPhotoProcessor.process(dng,options:rawEdit)
+        try require(editedRAW.source=="imported-RAW" && editedRAW.raw==dng,"Synthetic DNG import was rejected or lost its original")
+        try require(editedRAW.reference==neutralRAW.reference && editedRAW.jpeg != editedRAW.reference,"RAW comparator reference was edited or adjustments ignored")
+        try require(rmse(try bitmap(editedRAW.jpeg),against:try bitmap(neutralRAW.jpeg))>0.5,"RAW import bypassed tone/detail/color finishing")
+        log("CALIBRATED RAW IMPORT CHECK PASSED · synthetic DNG")
         log("PROCESSOR CHECKS PASSED · synthetic fixtures only")
     }
 }

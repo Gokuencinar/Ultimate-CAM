@@ -124,6 +124,7 @@ struct CameraView: View {
         if options.nightStatic { return options.nightMetalRAW ? "Noche · RAW Metal":(options.nightRAW ? "Noche · RAW":"Noche · JPEG") }
         if stack { return "Pila de \(stackCount)" }
         if options.portraitAmount>0 { return "Retrato · personas" }
+        if options.usesPreviewZSL && !rawEnabled { return "Cámara · ZSL Visor 1280p" }
         return rawEnabled ? "RAW + JPEG":"Cámara"
     }
     private var movieBusy:Bool { [.recording,.finishing,.saving].contains(movie.phase) }
@@ -165,7 +166,7 @@ struct CameraView: View {
         }
         .overlay(alignment: .bottom) {
             VStack(spacing: 0) {
-                if !videoMode && (camera.isFocusLocked || manualFocus) { focusInfo.padding(.horizontal, 20).padding(.bottom, 8) }
+                if (!videoMode && (camera.isFocusLocked || manualFocus || zoom>1.01)) || (videoMode && movie.zoom>1.01) { focusInfo.padding(.horizontal, 20).padding(.bottom, 8) }
                 if camera.processingInProgress {
                     Button("Detener procesado y conservar original") { camera.cancelProcessing() }
                         .font(.footnote.bold()).buttonStyle(.bordered).tint(CameraPalette.accent).padding(.bottom, 8)
@@ -197,7 +198,10 @@ struct CameraView: View {
             if !loadProfile(profiles.options(for: next.rawValue) ?? ProcessingOptions()) { options = ProcessingOptions() }
             if next != .front { lastBackLens = next }
         }
-        .onChange(of: options) { _, value in profiles.remember(value, lens: lens.rawValue) }
+        .onChange(of: options) { _, value in
+            if value.singlePhotoQuality == .quality && value.zeroShutterLagFusion { options.zeroShutterLagFusion=false }
+            profiles.remember(options,lens:lens.rawValue)
+        }
         .onChange(of: options) { _, value in camera.setPreviewTools(previewTools,processing:value) }
         .onChange(of: previewTools) { _, value in camera.setPreviewTools(value,processing:options) }
         .onChange(of: camera.busy) { _, value in if !value { camera.setPreviewTools(previewTools,processing:options) } }
@@ -249,6 +253,14 @@ struct CameraView: View {
             Spacer(minLength:0)
             Text(captureTitle)
                 .font(.system(size:12,weight:.medium)).foregroundStyle(.white.opacity(0.8))
+            if abs(bias)>=0.05 && !manualExposure {
+                Button { bias=0 } label: {
+                    Text(String(format:"%+.1f EV",bias)).font(.system(size:11,weight:.semibold).monospacedDigit())
+                        .foregroundStyle(CameraPalette.accent).padding(.horizontal,8).frame(minHeight:36)
+                        .background(.black.opacity(0.65),in:Capsule())
+                }.accessibilityIdentifier("camera.headerExposureBias").accessibilityLabel("Restablecer exposición")
+                    .accessibilityValue(String(format:"%.1f",bias))
+            }
             Spacer(minLength:0)
             Menu {
                 Toggle("Cuadrícula",isOn:$grid)
@@ -258,7 +270,7 @@ struct CameraView: View {
                 Toggle("Resaltar enfoque",isOn:$previewTools.peaking)
                 Toggle("Cebras de luces",isOn:$previewTools.zebras)
                 Toggle("Vista de color y LUT · 5 FPS",isOn:$previewTools.colorLook)
-            } label: { Image(systemName:"viewfinder").font(.system(size:19)).frame(width:44,height:44).background(.black.opacity(0.55),in:Circle()) }
+            } label: { Image(systemName:"viewfinder").foregroundStyle(previewTools.enabled ? CameraPalette.accent:Color.white).font(.system(size:19)).frame(width:44,height:44).background(.black.opacity(0.55),in:Circle()) }
                 .accessibilityLabel("Guías y herramientas del visor").accessibilityIdentifier("camera.previewTools").disabled(!controlsEnabled)
         }
     }
@@ -344,6 +356,7 @@ struct CameraView: View {
 
     private var focusInfo: some View {
         HStack {
+            if !videoMode && (manualFocus || camera.isFocusLocked) {
             Text(manualFocus ? "Enfoque manual · toca para volver a AF" : camera.focusStatus)
                 .font(.system(size: 11, weight: .semibold))
                 .padding(.horizontal, 10).padding(.vertical, 7)
@@ -359,10 +372,16 @@ struct CameraView: View {
                 }.accessibilityLabel("Liberar bloqueo de cámara")
                     .disabled(!controlsEnabled)
             }
-            Spacer(minLength: 0)
-            if zoom > 1.01 {
-                Text("\(zoom, specifier: "%.1f")×").font(.caption.monospacedDigit().bold())
-                    .padding(8).background(.black.opacity(0.7), in: Capsule()).allowsHitTesting(false)
+            }
+            Spacer(minLength:0)
+            if (videoMode ? movie.zoom:zoom)>1.01 {
+                Button {
+                    if videoMode { movie.setZoom(1,smooth:true) } else { camera.setZoom(1,smooth:true) }
+                } label: {
+                    Text("\(videoMode ? movie.zoom:zoom, specifier: "%.1f")×").font(.caption.monospacedDigit().bold())
+                        .padding(.horizontal,12).frame(minHeight:44).background(.black.opacity(0.7),in:Capsule())
+                }.accessibilityIdentifier("camera.resetZoom").accessibilityLabel("Restablecer zoom a 1×")
+                    .disabled(!controlsEnabled && !(videoMode && movie.phase == .recording))
             }
         }
     }
@@ -634,7 +653,7 @@ struct CameraView: View {
         Form {
             Section {
                 Picker(selection:$options.singlePhotoQuality) { ForEach(SinglePhotoQuality.allCases) { Text($0.label).tag($0) } }
-                    label: { Label("Procesado",systemImage:"sparkles") }.disabled(videoMode || stack || rawEnabled || options.zeroShutterLagFusion)
+                    label: { Label("Procesado",systemImage:"sparkles") }.disabled(videoMode || stack || rawEnabled  )
                 Toggle(isOn:Binding(get:{rawEnabled},set:{rawEnabled=$0;if $0 { options.zeroShutterLagFusion=false }})) { Label("Formato RAW",systemImage:"camera.aperture") }
                     .disabled(videoMode || !rawAvailable || stack)
                 Toggle(isOn:$options.preserveHDR) { Label("Conservar HDR",systemImage:"sun.max") }.accessibilityIdentifier("output.preserveHDR")
@@ -742,9 +761,12 @@ struct CameraView: View {
     private var captureSettings: some View {
         Group {
             Section("Fusión del visor") {
-                Toggle("Fusión previa al disparo",isOn:$options.zeroShutterLagFusion)
+                Toggle("Fusión del visor · 1280p",isOn:Binding(get:{options.usesPreviewZSL},set:{ value in
+                    options.zeroShutterLagFusion=value
+                    if value { options.singlePhotoQuality = .balanced }
+                }))
                     .disabled(rawEnabled || stack || options.portraitAmount>0).accessibilityIdentifier("capture.zsl")
-                Text("Fotogramas del visor a 1280 px.").font(.caption).foregroundStyle(.secondary)
+                Text("Salida reducida a 1280 px. Calidad iOS utiliza la captura nativa y desactiva esta fusión.").font(.caption).foregroundStyle(.secondary)
             }
             if options.nightStatic {
                 Section("Captura nocturna") {

@@ -9,6 +9,7 @@ private struct MetalFusionParameters {
     var noise=SIMD4<Float>(0,0,0,0)
     var tone=SIMD4<Float>(0,0,0,0)
     var sensorNoise=SIMD4<Float>(0,0,0,0)
+    var roi=SIMD4<UInt32>(0,0,0,0)
 }
 
 /// Own compute kernels, not the private Apple ISP or Google's proprietary HDR+.
@@ -147,6 +148,10 @@ final class MetalBurstProcessor {
             let r=work.referencePyramid[level],s=work.samplePyramid[level]
             let seed=level==2 ? r:work.regularizedFlow[level+1]
             var params=parameters;params.search=SIMD4<Int32>(level==2 ? 6:2,level==2 ? 0:1,parameters.search.z,level==0 ? 1:0)
+            if parameters.size.w==1 {
+                let divisor=UInt32(1<<level)
+                params.roi=SIMD4(parameters.roi.x/divisor,parameters.roi.y/divisor,(parameters.roi.z+divisor-1)/divisor,(parameters.roi.w+divisor-1)/divisor)
+            }
             try encode("uc_tile_flow",command,textures:[r,s,seed,work.flow[level]],parameters:params)
             try encode("uc_regularize_flow",command,textures:[r,s,work.flow[level],work.regularizedFlow[level]],parameters:params)
         }
@@ -196,6 +201,7 @@ final class MetalBurstProcessor {
         defer { frames.forEach { $0.discardResidentPages() } }
         let fused:(dng:Data,count:Int)=try autoreleasepool {
         var params=MetalFusionParameters();params.size.w=1
+        params.roi=try BayerFusionRegion.make(width:first.width,height:first.height,geometry:first.calibration.geometry,zoom:first.zoom).vector
         params.luma=SIMD4<Float>(first.calibration.pattern[0]==1 ? 0.5:0,first.calibration.pattern[1]==1 ? 0.5:0,
             first.calibration.pattern[2]==1 ? 0.5:0,first.calibration.pattern[3]==1 ? 0.5:0)
         params.search.z=options.hdrBracketing ? 1:0
@@ -230,7 +236,7 @@ final class MetalBurstProcessor {
             accepted+=1
             }
         }
-        return (try FusedDNG.encode(quads:download(work.mean,cancellation:cancellation),width:first.width,height:first.height,calibration:first.calibration,noiseProfile:first.noiseProfile,zoom:first.zoom),accepted)
+        return (try FusedDNG.encode(quads:download(work.mean,cancellation:cancellation),width:first.width,height:first.height,calibration:first.calibration,noiseProfile:first.noiseProfile,zoom:first.zoom,capture:DNGCaptureInfo.read(reference:referenceJPEG,exposure:first.exposure)),accepted)
         }
         // Fusion textures are released before full-resolution demosaicing/tone.
         guard let decoder=CIRAWFilter(imageData:fused.dng,identifierHint:"com.adobe.raw-image") else { throw CameraFailure.message("No se pudo revelar el mosaico fusionado.") }

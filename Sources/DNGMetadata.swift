@@ -54,7 +54,7 @@ struct DNGMetadata {
             return value
         }
         guard try integer(2,2)==42 else { throw CameraFailure.message("Se requiere DNG TIFF clásico.") }
-        let wanted=Set(namedTags.values).union([UInt16(51009)])
+        let wanted=Set(namedTags.values).union([UInt16(51009),33434,34855,33437,37386,42036])
         var pending=[Int(try integer(4,4))],visited=Set<Int>(),global=[UInt16:Field](),raw=[UInt16:Field]()
         while let offset=pending.popLast(),offset>0 {
             guard visited.count<16,visited.insert(offset).inserted else { throw CameraFailure.message("Directorios DNG cíclicos o excesivos.") }
@@ -63,14 +63,14 @@ struct DNGMetadata {
             var directory=[UInt16:Field](),isRAW=false
             for index in 0..<count {
                 let entry=offset+2+index*12,tag=UInt16(try integer(entry,2)),type=UInt16(try integer(entry+2,2))
-                guard wanted.contains(tag) || tag==330 || tag==262 else { continue }
+                guard wanted.contains(tag) || tag==330 || tag==34665 || tag==262 else { continue }
                 let units=Int(try integer(entry+4,4)),unit:Int
                 switch type { case 1,7:unit=1;case 3:unit=2;case 4:unit=4;case 5,10,12:unit=8;default:continue }
                 guard units>0,units<=1_048_576/unit else { throw CameraFailure.message("Metadatos DNG demasiado grandes.") }
                 let length=units*unit,start=length<=4 ? entry+8:Int(try integer(entry+8,4))
                 guard start>=0,start<=bytes.count-length else { throw CameraFailure.message("Datos DNG truncados.") }
                 let field=Field(type:type,data:bytes.subdata(in:start..<start+length),little:little)
-                if tag==330 {
+                if tag==330 || tag==34665 {
                     guard type==4,units<=8 else { throw CameraFailure.message("SubIFD DNG inválido.") }
                     pending.append(contentsOf:field.numbers.map { Int($0) })
                 } else if tag==262 { isRAW=field.numbers.first==32803 }

@@ -112,6 +112,7 @@ import Darwin
             try checkQuickRAWControls()
             try checkOpticalProgress()
             try checkZSLReference()
+            try check016(calibration:calibration,quads:quadData)
             print("Computational source checks passed; no capture session, app launch or GPU execution.")
         } catch { fputs("\(error)\n",stderr);exit(1) }
     }
@@ -277,4 +278,43 @@ import Darwin
         try require(PreviewReferenceSelector.index(in:[sharp,blur,sharp,blur],context:context)==2,"ZSL chose the shutter-shaken last frame or a frame outside the latest three")
         print("Recent ZSL reference check passed")
     }
+    static func check016(calibration:BayerCalibration,quads:Data) throws {
+        try require(UCHDRExposureWeight(0,0.2,0.25)==1,"Long HDR exposure discarded deep shadows/black CFA channel")
+        try require(UCHDRExposureWeight(0,0.2,2)==0,"Short HDR exposure accepted its noise floor")
+        try require(UCHDRExposureWeight(0,1,0.25)==0,"Long HDR exposure accepted saturated highlights")
+        try require(UCHDRExposureWeight(0,0.95,0.25)>0 && UCHDRExposureWeight(0,0.95,0.25)<1,"HDR highlight ramp lost its shoulder")
+        try require(abs(UCRAWVarianceSignal(-0.001,0.02)-0.01)<1e-6,"Negative anchor underestimated RAW signal variance")
+        let full=try BayerFusionRegion.make(width:2016,height:1512,geometry:nil,zoom:1)
+        let region=try BayerFusionRegion.make(width:2016,height:1512,geometry:nil,zoom:2)
+        try require(full==BayerFusionRegion(minX:0,minY:0,maxX:2016,maxY:1512),"Native ROI clipped the full sensor")
+        let crop=try BayerZoomCrop.geometry(width:4032,height:3024,original:nil,zoom:2)
+        try require(region.minX<=Int(crop.cropOrigin[0])/2-32 && region.minY<=Int(crop.cropOrigin[1])/2-32,"Zoom ROI lost warp margin")
+        try require(region.maxX>=Int(crop.cropOrigin[0]+crop.cropSize[0])/2+32 && region.maxY>=Int(crop.cropOrigin[1]+crop.cropSize[1])/2+32,"Zoom ROI lost far-side warp margin")
+        try require((region.maxX-region.minX)*(region.maxY-region.minY)<2016*1512/2,"2x zoom still fuses the entire sensor")
+        let coarse=region.level(2)
+        try require(coarse.minX*4<=region.minX && coarse.maxX*4>=region.maxX,"Pyramid ROI rounded inward")
+        var archive=BayerReferenceArchive(),frames=[SensorBayerFrame](),jpegs=[Data]()
+        for i in 0..<6 {
+            let exposure=FrameExposure(seconds:i<2 ? 0.01:0.02,iso:400)
+            let frame=SensorBayerFrame(width:256,height:192,quads:quads,calibration:calibration,exposure:exposure,timestamp:Double(i),sharpness:Double(i))
+            frames.append(frame);jpegs.append(Data([UInt8(i),0x4a]))
+            try archive.append(Data([UInt8(i),0x44]),index:i)
+        }
+        guard let anchor=SensorBayerFrame.referenceIndex(in:frames,hdr:false),let original=archive.original(at:anchor) else { throw CameraFailure.message("Lost Lucky Imaging reference") }
+        try require(anchor==5 && original[0]==jpegs[anchor][0],"DNG/JPEG do not share the final dominant-cohort sharp anchor")
+        let hdr=SensorBayerFrame.referenceIndex(in:frames,hdr:true)!
+        try require(hdr==0 && archive.original(at:hdr)==Data([0,0x44]),"HDR original no longer matches its shortest exposure")
+        let info=DNGCaptureInfo(exposure:frames[anchor].exposure,aperture:1.8,focalLength:4.25,lensModel:"Synthetic lens",make:"Apple",model:"iPhone")
+        let encoded=try FusedDNG.encode(quads:quads,width:256,height:192,calibration:calibration,capture:info)
+        let tags=try DNGMetadata.read(encoded)
+        try require(abs((tags[33434].first ?? 0)-0.02)<1e-6 && tags[34855]==[400],"Computational DNG lost anchor EXIF exposure/ISO")
+        try require(tags.fields[42036] != nil && tags[37386]==[4.25],"Computational DNG lost lens metadata")
+        var options=ProcessingOptions();options.zeroShutterLagFusion=true
+        try require(!options.usesPreviewZSL,"Quality priority silently selected 1280p")
+        options.singlePhotoQuality = .balanced
+        try require(options.usesPreviewZSL,"Explicit reduced ZSL path unavailable")
+        archive.reset();try require(archive.original(at:anchor)==nil,"RAW archive did not release its mappings")
+        print("0.16 HDR weights, ROI, indexed references, capture EXIF and native-quality ZSL checks passed")
+    }
+
 }

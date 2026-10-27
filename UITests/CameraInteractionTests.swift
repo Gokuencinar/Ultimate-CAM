@@ -10,7 +10,13 @@ final class CameraInteractionTests: XCTestCase {
         exposure.adjust(toNormalizedSliderPosition:0.75)
         XCTAssertGreaterThan(Double(reset.value as? String ?? "0") ?? 0,0.5)
         capture(app,"quick-exposure")
-        reset.tap();XCTAssertEqual(reset.value as? String,"0.0")
+        app.buttons["camera.quickSettings"].tap()
+        let headerEV=app.buttons["camera.headerExposureBias"]
+        XCTAssertTrue(headerEV.waitForExistence(timeout:3),"EV disappeared when quick settings closed")
+        XCTAssertGreaterThan(Double(headerEV.value as? String ?? "0") ?? 0,0.5)
+        headerEV.tap();XCTAssertFalse(headerEV.exists)
+        app.buttons["camera.quickSettings"].tap()
+        XCTAssertEqual(reset.value as? String,"0.0")
         let format=app.buttons["camera.quickFormat"]
         XCTAssertTrue(format.isEnabled)
         XCTAssertEqual(format.value as? String,"JPEG")

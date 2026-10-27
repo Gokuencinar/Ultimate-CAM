@@ -1,4 +1,5 @@
 #include <metal_stdlib>
+#include "FusionMath.h"
 using namespace metal;
 
 struct FusionParameters {
@@ -9,6 +10,7 @@ struct FusionParameters {
     float4 noise; // Pair shot/read variance in the reference exposure domain.
     float4 tone; // toe strength, deep-shadow chroma start/end, reserved.
     float4 sensorNoise; // Reference shot/read, sample shot/read before scaling.
+    uint4 roi; // Half-open active quad box (or level-scaled box for flow).
 };
 constexpr sampler pixels(coord::pixel,address::clamp_to_edge,filter::linear);
 
@@ -74,6 +76,10 @@ kernel void uc_tile_flow(texture2d<float,access::sample> reference [[texture(0)]
                          texture2d<float,access::write> output [[texture(3)]],
                          constant FusionParameters &params [[buffer(0)]],uint2 tile [[thread_position_in_grid]]) {
     if (tile.x>=output.get_width() || tile.y>=output.get_height()) return;
+    if (params.size.w==1 && (tile.x*16>=params.roi.z || tile.y*16>=params.roi.w ||
+        (tile.x+1)*16<=params.roi.x || (tile.y+1)*16<=params.roi.y)) {
+        output.write(float4(0,0,1,0),tile);return;
+    }
     float2 center=min((float2(tile)+0.5f)*16.0f,float2(reference.get_width(),reference.get_height())-1.0f);
     int2 prediction=0;float seedConfidence=0;
     if (params.search.y) {
@@ -122,6 +128,10 @@ kernel void uc_regularize_flow(texture2d<float,access::sample> reference [[textu
                                texture2d<float,access::write> output [[texture(3)]],
                                constant FusionParameters &params [[buffer(0)]],uint2 tile [[thread_position_in_grid]]) {
     if (tile.x>=output.get_width() || tile.y>=output.get_height()) return;
+    if (params.size.w==1 && (tile.x*16>=params.roi.z || tile.y*16>=params.roi.w ||
+        (tile.x+1)*16<=params.roi.x || (tile.y+1)*16<=params.roi.y)) {
+        output.write(float4(0,0,1,0),tile);return;
+    }
     float4 current=input.read(tile);
     if (current.w<0.25f) {
         float xs[8],ys[8],confidence=0;uint count=0;
@@ -165,7 +175,11 @@ kernel void uc_fuse_tiles(texture2d<float,access::read> reference [[texture(0)]]
                           texture2d<float,access::write> nextWeights [[texture(6)]],
                           constant FusionParameters &params [[buffer(0)]],uint2 p [[thread_position_in_grid]]) {
     if (p.x>=reference.get_width() || p.y>=reference.get_height()) return;
-    float4 anchor=reference.read(p),acc=mean.read(p);float oldWeight=weights.read(p).x;
+    float4 anchor=reference.read(p);
+    if (params.size.w==1 && (p.x<params.roi.x || p.y<params.roi.y || p.x>=params.roi.z || p.y>=params.roi.w)) {
+        nextMean.write(anchor,p);nextWeights.write(float4(1.0f),p);return;
+    }
+    float4 acc=mean.read(p);float oldWeight=weights.read(p).x;
     float2 grid=(float2(p)+0.5f)/16.0f-0.5f;
     int2 base=int2(floor(grid));float2 fraction=fract(grid);
     float4 contribution=0;float accepted=0;
@@ -182,7 +196,7 @@ kernel void uc_fuse_tiles(texture2d<float,access::read> reference [[texture(0)]]
         float energy=params.size.w ? dot(residual*residual,float4(0.25f)):dot(residual.rgb*residual.rgb,float3(1.0f/3));
         float variance=max(params.control.x,1e-7f);
         if (params.size.w) {
-            float signal=max(dot(anchor,float4(0.25f)),0.0f);
+            float signal=UCRAWVarianceSignal(dot(anchor,float4(0.25f)),dot(candidate,float4(0.25f)));
             variance=max(params.noise.x*signal+params.noise.y,1e-8f);
         }
         float robust=exp(-energy/(18.0f*variance));
@@ -194,7 +208,8 @@ kernel void uc_fuse_tiles(texture2d<float,access::read> reference [[texture(0)]]
         if (params.search.z) {
             float low=min(min(sensor.r,sensor.g),min(sensor.b,sensor.a));
             float high=max(max(sensor.r,sensor.g),max(sensor.b,sensor.a));
-            exposureWeight=smoothstep(0.001f,0.012f,low)*(1.0f-smoothstep(0.94f,0.995f,high));
+            // Longer exposures supply the shadow signal, even if one CFA phase is black.
+            exposureWeight=UCHDRExposureWeight(low,high,params.control.w);
         }
         float weight=spatial*robust*reliable*exposureWeight;
         contribution+=candidate*weight;accepted+=weight;

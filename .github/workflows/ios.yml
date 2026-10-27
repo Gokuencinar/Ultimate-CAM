@@ -4,11 +4,6 @@ on:
   push:
     branches: [main]
   workflow_dispatch:
-    inputs:
-      build_deb:
-        description: Generate DEB packages
-        type: boolean
-        default: false
 
 permissions:
   contents: read
@@ -21,8 +16,6 @@ jobs:
   build:
     runs-on: macos-15
     timeout-minutes: 25
-    env:
-      BUILD_DEB: ${{ github.event_name == 'workflow_dispatch' && inputs.build_deb }}
     steps:
       - uses: actions/checkout@v4
       - name: Prepare Xcode and XcodeGen
@@ -34,19 +27,17 @@ jobs:
             brew install xcodegen
           fi
           xcodegen --version
-          if [ "$BUILD_DEB" = true ]; then
           for tool in ldid dpkg-deb; do
             if ! command -v "$tool" >/dev/null 2>&1; then
               if [ "$tool" = dpkg-deb ]; then brew install dpkg; else brew install ldid; fi
             fi
           done
-          fi
           xcodegen generate
       - name: Check computational formats
         run: |
           set -euo pipefail
           mkdir -p build
-          xcrun --sdk macosx swiftc -g -O Sources/CameraFailure.swift Sources/CaptureProgress.swift Sources/PreviewReferenceSelector.swift Sources/TemporalFrameBuffer.swift Sources/BayerScratchStorage.swift Sources/DNGMetadata.swift Sources/SensorBayerFrame.swift Sources/HDRCapturePlan.swift Sources/NightCapturePlan.swift Sources/NightTonePlan.swift Sources/ProcessingOptions.swift Sources/PhotoModePolicy.swift Sources/PhotoCapturePolicy.swift Sources/ColorRecipe.swift Sources/CubeLUT.swift Tests/ComputationalChecks.swift -o build/computational-checks
+          xcrun --sdk macosx swiftc -g -O -import-objc-header Sources/FusionMath.h Sources/CameraFailure.swift Sources/CaptureProgress.swift Sources/PreviewReferenceSelector.swift Sources/TemporalFrameBuffer.swift Sources/BayerScratchStorage.swift Sources/DNGMetadata.swift Sources/SensorBayerFrame.swift Sources/HDRCapturePlan.swift Sources/NightCapturePlan.swift Sources/NightTonePlan.swift Sources/ProcessingOptions.swift Sources/PhotoModePolicy.swift Sources/PhotoCapturePolicy.swift Sources/ColorRecipe.swift Sources/CubeLUT.swift Tests/ComputationalChecks.swift -o build/computational-checks
           build/computational-checks
       - name: Build for iPhone without signing
         run: |
@@ -61,7 +52,7 @@ jobs:
       - name: Check image alignment and noise averaging
         run: |
           set -euo pipefail
-          SOURCES=(Sources/CameraFailure.swift Sources/ResearchWiener.swift Sources/CaptureRotation.swift Sources/CaptureMetadata.swift Sources/SphereViewerRenderer.swift Sources/SphereGeometry.swift Sources/SphereMetadata.swift Sources/SphereProcessor.swift Sources/PanoramaProcessor.swift Sources/PortraitProcessor.swift Sources/PreviewAnalysis.swift Sources/MovieConfiguration.swift Sources/MovieRecordedAsset.swift Sources/AdaptiveHDR.swift Sources/PNGLUT.swift Sources/PhotoCapturePolicy.swift Sources/WeightedTemporalMerger.swift Sources/ImportedPhotoProcessor.swift Sources/ColorRecipe.swift Sources/HDRCapturePlan.swift Sources/HDRProcessor.swift Sources/JPEGRenderer.swift Sources/NightCapturePlan.swift Sources/ProcessingCancellation.swift Sources/PreviewDecoder.swift Sources/ProcessingOptions.swift Sources/CubeLUT.swift Sources/ProcessingProfiles.swift Sources/AdvancedProcessor.swift Sources/LocalAlignment.swift Sources/NoiseAwareMerger.swift Sources/ImageStatistics.swift Sources/BurstProcessor.swift)
+          SOURCES=(Sources/BayerScratchStorage.swift Sources/DNGMetadata.swift Sources/SensorBayerFrame.swift Sources/NightTonePlan.swift Sources/CameraFailure.swift Sources/ResearchWiener.swift Sources/CaptureRotation.swift Sources/CaptureMetadata.swift Sources/SphereViewerRenderer.swift Sources/SphereGeometry.swift Sources/SphereMetadata.swift Sources/SphereProcessor.swift Sources/PanoramaProcessor.swift Sources/PortraitProcessor.swift Sources/PreviewAnalysis.swift Sources/MovieConfiguration.swift Sources/MovieRecordedAsset.swift Sources/AdaptiveHDR.swift Sources/PNGLUT.swift Sources/PhotoCapturePolicy.swift Sources/WeightedTemporalMerger.swift Sources/ImportedPhotoProcessor.swift Sources/ColorRecipe.swift Sources/HDRCapturePlan.swift Sources/HDRProcessor.swift Sources/JPEGRenderer.swift Sources/NightCapturePlan.swift Sources/ProcessingCancellation.swift Sources/PreviewDecoder.swift Sources/ProcessingOptions.swift Sources/CubeLUT.swift Sources/ProcessingProfiles.swift Sources/AdvancedProcessor.swift Sources/LocalAlignment.swift Sources/NoiseAwareMerger.swift Sources/ImageStatistics.swift Sources/BurstProcessor.swift)
           xcrun --sdk macosx swiftc -O "${SOURCES[@]}" Tests/PortChecks.swift -o build/port-checks
           build/port-checks
           xcrun --sdk macosx swiftc -O "${SOURCES[@]}" Tests/ProcessorChecks.swift -o build/processor-checks
@@ -75,16 +66,12 @@ jobs:
           xcrun --sdk macosx swiftc -O "${SOURCES[@]}" Tests/SpectralChecks.swift -o build/spectral-checks
           build/spectral-checks
       - name: Package rootless DEB
-        if: github.event_name == 'workflow_dispatch' && inputs.build_deb
         run: bash scripts/package_deb.sh
       - name: Package RootHide DEB
-        if: github.event_name == 'workflow_dispatch' && inputs.build_deb
         run: bash scripts/package_deb.sh roothide
       - name: Validate both package layouts
-        if: github.event_name == 'workflow_dispatch' && inputs.build_deb
         run: python3 Tests/PackageChecks.py build
       - name: Upload rootless DEB
-        if: github.event_name == 'workflow_dispatch' && inputs.build_deb
         uses: actions/upload-artifact@v4
         with:
           name: Ultimate-CAM-rootless-${{ github.run_number }}
@@ -92,7 +79,6 @@ jobs:
           if-no-files-found: error
           retention-days: 14
       - name: Upload RootHide DEB
-        if: github.event_name == 'workflow_dispatch' && inputs.build_deb
         uses: actions/upload-artifact@v4
         with:
           name: Ultimate-CAM-roothide-${{ github.run_number }}
