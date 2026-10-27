@@ -65,7 +65,7 @@ struct DNGMetadata {
                 let entry=offset+2+index*12,tag=UInt16(try integer(entry,2)),type=UInt16(try integer(entry+2,2))
                 guard wanted.contains(tag) || tag==330 || tag==34665 || tag==262 else { continue }
                 let units=Int(try integer(entry+4,4)),unit:Int
-                switch type { case 1,7:unit=1;case 3:unit=2;case 4:unit=4;case 5,10,12:unit=8;default:continue }
+                switch type { case 1,2,7:unit=1;case 3:unit=2;case 4:unit=4;case 5,10,12:unit=8;default:continue }
                 guard units>0,units<=1_048_576/unit else { throw CameraFailure.message("Metadatos DNG demasiado grandes.") }
                 let length=units*unit,start=length<=4 ? entry+8:Int(try integer(entry+8,4))
                 guard start>=0,start<=bytes.count-length else { throw CameraFailure.message("Datos DNG truncados.") }

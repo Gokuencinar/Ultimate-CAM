@@ -465,7 +465,7 @@ enum FusedDNG {
             exif.append(Tag(key:33434,type:5,count:1,data:rational(capture.exposure.seconds)))
             exif.append(Tag(key:34855,type:3,count:1,data:u16(UInt16(capture.exposure.iso.rounded()))))
             for (key,value) in [(UInt16(33437),capture.aperture),(UInt16(37386),capture.focalLength)] {
-                if let value,value.isFinite,value>0,value<10000 { exif.append(Tag(key:key,type:5,count:1,data:rational(value))) }
+                if let value,value.isFinite,value>0,value<1000 { exif.append(Tag(key:key,type:5,count:1,data:rational(value))) }
             }
             func ascii(_ value:String?)->Data? {
                 guard let value,!value.isEmpty,value.utf8.count<=256,let data=value.data(using:.ascii) else { return nil }
