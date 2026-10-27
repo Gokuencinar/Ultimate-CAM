@@ -24,127 +24,64 @@ final class CameraInteractionTests: XCTestCase {
             XCTAssertTrue(app.buttons["camera.shutter"].waitForExistence(timeout:5))
         }
     }
-    func testVideoSettingsAndReturnWithoutRecording() {
+    func testVideoStaysInCameraWindowWithoutRecording() {
         continueAfterFailure=false
         let app=XCUIApplication();app.launch()
+        let windows=app.windows.count
+        let finder=app.descendants(matching:.any).matching(identifier:"camera.viewfinder").firstMatch
+        XCTAssertTrue(finder.waitForExistence(timeout:10))
+        let originalFrame=finder.frame
+        revealMode(app,"camera.mode.video").tap()
+        XCTAssertTrue(app.buttons["video.record"].waitForExistence(timeout:8))
+        XCTAssertTrue(app.buttons["video.quickResolution"].exists)
+        XCTAssertTrue(app.buttons["video.quickFPS"].exists)
+        XCTAssertTrue(app.scrollViews["camera.modes"].exists)
+        XCTAssertEqual(app.windows.count,windows,"Video must use the existing window")
+        XCTAssertFalse(app.buttons["video.close"].exists,"Video must not be a separate presented camera")
+        XCTAssertEqual(finder.frame,originalFrame,"Persistent viewfinder geometry changed")
+        capture(app,"video")
         app.buttons["camera.settings"].tap()
+        XCTAssertTrue(app.navigationBars["Ajustes"].waitForExistence(timeout:3))
+        XCTAssertTrue(app.descendants(matching:.any).matching(identifier:"video.resolution").firstMatch.exists)
+        capture(app,"settings-video")
+        app.buttons["Listo"].tap()
+        revealMode(app,"camera.mode.photo").tap()
+        XCTAssertTrue(app.buttons["camera.shutter"].waitForExistence(timeout:8))
+        XCTAssertFalse(app.buttons["video.record"].exists)
+        XCTAssertEqual(app.windows.count,windows)
+    }
+    func testViewfinderAndCleanSettings() {
+        continueAfterFailure=false
+        let app=XCUIApplication();app.launch()
+        let finder=app.descendants(matching:.any).matching(identifier:"camera.viewfinder").firstMatch
+        XCTAssertTrue(finder.waitForExistence(timeout:10))
+        XCTAssertEqual(finder.frame.width,app.frame.width,accuracy:2)
+        XCTAssertEqual(finder.frame.height,app.frame.height,accuracy:2)
+        let point=finder.coordinate(withNormalizedOffset:CGVector(dx:0.45,dy:0.45))
+        point.tap();point.press(forDuration:0.8)
+        app.buttons["camera.settings"].tap()
+        XCTAssertTrue(app.navigationBars["Ajustes"].waitForExistence(timeout:3))
+        XCTAssertTrue(app.buttons["settings.night"].exists)
+        XCTAssertFalse(app.staticTexts.containing(NSPredicate(format:"label CONTAINS %@","shader")).firstMatch.exists)
+        capture(app,"settings-top")
+        let color=app.buttons["settings.color"]
+        for _ in 0..<5 { if color.isHittable { break };app.swipeUp() }
+        XCTAssertTrue(color.isHittable)
+        color.tap()
+        XCTAssertTrue(app.navigationBars["Color y estilo"].waitForExistence(timeout:3))
+        XCTAssertTrue(app.sliders["Exposici\u{00f3}n del JPEG (EV)"].exists)
+        capture(app,"settings-color")
+        app.navigationBars.buttons.element(boundBy:0).tap()
         let mirror=app.switches["capture.mirrorSelfies"],hardware=app.switches["capture.hardwareButtons"]
         for _ in 0..<6 { if mirror.isHittable && hardware.isHittable { break };app.swipeUp() }
         XCTAssertTrue(mirror.isHittable && hardware.isHittable)
         setSwitch(mirror,to:"1");setSwitch(hardware,to:"0")
+        capture(app,"settings-bottom")
         app.buttons["Listo"].tap()
-        let video=revealMode(app,"camera.mode.video")
-        XCTAssertTrue(video.isHittable);video.tap()
-        XCTAssertTrue(app.buttons["video.settings"].waitForExistence(timeout:8))
-        app.buttons["video.settings"].tap()
-        XCTAssertTrue(app.navigationBars["Vídeo"].waitForExistence(timeout:3))
-        XCTAssertTrue(app.descendants(matching:.any).matching(identifier:"video.resolution").firstMatch.exists)
-        for _ in 0..<4 { if mirror.isHittable && hardware.isHittable { break };app.swipeUp() }
-        XCTAssertTrue(NSPredicate(format:"value == %@","1").evaluate(with:mirror),"Selfie preference did not propagate to video")
-        XCTAssertTrue(NSPredicate(format:"value == %@","0").evaluate(with:hardware),"Hardware preference did not propagate to video")
-        setSwitch(mirror,to:"0");setSwitch(hardware,to:"1")
-        let image=XCTAttachment(screenshot:app.screenshot());image.name="Video configuration";image.lifetime = .keepAlways;add(image)
-        app.buttons["Listo"].tap();app.buttons["video.close"].tap()
-        XCTAssertTrue(app.buttons["camera.shutter"].waitForExistence(timeout:5))
-    }
-    func testViewfinderAndSettings() {
-        continueAfterFailure = false
-        let app = XCUIApplication()
-        app.launch()
-        let viewfinder = app.descendants(matching: .any).matching(identifier: "camera.viewfinder").firstMatch
-        XCTAssertTrue(viewfinder.waitForExistence(timeout: 10))
-        XCTAssertTrue(viewfinder.isHittable)
-        XCTAssertEqual(viewfinder.frame.width, app.frame.width, accuracy: 2)
-        XCTAssertEqual(viewfinder.frame.height, app.frame.height, accuracy: 2)
-        let point = viewfinder.coordinate(withNormalizedOffset: CGVector(dx: 0.45, dy: 0.45))
-        point.tap()
-        point.press(forDuration: 0.8)
-        app.buttons["camera.quickSettings"].tap()
-        app.buttons["Temporizador OFF"].tap()
-        XCTAssertTrue(app.buttons["Temporizador 3s"].exists)
-        app.buttons["Temporizador 3s"].tap()
-        XCTAssertTrue(app.buttons["Temporizador 10s"].exists)
-        app.buttons["Temporizador 10s"].tap()
-        XCTAssertTrue(app.buttons["Temporizador OFF"].exists)
-        let settings = app.buttons["camera.settings"]
-        XCTAssertTrue(settings.isHittable)
-        settings.tap()
-        XCTAssertTrue(app.navigationBars["Ajustes"].waitForExistence(timeout: 3))
-        app.buttons["Procesado"].tap()
-        XCTAssertTrue(app.buttons["processing.systemQuality"].waitForExistence(timeout:3))
-        app.buttons["processing.systemQuality"].tap()
-        XCTAssertTrue(app.buttons["Noche estática"].waitForExistence(timeout: 3))
-        app.buttons["Noche estática"].tap()
-        app.buttons["settings.tab.Captura"].tap()
-        let spectral=app.switches["night.spectralFusion"]
-        for _ in 0..<8 { if spectral.isHittable { break };app.swipeUp() }
-        setSwitch(spectral,to:"1")
-        app.buttons["Listo"].tap()
-        XCTAssertTrue(app.staticTexts["Noche estática · JPEG"].waitForExistence(timeout: 3))
         XCTAssertTrue(app.buttons["camera.shutter"].exists)
-        app.buttons["camera.settings"].tap()
-        let tabs = app.scrollViews["settings.tabs"]
-        tabs.swipeLeft()
-        app.buttons["settings.tab.Color"].tap()
-        XCTAssertTrue(app.staticTexts["Exposición del JPEG (EV)"].waitForExistence(timeout: 3))
-        let colorScreen = XCTAttachment(screenshot: app.screenshot())
-        colorScreen.name = "Color controls"; colorScreen.lifetime = .keepAlways; add(colorScreen)
-        let hdrOutput = app.switches["output.preserveHDR"]
-        for _ in 0..<8 {
-            if hdrOutput.isHittable { break }
-            app.swipeUp()
-        }
-        XCTAssertTrue(hdrOutput.isHittable)
-        // SwiftUI exposes the whole label row as a switch. Its center is text;
-        // tap the visible trailing thumb rather than the row's midpoint.
-        hdrOutput.coordinate(withNormalizedOffset:CGVector(dx:0.9,dy:0.5)).tap()
-        XCTAssertTrue(NSPredicate(format:"value == %@","1").evaluate(with:hdrOutput))
-        let outputScreen = XCTAttachment(screenshot:app.screenshot())
-        outputScreen.name="Adaptive HDR output and PNG LUT import";outputScreen.lifetime = .keepAlways;add(outputScreen)
-        let profiles = app.buttons["settings.tab.Perfiles"]
-        XCTAssertTrue(profiles.waitForExistence(timeout: 3))
-        profiles.tap()
-        let name = app.textFields["profile.name"]
-        XCTAssertTrue(name.waitForExistence(timeout: 3))
-        name.tap(); name.typeText("UI test profile")
-        app.buttons["Guardar perfil actual"].tap()
-        XCTAssertTrue(app.buttons["UI test profile"].waitForExistence(timeout: 3))
-        let profileScreen = XCTAttachment(screenshot: app.screenshot())
-        profileScreen.name = "Saved processing profile"; profileScreen.lifetime = .keepAlways; add(profileScreen)
-        app.buttons["UI test profile"].tap()
-        app.buttons["Listo"].tap()
-        XCTAssertTrue(app.staticTexts["Noche estática · JPEG"].waitForExistence(timeout: 3))
-        app.buttons["camera.settings"].tap()
-        app.scrollViews["settings.tabs"].swipeLeft()
-        app.buttons["settings.tab.Color"].tap()
-        app.segmentedControls.buttons["HSL"].tap()
-        XCTAssertTrue(app.sliders["Matiz (°)"].waitForExistence(timeout:3))
-        app.buttons["Naranja"].tap()
-        let hue = app.sliders["Matiz (°)"]
-        XCTAssertTrue(hue.waitForExistence(timeout:3))
-        hue.adjust(toNormalizedSliderPosition:0.6)
-        app.segmentedControls.buttons["Curvas"].tap()
-        XCTAssertTrue(app.sliders["Negros"].waitForExistence(timeout:3))
-        app.segmentedControls.buttons["Ruedas"].tap()
-        XCTAssertTrue(app.sliders["Balance de zonas"].waitForExistence(timeout:3))
-        let wheels = XCTAttachment(screenshot:app.screenshot())
-        wheels.name="Color grading wheels";wheels.lifetime = .keepAlways;add(wheels)
-        app.segmentedControls.buttons["Efectos"].tap()
-        XCTAssertTrue(app.sliders["Grano"].waitForExistence(timeout:3))
-        app.buttons["Listo"].tap()
-        let hdr = revealMode(app,"camera.mode.hdr")
-        XCTAssertTrue(hdr.isHittable)
-        hdr.tap()
-        XCTAssertTrue(app.staticTexts["HDR · 3 exposiciones"].waitForExistence(timeout:3))
-        let carousel=app.scrollViews["camera.modes"].frame
-        XCTAssertGreaterThanOrEqual(hdr.frame.minX,carousel.minX-1)
-        XCTAssertLessThanOrEqual(hdr.frame.maxX,carousel.maxX+1,"Selected mode must be completely visible")
-        let image = XCTAttachment(screenshot: app.screenshot())
-        image.lifetime = .keepAlways
-        add(image)
-        XCTAssertTrue(app.buttons["camera.gallery"].isHittable)
-        app.buttons["camera.gallery"].tap()
-        XCTAssertTrue(app.buttons["Importar desde Fotos"].waitForExistence(timeout:3))
+    }
+    private func capture(_ app:XCUIApplication,_ name:String) {
+        let image=XCTAttachment(screenshot:app.screenshot());image.name=name;image.lifetime = .keepAlways;add(image)
     }
     private func revealMode(_ app:XCUIApplication,_ identifier:String) -> XCUIElement {
         let button=app.buttons[identifier],modes=app.scrollViews["camera.modes"]

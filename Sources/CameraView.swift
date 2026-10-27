@@ -119,7 +119,7 @@ struct CameraView: View {
     private var intrinsicAdaptiveFusion:Bool { intrinsicMetalFusion || (options.nightStatic && (options.nightWeightedFusion || options.nightSpectralFusion)) }
     private var hardwareCaptureReady:Bool {
         hardwareButtons && (videoMode ? (movie.phase == .recording || (movie.ready && movie.phase == .idle)) : camera.ready) && !camera.busy && !loadingPhoto && !nativeNight.opening && !openingVideo &&
-        scenePhase == .active && auxiliaryMode==nil && !showControls && !showResult && !showPhotoPicker &&
+        scenePhase == .active && auxiliaryMode==nil && !showControls && !showResult && !showMovieReview && !showPhotoPicker &&
         !importFile && !exportFile && !importingDocument && !nativeNight.showMessage && camera.importFailure==nil
     }
 
