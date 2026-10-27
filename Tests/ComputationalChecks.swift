@@ -383,6 +383,8 @@ import Darwin
         try require(bounded.astro && bounded.seconds*Double(bounded.count)<=8,"Astro exceeded the user's integration budget")
         let blocked=try NightCapturePlan.make(iso:1600,seconds:1.0/30,isoRange:25...3200,durationRange:0.0001...1,budget:16,tripodStable:true,astroEnabled:false)
         try require(!blocked.astro,"Disabled Astro still altered exposure scheduling")
+        let daylight=try NightCapturePlan.make(iso:25,seconds:0.001,isoRange:25...3200,durationRange:0.0001...1,budget:16,tripodStable:true)
+        try require(!daylight.astro && abs(daylight.iso*daylight.seconds-0.025)<1e-6,"Tripod scheduling overexposed a bright minimum-ISO scene")
         let hdrScene=HDRSceneMeter(shadow:0.002,median:0.15,highlight:0.999,timestamp:1)
         let adaptive=try HDRCapturePlan.make(iso:200,seconds:0.02,span:1,isoRange:25...3200,durationRange:0.0001...1,scene:hdrScene)
         try require(adaptive[0].seconds==0.01 && adaptive[2].product/adaptive[0].product>4,"HDR ignored clipped highlights / scene span")

@@ -121,6 +121,7 @@ struct CameraView: View {
     private var captureTitle:String {
         if options.nativeNight { return "Noche · iOS" }
         if options.hdrBracketing { return options.hdrMetalRAW ? "HDR · RAW Metal":"HDR · 3 exposiciones" }
+        if options.nightStatic && camera.astroActive && camera.busy { return "Astro · Trípode" }
         if options.nightStatic { return options.nightMetalRAW ? "Noche · RAW Metal":(options.nightRAW ? "Noche · RAW":"Noche · JPEG") }
         if stack { return "Pila de \(stackCount)" }
         if options.portraitAmount>0 { return "Retrato · personas" }
@@ -464,6 +465,7 @@ struct CameraView: View {
     private var capturePhaseText:String {
         if options.nativeNight,let issue=camera.nativeNightIssue,!camera.busy { return issue }
         guard camera.busy else { return camera.status }
+        if camera.opticalCaptureInProgress && camera.astroActive { return "Astro · mantén el iPhone apoyado…" }
         if camera.opticalCaptureInProgress { return options.nativeNight ? "Noche de iOS · mantén firme el iPhone…":"Mantén firme el iPhone…" }
         if camera.captureProgress>=1 || camera.processingInProgress { return "Procesando foto · ya puedes mover el iPhone" }
         return "Preparando captura…"
