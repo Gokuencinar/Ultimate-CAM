@@ -37,9 +37,10 @@ final class MetalBurstProcessor {
     private let context:CIContext
     private let kernels:[String:MTLComputePipelineState]
     private let space=CGColorSpace(name:CGColorSpace.extendedLinearSRGB)!
-    init() throws {
-        guard let device=MTLCreateSystemDefaultDevice(),let queue=device.makeCommandQueue() else { throw CameraFailure.message("Metal no está disponible.") }
-        let library=try device.makeDefaultLibrary(bundle:Bundle.main)
+    init(device suppliedDevice:MTLDevice?=nil,library suppliedLibrary:MTLLibrary?=nil) throws {
+        guard let device=suppliedDevice ?? MTLCreateSystemDefaultDevice(),let queue=device.makeCommandQueue() else { throw CameraFailure.message("Metal no está disponible.") }
+        let library=try suppliedLibrary ?? device.makeDefaultLibrary(bundle:Bundle.main)
+        guard library.device.registryID==device.registryID else { throw CameraFailure.message("La biblioteca Metal pertenece a otra GPU.") }
         var kernels=[String:MTLComputePipelineState]()
         for name in ["uc_fuse_super_res","uc_clear","uc_initial_weights","uc_protect_bayer","uc_luma","uc_pyramid","uc_tile_flow","uc_regularize_flow","uc_fuse_tiles","uc_tone_luma","uc_night_tone"] {
             guard let function=library.makeFunction(name:name) else { throw CameraFailure.message("Falta un shader del procesador Metal.") }
