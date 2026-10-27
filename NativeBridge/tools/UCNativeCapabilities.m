@@ -115,7 +115,13 @@ int main(void) {
         unsigned classCount=0;Class *loaded=objc_copyClassList(&classCount);
         for (unsigned i=0;i<classCount;++i) {
             NSString *name=@(class_getName(loaded[i]));
-            if ([name hasPrefix:@"CAM"] && class_getClassMethod(loaded[i],sel_registerName("captureDigitalFlashModeForLowLightMode:")))
+            Method own=NULL;
+            if ([name hasPrefix:@"AVCapture"] && loaded[i]!=objc_lookUpClass("AVCaptureDevice")) {
+                Method method=class_getInstanceMethod(loaded[i],sel_registerName("setDigitalFlashMode:"));
+                Method parent=class_getInstanceMethod(class_getSuperclass(loaded[i]),sel_registerName("setDigitalFlashMode:"));
+                if (method && (!parent || method_getImplementation(method)!=method_getImplementation(parent))) own=method;
+            }
+            if (own || ([name hasPrefix:@"CAM"] && class_getClassMethod(loaded[i],sel_registerName("captureDigitalFlashModeForLowLightMode:"))))
                 [classes addObject:Inspect(name)];
         }
         free(loaded);
@@ -129,7 +135,9 @@ int main(void) {
             @[@"CAMCaptureConversions",@"captureDigitalFlashModeForLowLightMode:"],
             @[@"AVCapturePhotoOutput",@"setDigitalFlashCaptureEnabled:"],
             @[@"AVCapturePhotoOutput",@"supportedDigitalFlashModes"],
-            @[@"AVCaptureDevice",@"setDigitalFlashMode:"],@[@"CUCaptureController",@"changeToLowLightMode:"],
+            @[@"AVCaptureDevice",@"setDigitalFlashMode:"],
+            @[@"AVCaptureFigVideoDevice",@"setDigitalFlashMode:"],
+            @[@"AVCapturePhotoOutput",@"_updateSupportedDigitalFlashModesForSourceDevice:"],@[@"CUCaptureController",@"changeToLowLightMode:"],
             @[@"AVCapturePhotoOutput",@"_figCaptureIrisStillImageSettingsForAVCapturePhotoSettings:captureRequestIdentifier:delegate:connections:"]])
             [code addObject:Code(pair[0],pair[1])];
         NSDictionary *report = @{@"schema":@2,@"hardware":SystemString("hw.machine"),@"system_build":SystemString("kern.osversion"),@"system_version":NSProcessInfo.processInfo.operatingSystemVersionString,@"loads":loads,@"classes":classes,@"code_inspection":code,@"camera_objects_instantiated":@0,@"private_selectors_invoked":@0,@"capture_requests":@0};
