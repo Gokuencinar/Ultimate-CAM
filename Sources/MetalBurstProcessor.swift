@@ -167,23 +167,24 @@ final class MetalBurstProcessor {
     func processRAW(_ frames:[SensorBayerFrame],referenceJPEG:Data,originalDNG:Data,options:ProcessingOptions,
                     cancellation:ProcessingCancellation?,progress:((String)->Void)?) throws -> CaptureResult {
         guard !frames.isEmpty,(2...16).contains(frames.count) else { throw CameraFailure.message("Metal RAW necesita entre 2 y 16 fotogramas.") }
-        let anchorIndex=options.hdrBracketing ? frames.indices.min(by:{frames[$0].exposure.product<frames[$1].exposure.product})!:0
-        let first=frames[anchorIndex]
         guard frames.allSatisfy({$0.exposure.isValid}),zip(frames,frames.dropFirst()).allSatisfy({$0.timestamp<$1.timestamp}) else { throw CameraFailure.message("La pila RAW no está ordenada temporalmente.") }
-        defer { first.discardResidentPages() }
-        let dng:Data=try autoreleasepool {
+        guard let anchorIndex=SensorBayerFrame.referenceIndex(in:frames,hdr:options.hdrBracketing) else { throw CameraFailure.message("No hay una serie RAW con exposición coherente.") }
+        let first=frames[anchorIndex]
+        defer { frames.forEach { $0.discardResidentPages() } }
+        let fused:(dng:Data,count:Int)=try autoreleasepool {
         let reference=try upload(first)
         var params=MetalFusionParameters();params.size.w=1
         params.luma=SIMD4<Float>(first.calibration.pattern[0]==1 ? 0.5:0,first.calibration.pattern[1]==1 ? 0.5:0,
             first.calibration.pattern[2]==1 ? 0.5:0,first.calibration.pattern[3]==1 ? 0.5:0)
         params.search.z=options.hdrBracketing ? 1:0
         let work=try workspace(reference:reference,raw:true,parameters:params,cancellation:cancellation)
+        var accepted=1
         for (index,frame) in frames.enumerated() where index != anchorIndex {
+            if !options.hdrBracketing && !frame.matchesExposure(of:first) { continue }
             try autoreleasepool {
             defer { frame.discardResidentPages() }
             try cancellation?.check()
-            guard frame.width==first.width,frame.height==first.height,frame.calibration==first.calibration,
-                  options.hdrBracketing || (abs(frame.exposure.seconds/first.exposure.seconds-1)<0.05 && abs(frame.exposure.iso/first.exposure.iso-1)<0.05) else {
+            guard frame.width==first.width,frame.height==first.height,frame.calibration==first.calibration else {
                 throw CameraFailure.message("La pila RAW cambió de geometría, calibración, exposición o secuencia temporal.")
             }
             progress?("Metal RAW · alineando y fusionando \(index+1)/\(frames.count)…")
@@ -198,20 +199,21 @@ final class MetalBurstProcessor {
             params.noise=SIMD4<Float>(model.x,model.y,0,0)
             _=try upload(frame,into:work.sample)
             try fuse(work,parameters:params,cancellation:cancellation)
+            accepted+=1
             }
         }
-        return try FusedDNG.encode(quads:download(work.mean,cancellation:cancellation),width:first.width,height:first.height,calibration:first.calibration,noiseProfile:first.noiseProfile)
+        return (try FusedDNG.encode(quads:download(work.mean,cancellation:cancellation),width:first.width,height:first.height,calibration:first.calibration,noiseProfile:first.noiseProfile),accepted)
         }
         // Fusion textures are released before full-resolution demosaicing/tone.
-        guard let decoder=CIRAWFilter(imageData:dng,identifierHint:"com.adobe.raw-image") else { throw CameraFailure.message("No se pudo revelar el mosaico fusionado.") }
+        guard let decoder=CIRAWFilter(imageData:fused.dng,identifierHint:"com.adobe.raw-image") else { throw CameraFailure.message("No se pudo revelar el mosaico fusionado.") }
         decoder.isGamutMappingEnabled=false;decoder.boostAmount=0;decoder.boostShadowAmount=0;decoder.exposure=0;decoder.shadowBias=0
         if decoder.isLocalToneMapSupported { decoder.localToneMapAmount=0 }
         if decoder.isLuminanceNoiseReductionSupported { decoder.luminanceNoiseReductionAmount=0 }
         guard let developed=decoder.outputImage else { throw CameraFailure.message("El DNG de trabajo no se pudo revelar.") }
         progress?("Metal RAW · tono y color…")
         let mapped=try tone(developed,maximumGain:options.hdrBracketing ? 64:32,cancellation:cancellation)
-        let jpeg=try JPEGRenderer.render(mapped.sdr,extent:mapped.sdr.extent,options:options,context:context,hdrSource:options.preserveHDR ? mapped.hdr:nil,metadataReference:referenceJPEG,frames:frames.count)
-        return CaptureResult(jpeg:jpeg.data,reference:referenceJPEG,details:"\(options.hdrBracketing ? "HDR RAW Metal":"Noche RAW Metal") · \(frames.count) tomas · Bayer por teselas · \(jpeg.width) × \(jpeg.height) px.",mergedFrames:frames.count,raw:originalDNG,source:"Bayer-Metal")
+        let jpeg=try JPEGRenderer.render(mapped.sdr,extent:mapped.sdr.extent,options:options,context:context,hdrSource:options.preserveHDR ? mapped.hdr:nil,metadataReference:referenceJPEG,frames:fused.count)
+        return CaptureResult(jpeg:jpeg.data,reference:referenceJPEG,details:"\(options.hdrBracketing ? "HDR RAW Metal":"Noche RAW Metal") · \(fused.count) tomas · Bayer por teselas · \(jpeg.width) × \(jpeg.height) px.",mergedFrames:fused.count,raw:originalDNG,source:"Bayer-Metal")
     }
     func processZSL(_ images:[CGImage],options:ProcessingOptions,captureAngle:Double,previewMirrored:Bool,mirrorOutput:Bool,
                     cancellation:ProcessingCancellation?) throws -> CaptureResult {

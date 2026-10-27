@@ -35,7 +35,28 @@ struct SensorBayerFrame {
     let timestamp:Double
     var backing:BayerScratchStorage? = nil
     var noiseProfile:[Double] = []
+    var sharpness:Double = 0
     func discardResidentPages() { backing?.discardResidentPages() }
+
+    func matchesExposure(of other:SensorBayerFrame)->Bool {
+        exposure.isValid && other.exposure.isValid &&
+        abs(exposure.seconds/other.exposure.seconds-1)<0.05 && abs(exposure.iso/other.exposure.iso-1)<0.05
+    }
+    static func referenceIndex(in frames:[SensorBayerFrame],hdr:Bool)->Int? {
+        let valid=frames.indices.filter { frames[$0].exposure.isValid }
+        if hdr { return valid.min { frames[$0].exposure.product<frames[$1].exposure.product } }
+        // Pick the largest exposure cohort before ranking sharpness. A bright
+        // outlier must not win merely because its gradients are larger.
+        var best:Int?,population=0,score = -Double.infinity
+        for index in valid {
+            let count=valid.filter { frames[$0].matchesExposure(of:frames[index]) }.count
+            let sharpness=frames[index].sharpness.isFinite ? max(0,frames[index].sharpness):0
+            if count>population || (count==population && sharpness>score) {
+                best=index;population=count;score=sharpness
+            }
+        }
+        return population>=2 ? best:nil
+    }
 
     #if os(iOS)
     static func capture(_ photo:AVCapturePhoto,dng:Data) throws -> SensorBayerFrame {
@@ -142,6 +163,7 @@ struct SensorBayerFrame {
         }
         let mapped=try BayerScratchStorage.store(packed)
         var frame=SensorBayerFrame(width:qw,height:qh,quads:mapped.data,calibration:calibration,exposure:exposure,timestamp:photo.timestamp.seconds)
+        frame.sharpness=BayerQuadPacking.sharpness(quads:packed,width:qw,height:qh,pattern:croppedPattern)
         frame.noiseProfile=SensorNoiseModel.validProfile(numbers("NoiseProfile")) ?? []
         frame.backing=mapped.storage;return frame
     }
@@ -177,6 +199,36 @@ enum SensorNoiseModel {
 }
 
 enum BayerQuadPacking {
+    /// Bounded central reduction (~18K samples), computed once while packing
+    /// data is resident. Both green phases are measured independently; no CFA
+    /// colors are mixed, and no full image or scratch mapping is read again.
+    static func sharpness(quads:Data,width:Int,height:Int,pattern:[UInt8])->Double {
+        guard width>=8,height>=8,quads.count==width*height*8,pattern.count==4 else { return 0 }
+        let greens=pattern.indices.filter { pattern[$0]==1 }
+        guard greens.count==2 else { return 0 }
+        let spanX=min(width-4,384),spanY=min(height-4,384)
+        let x0=(width-spanX)/2,y0=(height-spanY)/2
+        let step=max(1,max(spanX,spanY)/96)
+        return quads.withUnsafeBytes { bytes in
+            var energy=0.0,light=0.0,count=0
+            func green(_ x:Int,_ y:Int,_ phase:Int)->Double {
+                let bits=bytes.loadUnaligned(fromByteOffset:((y*width+x)*4+phase)*2,as:UInt16.self)
+                return Double(Float16(bitPattern:UInt16(littleEndian:bits)))
+            }
+            for y in stride(from:y0,to:y0+spanY,by:step) {
+                for x in stride(from:x0,to:x0+spanX,by:step) {
+                    for phase in greens {
+                        let a=green(x,y,phase),b=green(x+1,y,phase),c=green(x,y+1,phase)
+                        guard a.isFinite,b.isFinite,c.isFinite,a<0.98,b<0.98,c<0.98 else { continue }
+                        let dx=min(0.1,abs(b-a)),dy=min(0.1,abs(c-a))
+                        energy+=dx*dx+dy*dy;light+=max(0,a);count+=1
+                    }
+                }
+            }
+            guard count>0 else { return 0 }
+            return energy/Double(count)/max(0.0001,light/Double(count))
+        }
+    }
     static func phaseIndices(originX:Int,originY:Int,anchorX:Int=0,anchorY:Int=0)->[Int] {
         (0..<4).map { phase in
             let row=((originY+phase/2-anchorY)%2+2)%2,col=((originX+phase%2-anchorX)%2+2)%2
