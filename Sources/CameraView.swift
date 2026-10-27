@@ -513,7 +513,7 @@ struct CameraView: View {
 
     private func openAuxiliary(_ mode:AuxiliaryCameraMode) {
         openingVideo=true
-        camera.prepareNativeHandoff { accepted in
+        camera.pauseForModeChange { accepted in
             openingVideo=false
             if accepted && scenePhase == .active { auxiliaryMode=mode }
             else if scenePhase == .active { camera.start() }
@@ -524,7 +524,7 @@ struct CameraView: View {
         guard controlsEnabled,!videoMode else { return }
         cancelCountdown();showQuickControls=false
         beginModeTransition { token in
-            camera.prepareNativeHandoff { accepted in
+            camera.pauseForModeChange { accepted in
                 guard token==modeTransitionID,scenePhase == .active else { return }
                 if accepted { videoMode=true;movie.start(movie.configuration,lens:lens) }
                 else { camera.start() }

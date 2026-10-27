@@ -264,6 +264,20 @@ final class CameraModel: NSObject, ObservableObject, AVCapturePhotoCaptureDelega
         }
     }
 
+    func pauseForModeChange(_ completion: @escaping (Bool) -> Void) {
+        queue.async {
+            guard !self.inFlight else { self.publish { completion(false) }; return }
+            self.active=false;self.focusToken=UUID()
+            self.rotationCoordinator=nil
+            self.previewAnalyzer.setActive(false)
+            self.restoreNativePreview()
+            if self.session.isRunning { self.session.stopRunning() }
+            let stopped = !self.session.isRunning
+            CaptureTrace.record("session.modePause",["sessionStopped":stopped])
+            self.publish { self.ready=false;completion(stopped) }
+        }
+    }
+
     func resumeAfterAuxiliary() {
         queue.async {
             guard !self.inFlight else { return }
