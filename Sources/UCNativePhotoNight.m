@@ -28,20 +28,31 @@ static NSArray<NSNumber *> *Modes(AVCapturePhotoOutput *output) {
     return value;
 }
 @implementation UCNativePhotoNight
-+ (NSString *)configureOutput:(AVCapturePhotoOutput *)output {
++ (NSString *)availabilityIssue:(AVCapturePhotoOutput *)output {
     NSString *issue=TargetIssue();if (issue) return issue;
     @try {
         if (!ABI(output,"setDigitalFlashCaptureEnabled:","v20@0:8B16") ||
             !ABI(output,"isDigitalFlashCaptureEnabled","B16@0:8")) return @"La salida de cámara no admite Noche de iOS.";
         NSArray *modes=Modes(output);
         if (![modes containsObject:@1] && ![modes containsObject:@2]) return @"Noche de iOS no está disponible en esta lente o formato.";
-        ((void(*)(id,SEL,BOOL))objc_msgSend)(output,sel_registerName("setDigitalFlashCaptureEnabled:"),YES);
-        if (!((BOOL(*)(id,SEL))objc_msgSend)(output,sel_registerName("isDigitalFlashCaptureEnabled"))) return @"iOS no habilitó la captura nocturna.";
         return nil;
-    } @catch (NSException *e) {
-        NSLog(@"UltimateCAM native Night output %@: %@",e.name,e.reason);
-        return @"iOS rechazó la configuración nocturna de esta sesión.";
-    }
+    } @catch (NSException *e) { (void)e;return @"No se pudieron leer las capacidades nocturnas de iOS."; }
+}
++ (NSNumber *)outputEnabled:(AVCapturePhotoOutput *)output {
+    if (TargetIssue() || !ABI(output,"isDigitalFlashCaptureEnabled","B16@0:8")) return nil;
+    @try { return @(((BOOL(*)(id,SEL))objc_msgSend)(output,sel_registerName("isDigitalFlashCaptureEnabled"))); }
+    @catch (NSException *e) { (void)e;return nil; }
+}
++ (NSString *)restoreOutput:(AVCapturePhotoOutput *)output enabled:(BOOL)enabled {
+    if (TargetIssue() || !ABI(output,"setDigitalFlashCaptureEnabled:","v20@0:8B16")) return @"No se pudo restaurar la salida fotográfica.";
+    @try {
+        ((void(*)(id,SEL,BOOL))objc_msgSend)(output,sel_registerName("setDigitalFlashCaptureEnabled:"),enabled);
+        return [self outputEnabled:output].boolValue==enabled ? nil:@"iOS no confirmó la salida fotográfica.";
+    } @catch (NSException *e) { NSLog(@"UltimateCAM native Night output %@: %@",e.name,e.reason);return @"iOS rechazó la configuración nocturna de esta sesión."; }
+}
++ (NSString *)configureOutput:(AVCapturePhotoOutput *)output {
+    NSString *issue=[self availabilityIssue:output];if (issue) return issue;
+    return [self restoreOutput:output enabled:YES];
 }
 + (NSNumber *)toneMapping:(AVCaptureDevice *)device {
     if (TargetIssue() || !ABI(device,"isGlobalToneMappingEnabled","B16@0:8")) return nil;

@@ -103,6 +103,7 @@ final class CameraModel: NSObject, ObservableObject, AVCapturePhotoCaptureDelega
     private var requestedNativeMode=0
     private var previousNativeMode:Int?
     private var previousNativeTone:Bool?
+    private var previousNativeOutput:Bool?
     private var nativeModeDevice:String?
     private var temporalFeed=false
     private var hdrPlan: [FrameExposure] = []
@@ -371,7 +372,7 @@ final class CameraModel: NSObject, ObservableObject, AVCapturePhotoCaptureDelega
         configurePreviewOutput()
         session.commitConfiguration()
         committed = true
-        let nativeIssue=UCNativePhotoNight.configure(output:output)
+        let nativeIssue=UCNativePhotoNight.availabilityIssue(output:output)
         publish { self.nativeNightIssue=nativeIssue }
         if nativeIssue==nil { applyNativePreview() }
         configuredLens=lens
@@ -415,16 +416,18 @@ final class CameraModel: NSObject, ObservableObject, AVCapturePhotoCaptureDelega
     private func applyNativePreview() {
         guard !inFlight,let device=input?.device else { return }
         if requestedNativeMode==0 { restoreNativePreview();return }
-        if let issue=UCNativePhotoNight.configure(output:output) { publish { self.nativeNightIssue=issue };return }
+        if let issue=UCNativePhotoNight.availabilityIssue(output:output) { publish { self.nativeNightIssue=issue };return }
         if nativeModeDevice != device.uniqueID {
-            guard let previous=UCNativePhotoNight.previewMode(device:device)?.intValue else {
+            guard let previous=UCNativePhotoNight.previewMode(device:device)?.intValue,(0...2).contains(previous),
+                  let outputEnabled=UCNativePhotoNight.outputEnabled(output:output)?.boolValue else {
                 publish { self.nativeNightIssue="No se pudo leer el estado nocturno de esta lente." };return
             }
             guard let tone=UCNativePhotoNight.toneMapping(device:device)?.boolValue else {
                 publish { self.nativeNightIssue="No se pudo conservar el tono original del visor." };return
             }
-            previousNativeMode=previous;previousNativeTone=tone;nativeModeDevice=device.uniqueID
+            previousNativeMode=previous;previousNativeTone=tone;previousNativeOutput=outputEnabled;nativeModeDevice=device.uniqueID
         }
+        if let issue=UCNativePhotoNight.configure(output:output) { publish { self.nativeNightIssue=issue };return }
         if let issue=UCNativePhotoNight.setPreview(mode:requestedNativeMode,device:device) {
             publish { self.nativeNightIssue=issue };return
         }
@@ -439,7 +442,10 @@ final class CameraModel: NSObject, ObservableObject, AVCapturePhotoCaptureDelega
                 CaptureTrace.record("nativeNight.restore.error",["description":issue]);return
             }
         }
-        previousNativeMode=nil;previousNativeTone=nil;nativeModeDevice=nil
+        if let enabled=previousNativeOutput,let issue=UCNativePhotoNight.restoreOutput(output,enabled:enabled) {
+            CaptureTrace.record("nativeNight.restore.error",["description":issue]);return
+        }
+        previousNativeMode=nil;previousNativeTone=nil;previousNativeOutput=nil;nativeModeDevice=nil
     }
 
     private func configurePreviewOutput() {

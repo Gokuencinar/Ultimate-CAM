@@ -4,6 +4,9 @@ NS_ASSUME_NONNULL_BEGIN
 /// Internal iPhone12,3 / 22H31 DigitalFlash route. All calls are signature-checked
 /// and exception-contained. A configured request is not proof of ISP execution.
 @interface UCNativePhotoNight : NSObject
++ (nullable NSString *)availabilityIssue:(AVCapturePhotoOutput *)output NS_SWIFT_NAME(availabilityIssue(output:));
++ (nullable NSNumber *)outputEnabled:(AVCapturePhotoOutput *)output NS_SWIFT_NAME(outputEnabled(output:));
++ (nullable NSString *)restoreOutput:(AVCapturePhotoOutput *)output enabled:(BOOL)enabled NS_SWIFT_NAME(restoreOutput(_:enabled:));
 + (nullable NSString *)configureOutput:(AVCapturePhotoOutput *)output NS_SWIFT_NAME(configure(output:));
 + (nullable NSString *)setPreviewMode:(NSInteger)mode device:(AVCaptureDevice *)device NS_SWIFT_NAME(setPreview(mode:device:));
 + (nullable NSNumber *)toneMapping:(AVCaptureDevice *)device NS_SWIFT_NAME(toneMapping(device:));
