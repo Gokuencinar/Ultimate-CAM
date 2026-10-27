@@ -3,8 +3,7 @@ import Combine
 import Photos
 import UIKit
 
-/// A separate movie session. The photo session is stopped before presenting
-/// this controller and is resumed only after it has released the camera.
+/// A movie session handed to CameraView's existing preview after photo stops.
 final class MovieCameraModel: NSObject, ObservableObject, AVCaptureFileOutputRecordingDelegate {
     let session=AVCaptureSession()
     @Published private(set) var status="Preparando vídeo…"
@@ -71,7 +70,17 @@ final class MovieCameraModel: NSObject, ObservableObject, AVCaptureFileOutputRec
         }
     }
     func configure(_ options:MovieConfiguration,lens:CameraLens) {
-        start(options,lens:lens)
+        queue.async {
+            guard !self.machine.busy else { return }
+            if self.active { self.start(options,lens:lens) }
+            else {
+                do {
+                    let request=try options.validated()
+                    self.current=request;self.selected=lens
+                    self.ui { self.configuration=request;self.lens=lens }
+                } catch { self.ui { self.status=error.localizedDescription } }
+            }
+        }
     }
     private func activate(_ options:MovieConfiguration,lens:CameraLens,audioAllowed:Bool) {
         guard active,!machine.busy else { return }

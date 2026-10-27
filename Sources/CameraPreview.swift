@@ -103,5 +103,9 @@ struct CameraPreview: UIViewRepresentable {
         if supportsZoom { view.addGestureRecognizer(UIPinchGestureRecognizer(target: context.coordinator, action: #selector(Coordinator.pinch(_:)))) }
         return view
     }
-    func updateUIView(_ view: PreviewSurface, context: Context) { context.coordinator.parent = self }
+    func updateUIView(_ view: PreviewSurface, context: Context) {
+        context.coordinator.parent = self
+        // Keep the same UIKit surface while photo/movie sessions hand off.
+        if view.previewLayer.session !== session { view.previewLayer.session=session;view.setNeedsLayout() }
+    }
 }
