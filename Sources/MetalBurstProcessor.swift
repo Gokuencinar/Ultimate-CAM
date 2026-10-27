@@ -17,13 +17,13 @@ final class MetalBurstProcessor {
     /// flow and ping-pong accumulators are reused after command completion.
     private final class FusionWorkspace {
         let reference:MTLTexture,sample:MTLTexture
-        let referencePyramid:[MTLTexture],samplePyramid:[MTLTexture],flow:[MTLTexture]
+        let referencePyramid:[MTLTexture],samplePyramid:[MTLTexture],flow:[MTLTexture],regularizedFlow:[MTLTexture]
         let means:[MTLTexture],weights:[MTLTexture]
         var slot=0
         var mean:MTLTexture { means[slot] }
-        init(reference:MTLTexture,sample:MTLTexture,referencePyramid:[MTLTexture],samplePyramid:[MTLTexture],flow:[MTLTexture],means:[MTLTexture],weights:[MTLTexture]) {
+        init(reference:MTLTexture,sample:MTLTexture,referencePyramid:[MTLTexture],samplePyramid:[MTLTexture],flow:[MTLTexture],regularizedFlow:[MTLTexture],means:[MTLTexture],weights:[MTLTexture]) {
             self.reference=reference;self.sample=sample;self.referencePyramid=referencePyramid
-            self.samplePyramid=samplePyramid;self.flow=flow;self.means=means;self.weights=weights
+            self.samplePyramid=samplePyramid;self.flow=flow;self.regularizedFlow=regularizedFlow;self.means=means;self.weights=weights
         }
     }
     private let device:MTLDevice,queue:MTLCommandQueue
@@ -34,7 +34,7 @@ final class MetalBurstProcessor {
         guard let device=MTLCreateSystemDefaultDevice(),let queue=device.makeCommandQueue() else { throw CameraFailure.message("Metal no está disponible.") }
         let library=try device.makeDefaultLibrary(bundle:Bundle.main)
         var kernels=[String:MTLComputePipelineState]()
-        for name in ["uc_initial_weights","uc_luma","uc_pyramid","uc_tile_flow","uc_fuse_tiles","uc_night_tone"] {
+        for name in ["uc_initial_weights","uc_luma","uc_pyramid","uc_tile_flow","uc_regularize_flow","uc_fuse_tiles","uc_night_tone"] {
             guard let function=library.makeFunction(name:name) else { throw CameraFailure.message("Falta un shader del procesador Metal.") }
             kernels[name]=try device.makeComputePipelineState(function:function)
         }
@@ -103,18 +103,19 @@ final class MetalBurstProcessor {
     }
     private func workspace(reference:MTLTexture,raw:Bool,parameters:MetalFusionParameters,cancellation:ProcessingCancellation?) throws -> FusionWorkspace {
         let w=reference.width,h=reference.height
-        var refs=[MTLTexture](),samples=[MTLTexture](),flows=[MTLTexture]()
+        var refs=[MTLTexture](),samples=[MTLTexture](),flows=[MTLTexture](),regularized=[MTLTexture]()
         var width=w,height=h
         for _ in 0..<3 {
             refs.append(try texture(width,height,format:.r16Float))
             samples.append(try texture(width,height,format:.r16Float))
             flows.append(try texture((width+15)/16,(height+15)/16,format:.rgba32Float))
+            regularized.append(try texture((width+15)/16,(height+15)/16,format:.rgba32Float))
             width=max(1,width/2);height=max(1,height/2)
         }
         let means=try [texture(w,h),texture(w,h)]
         let weights=try [texture(w,h,format:.r16Float),texture(w,h,format:.r16Float)]
         let sample=try texture(w,h,storage:raw ? .shared:.private)
-        let result=FusionWorkspace(reference:reference,sample:sample,referencePyramid:refs,samplePyramid:samples,flow:flows,means:means,weights:weights)
+        let result=FusionWorkspace(reference:reference,sample:sample,referencePyramid:refs,samplePyramid:samples,flow:flows,regularizedFlow:regularized,means:means,weights:weights)
         let command=try command()
         guard let blit=command.makeBlitCommandEncoder() else { throw CameraFailure.message("No se pudo preparar la acumulación.") }
         blit.copy(from:reference,sourceSlice:0,sourceLevel:0,sourceOrigin:MTLOrigin(x:0,y:0,z:0),sourceSize:MTLSize(width:w,height:h,depth:1),
@@ -132,12 +133,13 @@ final class MetalBurstProcessor {
         for level in stride(from:2,through:0,by:-1) {
             try cancellation?.check()
             let r=work.referencePyramid[level],s=work.samplePyramid[level]
-            let seed=level==2 ? r:work.flow[level+1]
+            let seed=level==2 ? r:work.regularizedFlow[level+1]
             var params=parameters;params.search=SIMD4<Int32>(level==2 ? 6:2,level==2 ? 0:1,parameters.search.z,level==0 ? 1:0)
             try encode("uc_tile_flow",command,textures:[r,s,seed,work.flow[level]],parameters:params)
+            try encode("uc_regularize_flow",command,textures:[r,s,work.flow[level],work.regularizedFlow[level]],parameters:params)
         }
         let next=1-work.slot
-        try encode("uc_fuse_tiles",command,textures:[work.reference,work.sample,work.mean,work.weights[work.slot],work.flow[0],work.means[next],work.weights[next]],parameters:parameters)
+        try encode("uc_fuse_tiles",command,textures:[work.reference,work.sample,work.mean,work.weights[work.slot],work.regularizedFlow[0],work.means[next],work.weights[next]],parameters:parameters)
         try finish(command,cancellation:cancellation);work.slot=next
     }
     private func tone(_ image:CIImage,maximumGain:Double,cancellation:ProcessingCancellation?) throws -> (sdr:CIImage,hdr:CIImage) {
@@ -193,9 +195,9 @@ final class MetalBurstProcessor {
             params.control.w=Float(scale)
             let model=SensorNoiseModel.pair(reference:first.exposure,referenceProfile:first.noiseProfile,
                 sample:frame.exposure,sampleProfile:frame.noiseProfile,scale:Float(scale))
-            let expected=max(1e-8,model.x*0.18+model.y)
-            let measured=Self.noise(reference:first.quads,sample:frame.quads,scale:Float(scale))
-            params.control.x=max(expected,min(measured,expected*4))
+            // Unregistered edge residuals are scene motion, not read/shot noise.
+            // RAW variance is evaluated per pixel by the calibrated GPU model.
+            params.control.x=max(1e-8,model.x*0.18+model.y)
             params.noise=SIMD4<Float>(model.x,model.y,0,0)
             _=try upload(frame,into:work.sample)
             try fuse(work,parameters:params,cancellation:cancellation)

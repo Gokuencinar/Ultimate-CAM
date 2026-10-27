@@ -52,27 +52,80 @@ kernel void uc_tile_flow(texture2d<float,access::sample> reference [[texture(0)]
                          constant FusionParameters &params [[buffer(0)]],uint2 tile [[thread_position_in_grid]]) {
     if (tile.x>=output.get_width() || tile.y>=output.get_height()) return;
     float2 center=min((float2(tile)+0.5f)*16.0f,float2(reference.get_width(),reference.get_height())-1.0f);
-    int2 prediction=0;
+    int2 prediction=0;float seedConfidence=0;
     if (params.search.y) {
         uint2 index=min(uint2(center*0.5f/16.0f),uint2(seed.get_width()-1,seed.get_height()-1));
-        prediction=int2(round(seed.read(index).xy*2.0f));
+        float4 prior=seed.read(index);prediction=int2(round(prior.xy*2.0f));seedConfidence=prior.w;
     }
-    float best=INFINITY,second=INFINITY;int2 chosen=prediction;
+    float priorWeight=1e-5f+2e-4f*seedConfidence;
+    float best=uc_tile_cost(reference,sample,tile,float2(prediction),params),second=INFINITY;
+    float bestScore=best;int2 chosen=prediction;
     for (int dy=-params.search.x;dy<=params.search.x;++dy) for (int dx=-params.search.x;dx<=params.search.x;++dx) {
+        if (dx==0 && dy==0) continue;
         int2 shift=prediction+int2(dx,dy);
         float cost=uc_tile_cost(reference,sample,tile,float2(shift),params);
-        if (cost<best) { second=best;best=cost;chosen=shift; } else second=min(second,cost);
+        float score=cost+priorWeight*float(dx*dx+dy*dy);
+        if (score<bestScore) { second=bestScore;bestScore=score;best=cost;chosen=shift; } else second=min(second,score);
     }
     float2 refined=float2(chosen);
     if (params.search.w && isfinite(best)) {
         for (int y=-2;y<=2;++y) for (int x=-2;x<=2;++x) {
             float2 shift=float2(chosen)+float2(x,y)*0.25f;
             float cost=uc_tile_cost(reference,sample,tile,shift,params);
-            if (cost<best) { best=cost;refined=shift; }
+            float2 deviation=shift-float2(prediction);
+            float score=cost+priorWeight*dot(deviation,deviation);
+            if (score<bestScore) { bestScore=score;best=cost;refined=shift; }
         }
     }
-    float confidence=isfinite(best) ? clamp((second-best)/max(second,1e-6f)*4.0f,0.0f,1.0f):0.0f;
+    float a=reference.sample(pixels,center+float2(-5,-5)).r,b=reference.sample(pixels,center+float2(5,-5)).r;
+    float c=reference.sample(pixels,center+float2(-5,5)).r,d=reference.sample(pixels,center+float2(5,5)).r;
+    float contrast=max(max(a,b),max(c,d))-min(min(a,b),min(c,d));
+    float floor=max(0.002f,2.0f*sqrt(max(params.control.x,1e-8f)));
+    float texture=smoothstep(floor,floor*3.0f,contrast);
+    float confidence=isfinite(best) ? clamp((second-bestScore)/max(second,1e-6f)*4.0f,0.0f,1.0f)*texture:0.0f;
     output.write(float4(refined,isfinite(best) ? best:1.0f,confidence),tile);
+}
+
+// Keep strong matches and motion boundaries intact. Replace only an isolated,
+// ambiguous vector supported by at least three confident neighbouring tiles.
+kernel void uc_regularize_flow(texture2d<float,access::sample> reference [[texture(0)]],
+                               texture2d<float,access::sample> sample [[texture(1)]],
+                               texture2d<float,access::read> input [[texture(2)]],
+                               texture2d<float,access::write> output [[texture(3)]],
+                               constant FusionParameters &params [[buffer(0)]],uint2 tile [[thread_position_in_grid]]) {
+    if (tile.x>=output.get_width() || tile.y>=output.get_height()) return;
+    float4 current=input.read(tile);
+    if (current.w<0.25f) {
+        float xs[8],ys[8],confidence=0;uint count=0;
+        for (int y=-1;y<=1;++y) for (int x=-1;x<=1;++x) {
+            int2 q=int2(tile)+int2(x,y);
+            if ((x==0 && y==0) || any(q<0) || q.x>=int(input.get_width()) || q.y>=int(input.get_height())) continue;
+            float4 neighbor=input.read(uint2(q));
+            if (neighbor.w<0.25f || !all(isfinite(neighbor))) continue;
+            xs[count]=neighbor.x;ys[count]=neighbor.y;confidence+=neighbor.w;++count;
+        }
+        if (count>=3) {
+            for (uint i=1;i<count;++i) {
+                for (uint j=i;j>0 && xs[j]<xs[j-1];--j) { float t=xs[j];xs[j]=xs[j-1];xs[j-1]=t; }
+                for (uint j=i;j>0 && ys[j]<ys[j-1];--j) { float t=ys[j];ys[j]=ys[j-1];ys[j-1]=t; }
+            }
+            float2 median=float2(xs[count/2],ys[count/2]);uint support=0;
+            for (int y=-1;y<=1;++y) for (int x=-1;x<=1;++x) {
+                int2 q=int2(tile)+int2(x,y);
+                if ((x==0 && y==0) || any(q<0) || q.x>=int(input.get_width()) || q.y>=int(input.get_height())) continue;
+                float4 neighbor=input.read(uint2(q));
+                if (neighbor.w>=0.25f && distance(neighbor.xy,median)<1.5f) ++support;
+            }
+            if (support>=3 && distance(current.xy,median)>1.5f) {
+                float cost=uc_tile_cost(reference,sample,tile,median,params);
+                // Photometric veto: never borrow flow across an object edge
+                // when it explains the local tile worse than the original.
+                if (isfinite(cost) && cost<=current.z+sqrt(max(params.control.x,1e-8f)))
+                    current=float4(median,cost,min(0.5f,confidence/float(count)));
+            }
+        }
+    }
+    output.write(current,tile);
 }
 
 kernel void uc_fuse_tiles(texture2d<float,access::read> reference [[texture(0)]],
@@ -102,9 +155,7 @@ kernel void uc_fuse_tiles(texture2d<float,access::read> reference [[texture(0)]]
         float variance=max(params.control.x,1e-7f);
         if (params.size.w) {
             float signal=max(dot(anchor,float4(0.25f)),0.0f);
-            float nominal=max(params.noise.x*0.18f+params.noise.y,1e-8f);
-            float correction=clamp(params.control.x/nominal,1.0f,4.0f);
-            variance=max((params.noise.x*signal+params.noise.y)*correction,1e-8f);
+            variance=max(params.noise.x*signal+params.noise.y,1e-8f);
         }
         float robust=exp(-energy/(18.0f*variance));
         // A low-cost zero match is valid in smooth areas; a high-cost ambiguous
