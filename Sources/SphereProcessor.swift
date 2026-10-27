@@ -30,11 +30,11 @@ final class SphereProcessor {
             guard let projected=Self.projectKernel?.apply(extent:extent,roiCallback:{_,_ in image.extent},arguments:[image,
                 CIVector(x:CGFloat(width),y:CGFloat(width/2)),CIVector(x:image.extent.width,y:image.extent.height),
                 focal,rows[0],rows[1],rows[2]]),
-                let combined=Self.meanKernel?.apply(extent:extent,arguments:[mean,weight,projected]),
-                let total=Self.weightKernel?.apply(extent:extent,arguments:[weight,projected]),
-                let cg=context.createCGImage(combined,from:extent,format:.RGBAh,colorSpace:space),
-                let wg=context.createCGImage(total,from:extent,format:.RGBAh,colorSpace:space) else { throw CameraFailure.message("No se pudo proyectar la esfera.") }
-            mean=CIImage(cgImage:cg);weight=CIImage(cgImage:wg)
+                let color=Self.colorKernel?.apply(extent:extent,arguments:[projected]),
+                let coverage=Self.coverKernel?.apply(extent:extent,arguments:[projected]) else { throw CameraFailure.message("No se pudo proyectar la esfera.") }
+            let joined=try MultiBandStitcher.blend(mean,coverage:weight,color,coverage:coverage,
+                extent:extent,context:context,wrapX:true,cancellation:cancellation)
+            mean=joined.image;weight=joined.coverage
         }
         try cancellation?.check()
         let mask=weight.applyingFilter("CIColorThreshold",parameters:["inputThreshold":0.001])
@@ -66,11 +66,6 @@ final class SphereProcessor {
             return vec4(unpremultiply(color).rgb*w,w);
         }
         """)
-    private static let weightKernel=CIColorKernel(source:"kernel vec4 sphereWeight(__sample w,__sample p) { return vec4(vec3(w.r+p.a),1.0); }")
-    private static let meanKernel=CIColorKernel(source:"""
-        kernel vec4 sphereMean(__sample old,__sample weight,__sample next) {
-            float total=weight.r+next.a;
-            return vec4(total>0.00001 ? (unpremultiply(old).rgb*weight.r+next.rgb)/total : vec3(0.0),total>0.00001 ? 1.0:0.0);
-        }
-        """)
+    private static let coverKernel=CIColorKernel(source:"kernel vec4 cover(__sample p) {return vec4(vec3(p.a),1.0);}")
+    private static let colorKernel=CIColorKernel(source:"kernel vec4 color(__sample p) {return vec4(unpremultiply(p).rgb,p.a>0.00001 ? 1.0:0.0);}")
 }

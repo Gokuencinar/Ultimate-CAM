@@ -11,6 +11,7 @@ import simd
         catch { fputs("SPHERE CHECK FAILED: \(error)\n",stderr);exit(1) }
     }
     static func run() throws {
+        try checkMeridianBlend()
         let upright=simd_float3x3(simd_quatf(angle:Float.pi/2,axis:SIMD3(1,0,0)))
         let down=SIMD3<Float>(0,0,-1)
         let initial=SphereMotionSnapshot(rotation:upright,gravity:upright.transpose*down,rotationSpeed:0,timestamp:1)
@@ -65,4 +66,33 @@ import simd
         do { _=try SphereProcessor().process(Array(frames.prefix(2)),width:512) } catch { rejected=true }
         try check(rejected,"Incomplete sphere was labeled complete")
     }
+    static func checkMeridianBlend() throws {
+        let w=256,h=128,e=CGRect(x:0,y:0,width:w,height:h),space=CGColorSpace(name:CGColorSpace.extendedLinearSRGB)!
+        let context=CIContext(options:[.workingColorSpace:space])
+        var a=[Float](repeating:1,count:w*h*4),b=a,aw=a,bw=a
+        for y in 0..<h { for x in 0..<w {
+            let angle=2*Float.pi*(Float(x)+0.5)/Float(w),v:Float=0.3+0.06*cos(angle)+0.04*sin(Float(y)*0.13)
+            for c in 0..<3 {
+                let j=(y*w+x)*4+c;a[j]=v;b[j]=v*0.6
+                aw[j]=(x<44 || x>=212) ? 0:1;bw[j]=(x<80 || x>=176) ? 1:0
+                // A moved object at the wrapped overlap must be avoided too.
+                if x>=184 && x<198 && y>42 && y<82 { b[j]+=0.15 }
+            }
+        } }
+        func image(_ p:[Float])->CIImage { CIImage(bitmapData:p.withUnsafeBufferPointer{Data(buffer:$0)},bytesPerRow:w*16,size:e.size,format:.RGBAf,colorSpace:space) }
+        let result=try MultiBandStitcher.blend(image(a),coverage:image(aw),image(b),coverage:image(bw),extent:e,context:context,wrapX:true)
+        var out=a
+        out.withUnsafeMutableBytes { context.render(result.image,toBitmap:$0.baseAddress!,rowBytes:w*16,bounds:e,format:.RGBAf,colorSpace:space) }
+        var before=0.0,after=0.0,seamError=0.0
+        for y in 4..<h-4 { for x in 0..<w {
+            let j=(y*w+x)*4
+            let moving=x>=184 && x<198 && y>42 && y<82
+            if !moving { before+=pow(Double(b[j]-a[j]),2);after+=pow(Double(out[j]-a[j]),2) }
+            if x==0 { seamError+=abs(Double(out[j]-out[(y*w+w-1)*4])) }
+        } }
+        print("Sphere wrapped gain",result.gain,"join error ratio",after/before,"meridian discontinuity",seamError/Double(h-8))
+        try check(after<before*0.1,"Wrapped sphere gain / multiband did not improve exposure continuity")
+        try check(seamError/Double(h-8)<0.003,"Multiband join opened the longitude meridian")
+    }
+
 }

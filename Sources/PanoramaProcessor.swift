@@ -54,12 +54,9 @@ final class PanoramaProcessor {
             guard union.width<=8192,union.height<=8192,union.width*union.height<=16_000_000 else { throw CameraFailure.message("El panorama supera el límite de 16 MP. Termina antes o usa menos fotos.") }
             let overlap=extent.intersection(warped.extent)
             guard overlap.width*overlap.height>next.extent.width*next.extent.height*0.2 else { throw CameraFailure.message("Falta solapamiento entre las fotos.") }
-            guard let combined=Self.meanKernel?.apply(extent:union,arguments:[mean,weight,warped,warpedWeight]),
-                  let combinedWeight=Self.weightKernel?.apply(extent:union,arguments:[weight,warpedWeight]),
-                  let color=context.createCGImage(combined,from:union,format:.RGBAh,colorSpace:space),
-                  let w=context.createCGImage(combinedWeight,from:union,format:.RGBAh,colorSpace:space) else { throw CameraFailure.message("No se pudo fusionar el panorama.") }
-            mean=CIImage(cgImage:color).transformed(by:CGAffineTransform(translationX:union.minX,y:union.minY))
-            weight=CIImage(cgImage:w).transformed(by:CGAffineTransform(translationX:union.minX,y:union.minY))
+            let joined=try MultiBandStitcher.blend(mean,coverage:weight,warped,coverage:warpedWeight,
+                extent:union,context:context,cancellation:cancellation)
+            mean=joined.image;weight=joined.coverage
             extent=union;previous=next;previousTransform=transform
         }
         try cancellation?.check()
@@ -130,14 +127,6 @@ final class PanoramaProcessor {
             vec2 p=destCoord()-rect.xy;
             float d=min(min(p.x,rect.z-p.x),min(p.y,rect.w-p.y));
             return vec4(vec3(clamp(d/radius,0.0,1.0)),1.0);
-        }
-        """)
-    private static let weightKernel=CIColorKernel(source:"kernel vec4 weights(__sample a,__sample b) { return vec4(vec3(a.r+b.r),1.0); }")
-    private static let meanKernel=CIColorKernel(source:"""
-        kernel vec4 panoramaMean(__sample a,__sample aw,__sample b,__sample bw) {
-            float total=aw.r+bw.r;
-            vec3 color=total>0.00001 ? (unpremultiply(a).rgb*aw.r+unpremultiply(b).rgb*bw.r)/total : vec3(0.0);
-            return vec4(color,total>0.00001 ? 1.0:0.0);
         }
         """)
 }

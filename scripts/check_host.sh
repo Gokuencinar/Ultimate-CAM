@@ -19,6 +19,7 @@ SOURCES=(
   Sources/SphereGeometry.swift
   Sources/SphereMetadata.swift
   Sources/SphereProcessor.swift
+  Sources/MultiBandStitcher.swift
   Sources/PanoramaProcessor.swift
   Sources/PortraitProcessor.swift
   Sources/PreviewAnalysis.swift
