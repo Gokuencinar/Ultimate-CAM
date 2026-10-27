@@ -13,12 +13,19 @@ kernel void uc_initial_weights(texture2d<float,access::write> output [[texture(0
     if (p.x<output.get_width() && p.y<output.get_height()) output.write(float4(1.0f),p);
 }
 
+kernel void uc_luma(texture2d<float,access::read> input [[texture(0)]],
+                    texture2d<float,access::write> output [[texture(1)]],
+                    constant FusionParameters &params [[buffer(0)]],uint2 p [[thread_position_in_grid]]) {
+    if (p.x<output.get_width() && p.y<output.get_height()) output.write(float4(dot(input.read(p),params.luma)),p);
+}
+
 kernel void uc_pyramid(texture2d<float,access::read> input [[texture(0)]],
                        texture2d<float,access::write> output [[texture(1)]],uint2 p [[thread_position_in_grid]]) {
     if (p.x>=output.get_width() || p.y>=output.get_height()) return;
     uint2 edge=uint2(input.get_width()-1,input.get_height()-1),q=p*2;
-    output.write((input.read(min(q,edge))+input.read(min(q+uint2(1,0),edge))+
-                  input.read(min(q+uint2(0,1),edge))+input.read(min(q+1,edge)))*0.25f,p);
+    float value=(input.read(min(q,edge)).r+input.read(min(q+uint2(1,0),edge)).r+
+                 input.read(min(q+uint2(0,1),edge)).r+input.read(min(q+1,edge)).r)*0.25f;
+    output.write(float4(value),p);
 }
 
 inline float uc_tile_cost(texture2d<float,access::sample> reference,
@@ -29,7 +36,7 @@ inline float uc_tile_cost(texture2d<float,access::sample> reference,
         float2 p=float2(tile*16+uint2(x,y))+0.5f,q=p+shift;
         if (p.x>=reference.get_width() || p.y>=reference.get_height() || q.x<0.5f || q.y<0.5f ||
             q.x>sample.get_width()-0.5f || q.y>sample.get_height()-0.5f) continue;
-        float a=dot(reference.sample(pixels,p),params.luma),b=dot(sample.sample(pixels,q),params.luma)*params.control.w;
+        float a=reference.sample(pixels,p).r,b=sample.sample(pixels,q).r*params.control.w;
         cost+=min(abs(a-b),0.25f);++count;
     }
     return count>=12 ? cost/float(count):INFINITY;
