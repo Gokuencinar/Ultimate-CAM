@@ -102,6 +102,7 @@ final class CameraModel: NSObject, ObservableObject, AVCapturePhotoCaptureDelega
     @Published private(set) var nativeNightIssue:String? = "Preparando cámara…"
     private var requestedNativeMode=0
     private var previousNativeMode:Int?
+    private var previousNativeTone:Bool?
     private var nativeModeDevice:String?
     private var temporalFeed=false
     private var hdrPlan: [FrameExposure] = []
@@ -170,6 +171,7 @@ final class CameraModel: NSObject, ObservableObject, AVCapturePhotoCaptureDelega
                 configured = true
             }
             if !session.isRunning { session.startRunning() }
+            applyNativePreview()
             if rotationCoordinator==nil,let device=input?.device { rotationCoordinator=AVCaptureDevice.RotationCoordinator(device:device,previewLayer:nil) }
             let rawAvailable = !output.availableRawPhotoPixelFormatTypes.isEmpty
             publish { self.supportsRAW = rawAvailable }
@@ -258,20 +260,6 @@ final class CameraModel: NSObject, ObservableObject, AVCapturePhotoCaptureDelega
             self.publish { self.ready = false }
             self.restoreNativePreview()
             if self.session.isRunning { self.session.stopRunning() }
-        }
-    }
-
-    func prepareNativeHandoff(_ completion: @escaping (Bool) -> Void) {
-        queue.async {
-            guard !self.inFlight else { self.publish { completion(false) }; return }
-            self.active=false;self.focusToken=UUID()
-            self.rotationCoordinator=nil
-            self.previewAnalyzer.setActive(false)
-            self.restoreNativePreview()
-            if self.session.isRunning { self.session.stopRunning() }
-            let stopped = !self.session.isRunning
-            CaptureTrace.record("nativeNight.handoff",["sessionStopped":stopped])
-            self.publish { self.ready=false;completion(stopped) }
         }
     }
 
@@ -432,7 +420,10 @@ final class CameraModel: NSObject, ObservableObject, AVCapturePhotoCaptureDelega
             guard let previous=UCNativePhotoNight.previewMode(device:device)?.intValue else {
                 publish { self.nativeNightIssue="No se pudo leer el estado nocturno de esta lente." };return
             }
-            previousNativeMode=previous;nativeModeDevice=device.uniqueID
+            guard let tone=UCNativePhotoNight.toneMapping(device:device)?.boolValue else {
+                publish { self.nativeNightIssue="No se pudo conservar el tono original del visor." };return
+            }
+            previousNativeMode=previous;previousNativeTone=tone;nativeModeDevice=device.uniqueID
         }
         if let issue=UCNativePhotoNight.setPreview(mode:requestedNativeMode,device:device) {
             publish { self.nativeNightIssue=issue };return
@@ -443,9 +434,12 @@ final class CameraModel: NSObject, ObservableObject, AVCapturePhotoCaptureDelega
     private func restoreNativePreview() {
         if let mode=previousNativeMode,let device=input?.device,nativeModeDevice==device.uniqueID {
             let issue=UCNativePhotoNight.setPreview(mode:mode,device:device)
-            if let issue { CaptureTrace.record("nativeNight.restore.error",["description":issue]) }
+            if let issue { CaptureTrace.record("nativeNight.restore.error",["description":issue]);return }
+            if let tone=previousNativeTone,let issue=UCNativePhotoNight.restoreToneMapping(enabled:tone,device:device) {
+                CaptureTrace.record("nativeNight.restore.error",["description":issue]);return
+            }
         }
-        previousNativeMode=nil;nativeModeDevice=nil
+        previousNativeMode=nil;previousNativeTone=nil;nativeModeDevice=nil
     }
 
     private func configurePreviewOutput() {

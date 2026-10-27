@@ -43,6 +43,24 @@ static NSArray<NSNumber *> *Modes(AVCapturePhotoOutput *output) {
         return @"iOS rechazó la configuración nocturna de esta sesión.";
     }
 }
++ (NSNumber *)toneMapping:(AVCaptureDevice *)device {
+    if (TargetIssue() || !ABI(device,"isGlobalToneMappingEnabled","B16@0:8")) return nil;
+    @try { return @(((BOOL(*)(id,SEL))objc_msgSend)(device,sel_registerName("isGlobalToneMappingEnabled"))); }
+    @catch (NSException *e) { (void)e;return nil; }
+}
++ (NSString *)restoreToneMapping:(BOOL)enabled device:(AVCaptureDevice *)device {
+    if (TargetIssue() || !ABI(device,"setGlobalToneMappingEnabled:","v20@0:8B16")) return @"No se pudo restaurar el tono del visor.";
+    if ([self toneMapping:device].boolValue==enabled) return nil;
+    NSError *error=nil;
+    if (![device lockForConfiguration:&error]) return @"No se pudo restaurar el tono del visor.";
+    @try {
+        ((void(*)(id,SEL,BOOL))objc_msgSend)(device,sel_registerName("setGlobalToneMappingEnabled:"),enabled);
+        return [self toneMapping:device].boolValue==enabled ? nil:@"iOS no confirmó la restauración del tono.";
+    } @catch (NSException *e) {
+        NSLog(@"UltimateCAM native Night restore tone %@: %@",e.name,e.reason);
+        return @"iOS rechazó la restauración del tono del visor.";
+    } @finally { [device unlockForConfiguration]; }
+}
 + (NSNumber *)previewMode:(AVCaptureDevice *)device {
     if (TargetIssue() || !ABI(device,"digitalFlashMode","q16@0:8")) return nil;
     @try { return @(((NSInteger(*)(id,SEL))objc_msgSend)(device,sel_registerName("digitalFlashMode"))); }

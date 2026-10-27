@@ -9,6 +9,7 @@ struct DiagnosticCaptureRequest {
     let flash: CameraFlash
     let adjustments: Bool
     let night: Bool
+    let nativeNight:Bool
     let nightRAW: Bool
     let spectral:Bool
     let spectralStrength:Double
@@ -19,7 +20,7 @@ struct DiagnosticCaptureRequest {
     init?(_ object: [String: String]) {
         guard Set(object.keys).isSubset(of: ["action", "mode", "count", "raw", "adjustments", "flash", "nightRaw","spectral","spectralStrength","nightBudget","nightShutterLimit","mirrorSelfie"]),
               object["action"] == "capture",
-              ["normal", "stack", "night"].contains(object["mode"] ?? "normal"),
+              ["normal", "stack", "night", "iosNight"].contains(object["mode"] ?? "normal"),
               ["true", "false"].contains(object["raw"] ?? "false"),
               ["true", "false"].contains(object["nightRaw"] ?? "false"),
               ["true", "false"].contains(object["adjustments"] ?? "false"),
@@ -30,6 +31,7 @@ struct DiagnosticCaptureRequest {
               let limit=Double(object["nightShutterLimit"] ?? "1"),limit.isFinite,(1.0/30...1).contains(limit),
               let flash = CameraFlash(rawValue: object["flash"] ?? "off"),
               let count = Int(object["count"] ?? "3"), [3, 5, 7, 9].contains(count) else { return nil }
+        nativeNight=object["mode"] == "iosNight"
         night = object["mode"] == "night"
         nightRAW = object["nightRaw"] == "true"
         spectral=object["spectral"] == "true";spectralStrength=strength;nightBudget=budget;nightShutterLimit=limit
@@ -40,11 +42,13 @@ struct DiagnosticCaptureRequest {
         adjustments = object["adjustments"] == "true"
         self.flash = flash
         guard (!nightRAW && !spectral) || night else { return nil }
+        guard !nativeNight || (!raw && flash == .off && !nightRAW && !spectral) else { return nil }
         guard !(stack && raw), flash == .off || (!stack && !raw) else { return nil }
     }
 
     var options: ProcessingOptions {
         var result = ProcessingOptions()
+        if nativeNight { result=PhotoModePolicy.nativeNight(from:result) }
         if night {
             result.nightStatic = true
             result.nightRAW = nightRAW
