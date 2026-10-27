@@ -224,7 +224,7 @@ kernel void uc_night_tone(texture2d<float,access::sample> input [[texture(0)]],
     mapped=mapped*mapped/max(mapped+toe,1e-6f)*(0.18f+toe)/0.18f;
     // Only low-signal chroma is attenuated. Luma and hue ratios in supported
     // midtones/highlights are unchanged by the shadow chroma stage.
-    float chroma=smoothstep(params.tone.y,params.tone.z,luminance);
+    float chroma=params.tone.z>params.tone.y ? smoothstep(params.tone.y,params.tone.z,luminance):1.0f;
     float3 clean=mix(float3(luminance),rgb,chroma);
     float3 result=clean*(mapped/luminance);
     result/=max(1.0f,max(result.r,max(result.g,result.b)));

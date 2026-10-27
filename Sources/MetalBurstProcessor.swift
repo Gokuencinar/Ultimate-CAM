@@ -143,7 +143,7 @@ final class MetalBurstProcessor {
         try encode("uc_fuse_tiles",command,textures:[work.reference,work.sample,work.mean,work.weights[work.slot],work.regularizedFlow[0],work.means[next],work.weights[next]],parameters:parameters)
         try finish(command,cancellation:cancellation);work.slot=next
     }
-    private func tone(_ image:CIImage,maximumGain:Double,cancellation:ProcessingCancellation?) throws -> (sdr:CIImage,hdr:CIImage) {
+    private func tone(_ image:CIImage,maximumGain:Double,night:Bool,cancellation:ProcessingCancellation?) throws -> (sdr:CIImage,hdr:CIImage) {
         let extent=image.extent.integral,w=Int(extent.width),h=Int(extent.height)
         let normalized=image.transformed(by:CGAffineTransform(translationX:-extent.minX,y:-extent.minY))
         let input=try load(normalized,width:w,height:h,cancellation:cancellation),output=try texture(w,h)
@@ -164,7 +164,7 @@ final class MetalBurstProcessor {
         }
         let plan=try NightTonePlan.make(luminances:values,maximumGain:maximumGain)
         var params=MetalFusionParameters();params.control.y=Float(plan.gain);params.control.z=Float(plan.whitePoint)
-        params.tone=SIMD4<Float>(0.003,0.002,0.02,0)
+        params.tone=night ? SIMD4<Float>(0.003,0.002,0.02,0):SIMD4<Float>(repeating:0)
         let command=try command()
         try encode("uc_tone_luma",command,textures:[input,base])
         try encode("uc_pyramid",command,textures:[base,middleBase])
@@ -224,7 +224,7 @@ final class MetalBurstProcessor {
         if decoder.isColorNoiseReductionSupported { decoder.colorNoiseReductionAmount=0.5 }
         guard let developed=decoder.outputImage else { throw CameraFailure.message("El DNG de trabajo no se pudo revelar.") }
         progress?("Metal RAW · tono y color…")
-        let mapped=try tone(developed,maximumGain:options.hdrBracketing ? 64:32,cancellation:cancellation)
+        let mapped=try tone(developed,maximumGain:options.hdrBracketing ? 64:32,night:!options.hdrBracketing,cancellation:cancellation)
         let jpeg=try JPEGRenderer.render(mapped.sdr,extent:mapped.sdr.extent,options:options,context:context,hdrSource:options.preserveHDR ? mapped.hdr:nil,metadataReference:referenceJPEG,frames:fused.count)
         return CaptureResult(jpeg:jpeg.data,reference:referenceJPEG,details:"\(options.hdrBracketing ? "HDR RAW Metal":"Noche RAW Metal") · \(fused.count) tomas · Bayer por teselas · \(jpeg.width) × \(jpeg.height) px.",mergedFrames:fused.count,raw:originalDNG,source:"Bayer-Metal")
     }
