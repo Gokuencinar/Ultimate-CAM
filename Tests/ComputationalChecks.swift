@@ -386,6 +386,10 @@ import Darwin
         let hdrScene=HDRSceneMeter(shadow:0.002,median:0.15,highlight:0.999,timestamp:1)
         let adaptive=try HDRCapturePlan.make(iso:200,seconds:0.02,span:1,isoRange:25...3200,durationRange:0.0001...1,scene:hdrScene)
         try require(adaptive[0].seconds==0.01 && adaptive[2].product/adaptive[0].product>4,"HDR ignored clipped highlights / scene span")
+        var temporal=ProcessingOptions();temporal.zeroShutterLagFusion=true;temporal.nightStatic=true
+        try require(!temporal.usesPreviewZSL,"ZSL changed the manual night capture priority")
+        temporal.nightStatic=false;temporal.hdrBracketing=true
+        try require(!temporal.usesPreviewZSL,"ZSL changed HDR exposure scheduling")
         print("0.17 SR recovery, lens priors, temporal points, tripod scheduling and adaptive HDR passed")
     }
 

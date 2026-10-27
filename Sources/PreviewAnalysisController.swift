@@ -47,7 +47,7 @@ final class PreviewAnalysisController:NSObject,AVCaptureVideoDataOutputSampleBuf
         output.setSampleBufferDelegate(self,queue:queue)
     }
     func setActive(_ value:Bool) {
-        lock.lock();active=value;generation=UUID();lock.unlock()
+        lock.lock();active=value;generation=UUID();if !value { exposureReading=nil };lock.unlock()
         if !value { history.reset();motion.reset();DispatchQueue.main.async { self.completion(nil) } }
     }
     func configure(_ options:PreviewAnalysisOptions,processing:ProcessingOptions) {

@@ -221,9 +221,10 @@ kernel void uc_fuse_tiles(texture2d<float,access::read> reference [[texture(0)]]
             float4 supported=uc_point_support(rawReference,rawSample,p,q,anchor,motion.xy,params);
             pairAnchor=mix(anchor,rawReference.read(p),supported);
             sensor=mix(sensor,rawSample.sample(pixels,q),supported);
-            // Restore the clipped reference contribution only after temporal
-            // support, including support first discovered in a later frame.
-            acc=mix(acc,max(acc,pairAnchor),supported);
+            // Resolve the initial reference contribution once, on the first
+            // registered sample. Repeatedly taking max(mean, rawReference)
+            // would bias every later stellar estimate toward a noisy peak.
+            if(params.flags.y) acc=mix(acc,pairAnchor,supported);
         }
         float4 candidate=sensor*params.control.w;
         float4 residual=candidate-pairAnchor;
@@ -339,7 +340,7 @@ kernel void uc_fuse_super_res(texture2d<float,access::sample> reference [[textur
   uint2 rp=uint2(clamp(round(native),float2(0),float2(reference.get_width()-1,reference.get_height()-1)));
   float4 supported=params.search.y ? uc_point_support(rawReference,rawSample,rp,float2(rp)+0.5f+motion.xy,reference.read(rp),motion.xy,params):float4(0);
   float anchor=mix(clean[phase],rawReference.sample(pixels,native+0.5f)[phase],supported[phase]);
-  if(supported[phase]>0.5f) previous[phase]=max(previous[phase],anchor);
+  if(params.flags.y && supported[phase]>0.5f) previous[phase]=max(previous[phase],anchor);
   float signal=max(anchor,0.0f),variance=max(params.noise.x*signal+params.noise.y,1e-6f);
   float reliable=motion.z<3*sqrt(variance) ? 1.0f:motion.w;
   for (int y=-1;y<=2;++y) for (int x=-1;x<=2;++x) {

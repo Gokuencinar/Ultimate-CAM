@@ -61,7 +61,7 @@ struct ProcessingOptions: Codable, Equatable {
     var aspect: PhotoAspect = PhotoAspect.original
     var lutID: String? = nil
     var lutIntensity: Double = 1
-    var usesPreviewZSL:Bool { !nativeNight && zeroShutterLagFusion }
+    var usesPreviewZSL:Bool { !nativeNight && !nightStatic && !hdrBracketing && portraitAmount==0 && zeroShutterLagFusion }
     func selectedRAW(original:Data,fused:Data)->Data { saveFusedDNG ? fused:original }
 
     var advancedRendering: Bool {

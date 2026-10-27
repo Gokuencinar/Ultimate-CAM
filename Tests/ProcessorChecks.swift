@@ -336,6 +336,22 @@ struct ProcessorChecks {
         let bokeh=try PortraitProcessor.apply(guide,mask:mask,extent:e,amount:1,depth:depth,context:ctx)
         let rendered=read(bokeh)
         try require(rendered.allSatisfy(\.isFinite) && abs(rendered[(64*w+90)*4]-0.8)<0.02,"Hybrid depth bokeh damaged foreground / generated invalid pixels")
+        var textured=pixels,layered=disparity
+        for y in 0..<h { for x in 0..<w {
+            let i=(y*w+x)*4,person=matte[i]>0.5
+            for c in 0..<3 {
+                textured[i+c]=person ? 0.8:((x+y)%2==0 ? 0.6:0.1)
+                layered[i+c]=person || x<70 ? 0.7:0.1
+            }
+        } }
+        let texturedImage=image(textured),layeredDepth=PortraitDepth(disparity:image(layered),validity:CIImage(color:.white).cropped(to:e))
+        let progressive=read(try PortraitProcessor.apply(texturedImage,mask:mask,extent:e,amount:1,depth:layeredDepth,context:ctx))
+        var nearError:Float=0,farError:Float=0
+        for y in 24..<104 { for x in 12..<44 {
+            let near=(y*w+x)*4,far=(y*w+x+132)*4
+            nearError+=abs(progressive[near]-textured[near]);farError+=abs(progressive[far]-textured[far])
+        } }
+        try require(farError>nearError+100,"Depth bokeh ignored distance from the focal plane")
         // A native 12 MP anchor keeps its fine spatial detail: support supplies
         // only a low-frequency correction, never the final output dimensions.
         let nativeExtent=CGRect(x:0,y:0,width:4032,height:3024)

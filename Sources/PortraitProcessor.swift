@@ -49,8 +49,13 @@ enum PortraitProcessor {
         if amount==0 { return input.cropped(to:extent) }
         let radius=max(1,min(48,extent.width*0.012*amount))
         let soft=guidedMask(mask,guide:input,extent:extent)
-        guard let weighted=weightedKernel?.apply(extent:extent,arguments:[input,soft]),
-              let weight=weightKernel?.apply(extent:extent,arguments:[soft]) else { throw CameraFailure.message("No se pudo separar el fondo del retrato.") }
+        // The refined alpha blends the final edge. A conservative union matte
+        // separately excludes foreground from the background convolution; using
+        // a fractional guided edge here bleeds face/hair colour into the bokeh.
+        let exclusion=mask.applyingFilter("CIMaximumCompositing",parameters:[kCIInputBackgroundImageKey:soft])
+            .clampedToExtent().applyingFilter("CIMorphologyMaximum",parameters:[kCIInputRadiusKey:2]).cropped(to:extent)
+        guard let weighted=weightedKernel?.apply(extent:extent,arguments:[input,exclusion]),
+              let weight=weightKernel?.apply(extent:extent,arguments:[exclusion]) else { throw CameraFailure.message("No se pudo separar el fondo del retrato.") }
         func background(_ scale:Double) throws -> CIImage {
             let parameters=[kCIInputRadiusKey:radius*scale]
             let color=weighted.clampedToExtent().applyingFilter("CIDiscBlur",parameters:parameters).cropped(to:extent)

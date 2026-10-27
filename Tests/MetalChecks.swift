@@ -77,7 +77,7 @@ import Darwin
         rawA[(16*n+12)*4]=0.7;rawB[(16*n+13)*4]=0.7
         rawA[(16*n+24)*4]=0.7;rawB[(16*n+24)*4]=0.7
         upload(rawA,a);upload(rawB,b)
-        var params=MetalFusionParameters();params.size.w=1;params.roi=SIMD4(0,0,32,32);params.sensorNoise=SIMD4(0,1e-6,0,1e-6);params.noise=SIMD4(0,2e-6,0,0)
+        var params=MetalFusionParameters();params.size.w=1;params.flags.y=1;params.roi=SIMD4(0,0,32,32);params.sensorNoise=SIMD4(0,1e-6,0,1e-6);params.noise=SIMD4(0,2e-6,0,0)
         try execute("uc_protect_bayer",[a,cleanA],params,cleanA);try execute("uc_protect_bayer",[b,cleanB],params,cleanB)
         let counts=try texture(n,n,.r16Float),nextCounts=try texture(n,n,.r16Float),output=try texture(n,n),motion=try texture(2,2,.rgba32Float)
         try execute("uc_initial_weights",[counts],params,counts)

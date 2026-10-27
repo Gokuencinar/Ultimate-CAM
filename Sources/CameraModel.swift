@@ -720,6 +720,7 @@ final class CameraModel: NSObject, ObservableObject, AVCapturePhotoCaptureDelega
         self.rawData = nil
         let preRoll=options.usesPreviewZSL && !burst && !raw && flash == .off && options.portraitAmount==0
             && device.exposureMode != .custom && device.exposureMode != .locked ? self.previewAnalyzer.history.snapshot(at:shutterTime).map(\.value):[]
+        let hdrScene=self.previewAnalyzer.exposure(at:shutterTime)
         let motion=(options.nightMotionMetering || options.astroEnabled) ? self.previewAnalyzer.motion.estimate(at:shutterTime):nil
         self.previewAnalyzer.setActive(false)
         self.publish { self.busy = true }
@@ -763,7 +764,7 @@ final class CameraModel: NSObject, ObservableObject, AVCapturePhotoCaptureDelega
                     shutterLimit: options.nightShutterLimit,motionLimit:options.nightMotionMetering ? motion?.shutterLimit:nil,tripodStable:motion?.tripodStable ?? false,astroEnabled:options.astroEnabled) : nil
                 let bracket = hdr ? try HDRCapturePlan.make(iso:Double(device.iso),seconds:device.exposureDuration.seconds,span:options.hdrSpan,
                     isoRange:Double(device.activeFormat.minISO)...Double(device.activeFormat.maxISO),
-                    durationRange:device.activeFormat.minExposureDuration.seconds...device.activeFormat.maxExposureDuration.seconds,scene:self.previewAnalyzer.exposure(at:shutterTime)) : nil
+                    durationRange:device.activeFormat.minExposureDuration.seconds...device.activeFormat.maxExposureDuration.seconds,scene:hdrScene) : nil
                 try device.lockForConfiguration()
                 defer { device.unlockForConfiguration() }
                 if device.exposureMode != .custom { self.savedExposure = device.exposureMode }
@@ -864,7 +865,8 @@ final class CameraModel: NSObject, ObservableObject, AVCapturePhotoCaptureDelega
         }
         settings.flashMode = requestedFlash.mode
         settings.maxPhotoDimensions = output.maxPhotoDimensions
-        let priority = processingOptions.nativeNight ? SinglePhotoQuality.quality:(processingOptions.usesPreviewZSL ? .balanced:PhotoCapturePolicy.priority(requested: processingOptions.singlePhotoQuality,
+        let hybrid=processingOptions.usesPreviewZSL && !rawRequested && desiredCount==1 && input?.device.exposureMode != .custom && input?.device.exposureMode != .locked
+        let priority = processingOptions.nativeNight ? SinglePhotoQuality.quality:(hybrid ? .balanced:PhotoCapturePolicy.priority(requested: processingOptions.singlePhotoQuality,
             count: desiredCount, raw: rawRequested, customExposure: input?.device.exposureMode == .custom,
             lockedExposure: input?.device.exposureMode == .locked))
         let deliverDepth=processingOptions.portraitAmount>0 && !rawRequested && desiredCount==1 && output.isDepthDataDeliverySupported

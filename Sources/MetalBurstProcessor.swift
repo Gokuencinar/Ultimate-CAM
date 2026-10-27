@@ -246,7 +246,7 @@ final class MetalBurstProcessor {
             progress?("Metal RAW · alineando y fusionando \(index+1)/\(frames.count)…")
             let scale=first.exposure.product/frame.exposure.product
             guard scale.isFinite,(1.0/256...256).contains(scale) else { throw CameraFailure.message("Separación RAW fuera de rango.") }
-            params.control.w=Float(scale)
+            params.control.w=Float(scale);params.flags.y=accepted==1 ? 1:0
             let model=SensorNoiseModel.pair(reference:first.exposure,referenceProfile:first.noiseProfile,
                 sample:frame.exposure,sampleProfile:frame.noiseProfile,scale:Float(scale),referenceLens:first.lens,sampleLens:frame.lens)
             // Unregistered edge residuals are scene motion, not read/shot noise.
