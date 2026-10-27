@@ -163,8 +163,9 @@ struct SensorBayerFrame {
         }
         let mapped=try BayerScratchStorage.store(packed)
         var frame=SensorBayerFrame(width:qw,height:qh,quads:mapped.data,calibration:calibration,exposure:exposure,timestamp:photo.timestamp.seconds)
-        frame.sharpness=BayerQuadPacking.sharpness(quads:packed,width:qw,height:qh,pattern:croppedPattern)
         frame.noiseProfile=SensorNoiseModel.validProfile(numbers("NoiseProfile")) ?? []
+        frame.sharpness=BayerQuadPacking.sharpness(quads:packed,width:qw,height:qh,pattern:croppedPattern,
+            noise:SensorNoiseModel.coefficients(iso:exposure.iso,profile:frame.noiseProfile))
         frame.backing=mapped.storage;return frame
     }
     #endif
@@ -198,11 +199,24 @@ enum SensorNoiseModel {
     }
 }
 
+enum BayerImpulseProtection {
+    /// Same per-phase soft rejection used by the GPU prepass. Also prevents an
+    /// isolated green impulse from winning the CPU lucky-imaging metric.
+    static func value(_ center:Float,minimum:Float,maximum:Float,noise:SIMD2<Float>)->Float {
+        guard center.isFinite,minimum.isFinite,maximum.isFinite,minimum<=maximum else { return center }
+        let bounded=min(maximum,max(minimum,center))
+        let variance=max(1e-8,noise.x*max(0,(minimum+maximum)*0.5)+noise.y)
+        let threshold=6*sqrt(variance),distance=abs(center-bounded)
+        let t=min(1,max(0,(distance-threshold)/threshold))
+        return center+(bounded-center)*(t*t*(3-2*t))
+    }
+}
+
 enum BayerQuadPacking {
     /// Bounded central reduction (~18K samples), computed once while packing
     /// data is resident. Both green phases are measured independently; no CFA
     /// colors are mixed, and no full image or scratch mapping is read again.
-    static func sharpness(quads:Data,width:Int,height:Int,pattern:[UInt8])->Double {
+    static func sharpness(quads:Data,width:Int,height:Int,pattern:[UInt8],noise:SIMD2<Float> = SIMD2<Float>(2e-5,4.5e-7))->Double {
         guard width>=8,height>=8,quads.count==width*height*8,pattern.count==4 else { return 0 }
         let greens=pattern.indices.filter { pattern[$0]==1 }
         guard greens.count==2 else { return 0 }
@@ -211,9 +225,17 @@ enum BayerQuadPacking {
         let step=max(1,max(spanX,spanY)/96)
         return quads.withUnsafeBytes { bytes in
             var energy=0.0,light=0.0,count=0
-            func green(_ x:Int,_ y:Int,_ phase:Int)->Double {
+            func raw(_ x:Int,_ y:Int,_ phase:Int)->Float {
                 let bits=bytes.loadUnaligned(fromByteOffset:((y*width+x)*4+phase)*2,as:UInt16.self)
-                return Double(Float16(bitPattern:UInt16(littleEndian:bits)))
+                return Float(Float16(bitPattern:UInt16(littleEndian:bits)))
+            }
+            func green(_ x:Int,_ y:Int,_ phase:Int)->Double {
+                var low=Float.infinity,high = -Float.infinity
+                for dy in -1...1 { for dx in -1...1 where dx != 0 || dy != 0 {
+                    let value=raw(min(width-1,max(0,x+dx)),min(height-1,max(0,y+dy)),phase)
+                    low=min(low,value);high=max(high,value)
+                } }
+                return Double(BayerImpulseProtection.value(raw(x,y,phase),minimum:low,maximum:high,noise:noise))
             }
             for y in stride(from:y0,to:y0+spanY,by:step) {
                 for x in stride(from:x0,to:x0+spanX,by:step) {

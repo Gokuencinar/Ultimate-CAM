@@ -8,6 +8,7 @@ private struct MetalFusionParameters {
     var luma=SIMD4<Float>(0.2126,0.7152,0.0722,0)
     var noise=SIMD4<Float>(0,0,0,0)
     var tone=SIMD4<Float>(0,0,0,0)
+    var sensorNoise=SIMD4<Float>(0,0,0,0)
 }
 
 /// Own compute kernels, not the private Apple ISP or Google's proprietary HDR+.
@@ -17,13 +18,13 @@ final class MetalBurstProcessor {
     /// One workspace per burst. The reference pyramid is immutable; sample,
     /// flow and ping-pong accumulators are reused after command completion.
     private final class FusionWorkspace {
-        let reference:MTLTexture,sample:MTLTexture
+        let reference:MTLTexture,sample:MTLTexture,sampleUpload:MTLTexture
         let referencePyramid:[MTLTexture],samplePyramid:[MTLTexture],flow:[MTLTexture],regularizedFlow:[MTLTexture]
         let means:[MTLTexture],weights:[MTLTexture]
         var slot=0
         var mean:MTLTexture { means[slot] }
-        init(reference:MTLTexture,sample:MTLTexture,referencePyramid:[MTLTexture],samplePyramid:[MTLTexture],flow:[MTLTexture],regularizedFlow:[MTLTexture],means:[MTLTexture],weights:[MTLTexture]) {
-            self.reference=reference;self.sample=sample;self.referencePyramid=referencePyramid
+        init(reference:MTLTexture,sample:MTLTexture,sampleUpload:MTLTexture,referencePyramid:[MTLTexture],samplePyramid:[MTLTexture],flow:[MTLTexture],regularizedFlow:[MTLTexture],means:[MTLTexture],weights:[MTLTexture]) {
+            self.reference=reference;self.sample=sample;self.sampleUpload=sampleUpload;self.referencePyramid=referencePyramid
             self.samplePyramid=samplePyramid;self.flow=flow;self.regularizedFlow=regularizedFlow;self.means=means;self.weights=weights
         }
     }
@@ -35,7 +36,7 @@ final class MetalBurstProcessor {
         guard let device=MTLCreateSystemDefaultDevice(),let queue=device.makeCommandQueue() else { throw CameraFailure.message("Metal no está disponible.") }
         let library=try device.makeDefaultLibrary(bundle:Bundle.main)
         var kernels=[String:MTLComputePipelineState]()
-        for name in ["uc_initial_weights","uc_luma","uc_pyramid","uc_tile_flow","uc_regularize_flow","uc_fuse_tiles","uc_tone_luma","uc_night_tone"] {
+        for name in ["uc_initial_weights","uc_protect_bayer","uc_luma","uc_pyramid","uc_tile_flow","uc_regularize_flow","uc_fuse_tiles","uc_tone_luma","uc_night_tone"] {
             guard let function=library.makeFunction(name:name) else { throw CameraFailure.message("Falta un shader del procesador Metal.") }
             kernels[name]=try device.makeComputePipelineState(function:function)
         }
@@ -115,20 +116,30 @@ final class MetalBurstProcessor {
         }
         let means=try [texture(w,h),texture(w,h)]
         let weights=try [texture(w,h,format:.r16Float),texture(w,h,format:.r16Float)]
-        let sample=try texture(w,h,storage:raw ? .shared:.private)
-        let result=FusionWorkspace(reference:reference,sample:sample,referencePyramid:refs,samplePyramid:samples,flow:flows,regularizedFlow:regularized,means:means,weights:weights)
+        let sample=try texture(w,h),sampleUpload=try raw ? texture(w,h,storage:.shared):sample
+        let protectedReference=try raw ? texture(w,h):reference
+        let result=FusionWorkspace(reference:protectedReference,sample:sample,sampleUpload:sampleUpload,referencePyramid:refs,samplePyramid:samples,flow:flows,regularizedFlow:regularized,means:means,weights:weights)
         let command=try command()
+        // Clean both the alignment anchor and the initial accumulated mean.
+        // Otherwise the reference impulse would survive even after residuals
+        // accepted clean samples. Original saved DNG bytes are untouched.
+        if raw { try encode("uc_protect_bayer",command,textures:[reference,protectedReference],parameters:parameters) }
         guard let blit=command.makeBlitCommandEncoder() else { throw CameraFailure.message("No se pudo preparar la acumulación.") }
-        blit.copy(from:reference,sourceSlice:0,sourceLevel:0,sourceOrigin:MTLOrigin(x:0,y:0,z:0),sourceSize:MTLSize(width:w,height:h,depth:1),
+        blit.copy(from:protectedReference,sourceSlice:0,sourceLevel:0,sourceOrigin:MTLOrigin(x:0,y:0,z:0),sourceSize:MTLSize(width:w,height:h,depth:1),
             to:means[0],destinationSlice:0,destinationLevel:0,destinationOrigin:MTLOrigin(x:0,y:0,z:0))
         blit.endEncoding()
         try encode("uc_initial_weights",command,textures:[weights[0]])
-        try encode("uc_luma",command,textures:[reference,refs[0]],parameters:parameters)
+        try encode("uc_luma",command,textures:[protectedReference,refs[0]],parameters:parameters)
         for level in 1..<3 { try encode("uc_pyramid",command,textures:[refs[level-1],refs[level]]) }
         try finish(command,cancellation:cancellation);return result
     }
     private func fuse(_ work:FusionWorkspace,parameters:MetalFusionParameters,cancellation:ProcessingCancellation?) throws {
         let command=try command()
+        if parameters.size.w==1 {
+            var protection=parameters
+            protection.sensorNoise=SIMD4<Float>(parameters.sensorNoise.z,parameters.sensorNoise.w,0,0)
+            try encode("uc_protect_bayer",command,textures:[work.sampleUpload,work.sample],parameters:protection)
+        }
         try encode("uc_luma",command,textures:[work.sample,work.samplePyramid[0]],parameters:parameters)
         for level in 1..<3 { try encode("uc_pyramid",command,textures:[work.samplePyramid[level-1],work.samplePyramid[level]]) }
         for level in stride(from:2,through:0,by:-1) {
@@ -184,12 +195,15 @@ final class MetalBurstProcessor {
         let first=frames[anchorIndex]
         defer { frames.forEach { $0.discardResidentPages() } }
         let fused:(dng:Data,count:Int)=try autoreleasepool {
-        let reference=try upload(first)
         var params=MetalFusionParameters();params.size.w=1
         params.luma=SIMD4<Float>(first.calibration.pattern[0]==1 ? 0.5:0,first.calibration.pattern[1]==1 ? 0.5:0,
             first.calibration.pattern[2]==1 ? 0.5:0,first.calibration.pattern[3]==1 ? 0.5:0)
         params.search.z=options.hdrBracketing ? 1:0
-        let work=try workspace(reference:reference,raw:true,parameters:params,cancellation:cancellation)
+        let referenceNoise=SensorNoiseModel.coefficients(iso:first.exposure.iso,profile:first.noiseProfile)
+        params.sensorNoise=SIMD4<Float>(referenceNoise.x,referenceNoise.y,referenceNoise.x,referenceNoise.y)
+        let work=try autoreleasepool {
+            try workspace(reference:upload(first),raw:true,parameters:params,cancellation:cancellation)
+        }
         var accepted=1
         for (index,frame) in frames.enumerated() where index != anchorIndex {
             if !options.hdrBracketing && !frame.matchesExposure(of:first) { continue }
@@ -209,7 +223,9 @@ final class MetalBurstProcessor {
             // RAW variance is evaluated per pixel by the calibrated GPU model.
             params.control.x=max(1e-8,model.x*0.18+model.y)
             params.noise=SIMD4<Float>(model.x,model.y,0,0)
-            _=try upload(frame,into:work.sample)
+            let sampleNoise=SensorNoiseModel.coefficients(iso:frame.exposure.iso,profile:frame.noiseProfile)
+            params.sensorNoise.z=sampleNoise.x;params.sensorNoise.w=sampleNoise.y
+            _=try upload(frame,into:work.sampleUpload)
             try fuse(work,parameters:params,cancellation:cancellation)
             accepted+=1
             }

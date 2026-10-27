@@ -8,8 +8,30 @@ struct FusionParameters {
     float4 luma;
     float4 noise; // Pair shot/read variance in the reference exposure domain.
     float4 tone; // toe strength, deep-shadow chroma start/end, reserved.
+    float4 sensorNoise; // Reference shot/read, sample shot/read before scaling.
 };
 constexpr sampler pixels(coord::pixel,address::clamp_to_edge,filter::linear);
+
+kernel void uc_protect_bayer(texture2d<float,access::read> input [[texture(0)]],
+                             texture2d<float,access::write> output [[texture(1)]],
+                             constant FusionParameters &params [[buffer(0)]],uint2 p [[thread_position_in_grid]]) {
+    if (p.x>=output.get_width() || p.y>=output.get_height()) return;
+    float4 center=input.read(p),low=float4(INFINITY),high=float4(-INFINITY);uint count=0;
+    for (int y=-1;y<=1;++y) for (int x=-1;x<=1;++x) {
+        int2 q=int2(p)+int2(x,y);
+        if ((x==0 && y==0) || any(q<0) || q.x>=int(input.get_width()) || q.y>=int(input.get_height())) continue;
+        float4 neighbor=input.read(uint2(q));low=min(low,neighbor);high=max(high,neighbor);++count;
+    }
+    if (count>=3) {
+        // Component-wise only: each texture channel is one fixed CFA phase.
+        // Estimate variance from neighbours so an impulse cannot inflate it.
+        float4 variance=max(params.sensorNoise.x*max((low+high)*0.5f,0.0f)+params.sensorNoise.y,1e-8f);
+        float4 threshold=6.0f*sqrt(variance),bounded=clamp(center,low,high);
+        float4 strength=smoothstep(threshold,threshold*2.0f,abs(center-bounded));
+        center=mix(center,bounded,strength);
+    }
+    output.write(center,p);
+}
 
 kernel void uc_initial_weights(texture2d<float,access::write> output [[texture(0)]],uint2 p [[thread_position_in_grid]]) {
     if (p.x<output.get_width() && p.y<output.get_height()) output.write(float4(1.0f),p);
