@@ -353,7 +353,7 @@ import Darwin
         try require(srError<resizeError*0.75,"Shifted SR did not recover the synthetic 0.65-cycle/quad signal better than a single-frame resize")
         let small=SensorBayerFrame(width:256,height:192,quads:quads,calibration:calibration,exposure:frame.exposure,timestamp:1,zoom:2)
         let plan=try SuperResolutionPlan.make(small,count:4)!
-        let encoded=try FusedDNG.encode(quads:quads,width:plan.width,height:plan.height,calibration:plan.calibration(calibration),zoom:1,reconstruction:plan)
+        let encoded=try FusedDNG.encode(quads:quads,width:plan.width,height:plan.height,calibration:plan.calibration(calibration),zoom:1)
         let decoder=CIRAWFilter(imageData:encoded,identifierHint:"com.adobe.raw-image")
         try require(decoder?.outputImage?.extent.size==CGSize(width:512,height:384),"Reconstructed DNG retained the low-resolution crop")
         func be32(_ value:UInt32)->Data { var v=value.bigEndian;return withUnsafeBytes(of:&v){Data($0)} }
@@ -367,9 +367,18 @@ import Darwin
         let remapped=try DNGMetadata.validatedOpcodes(opticalPlan.vignette!)
         func double(_ o:Int)->Double { Double(bitPattern:remapped[o..<o+8].reduce(UInt64(0)){($0<<8)|UInt64($1)}) }
         try require(abs(double(20)-0.125)<1e-9 && abs(double(28)-0.00625)<1e-9 && double(60)==0.5,"SR radial shading was not transformed into the crop coordinates")
-        let opticalDNG=try FusedDNG.encode(quads:quads,width:256,height:192,calibration:opticalPlan.calibration(optics),reconstruction:opticalPlan)
+        let opticalDNG=try FusedDNG.encode(quads:quads,width:256,height:192,calibration:opticalPlan.calibration(optics))
         try require(try DNGMetadata.read(opticalDNG).fields[51022]?.data==remapped,"SR DNG lost transformed optical shading")
         guard let opticalDecoder=CIRAWFilter(imageData:opticalDNG,identifierHint:"com.adobe.raw-image"),opticalDecoder.outputImage != nil else { throw CameraFailure.message("Transformed optical DNG did not develop") }
+        let map=BayerGainMap(top:0,left:0,bottom:384,right:512,rowPitch:1,colPitch:1,rows:2,cols:2,spacingY:1,spacingX:1,originY:0,originX:0,gains:[1,2,3,4])
+        let operation=map.transformed(plan)!
+        let mapped=try BayerGainMap.read(be32(1)+operation)[0]
+        for y in [0,40,191,383] { for x in [0,100,256,511] {
+            let ox=plan.originX*2+(Double(x)+0.5)/plan.scaleX,oy=plan.originY*2+(Double(y)+0.5)/plan.scaleY
+            let before=map.gain(x:ox,y:oy,phase:0,sensorWidth:512,sensorHeight:384)
+            let after=mapped.gain(x:Double(x)+0.5,y:Double(y)+0.5,phase:0,sensorWidth:512,sensorHeight:384)
+            try require(abs(before-after)<1e-5,"SR changed the original lens GainMap / highlight headroom")
+        } }
         for lens in LensIdentity.allCases {
             let prior=LensCalibration.profile(lens)
             try require(prior.shot>0 && prior.read>0 && prior.sharpenRadius>0,"Invalid lens profile")

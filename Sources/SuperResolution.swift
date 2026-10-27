@@ -4,6 +4,7 @@ struct BayerGainMap {
     let top:Int,left:Int,bottom:Int,right:Int,rowPitch:Int,colPitch:Int
     let rows:Int,cols:Int,spacingY:Double,spacingX:Double,originY:Double,originX:Double
     let gains:[Float]
+    var flags:UInt32=0
     static func read(_ data:Data?) throws -> [Self] {
         guard let data else { return [] };_ = try DNGMetadata.validatedOpcodes(data)
         func u(_ o:Int)->Int { Int(data[o..<o+4].reduce(UInt32(0)){($0<<8)|UInt32($1)}) }
@@ -17,10 +18,10 @@ struct BayerGainMap {
             guard rows>0,cols>0,rows<=512,cols<=512,planes==1,u(s+16)==0,u(s+20)==1,
                   [1,2].contains(u(s+24)),[1,2].contains(u(s+28)),length==76+rows*cols*4 else { throw CameraFailure.message("Mapa de lente SR no compatible.") }
             let sy=d(s+40),sx=d(s+48),oy=d(s+56),ox=d(s+64)
-            guard [sy,sx,oy,ox].allSatisfy(\.isFinite),sy>0,sx>0 else { throw CameraFailure.message("Mapa de lente SR inválido.") }
+            guard [sy,sx,oy,ox].allSatisfy({$0.isFinite && abs($0)<=1e6}),sy>0,sx>0 else { throw CameraFailure.message("Mapa de lente SR inválido.") }
             let values=(0..<rows*cols).map { Float(bitPattern:UInt32(u(s+76+$0*4))) }
             guard values.allSatisfy({$0.isFinite && $0>0 && $0<=32}) else { throw CameraFailure.message("Ganancia óptica fuera de rango.") }
-            result.append(Self(top:u(s),left:u(s+4),bottom:u(s+8),right:u(s+12),rowPitch:u(s+24),colPitch:u(s+28),rows:rows,cols:cols,spacingY:sy,spacingX:sx,originY:oy,originX:ox,gains:values));offset=s+length
+            result.append(Self(top:u(s),left:u(s+4),bottom:u(s+8),right:u(s+12),rowPitch:u(s+24),colPitch:u(s+28),rows:rows,cols:cols,spacingY:sy,spacingX:sx,originY:oy,originX:ox,gains:values,flags:UInt32(u(offset+8))));offset=s+length
         }
         return result
     }
@@ -38,6 +39,35 @@ struct BayerGainMap {
         let upper:Float=a*(1-fx)+b*fx,lower:Float=c*(1-fx)+d*fx
         return upper*(1-fy)+lower*fy
     }
+    /// Affine reparameterization of the original bilinear map. Keep its grid
+    /// samples intact; let the floating-point RAW decoder apply gain after the
+    /// 16-bit mosaic is read, preserving corner highlight headroom.
+    func transformed(_ plan:SuperResolutionPlan)->Data? {
+        let w=plan.width*2,h=plan.height*2,cropX=plan.originX*2,cropY=plan.originY*2
+        let cw=Double(w)/plan.scaleX,ch=Double(h)/plan.scaleY
+        func first(_ coordinate:Double,_ scale:Double,_ crop:Double,_ phase:Int,_ pitch:Int,_ limit:Int)->Int {
+            let edge:Double=(coordinate-crop)*scale-0.5
+            var value:Int=max(0,min(limit,Int(ceil(edge))))
+            if pitch==2 && value%2 != phase { value+=1 };return min(limit,value)
+        }
+        let l=first(Double(left),plan.scaleX,cropX,left%2,colPitch,w)
+        let t=first(Double(top),plan.scaleY,cropY,top%2,rowPitch,h)
+        let r=max(0,min(w,Int(ceil((Double(right)-cropX)*plan.scaleX-0.5))))
+        let b=max(0,min(h,Int(ceil((Double(bottom)-cropY)*plan.scaleY-0.5))))
+        guard l<r,t<b else { return nil }
+        func be32(_ value:UInt32)->Data { var x=value.bigEndian;return withUnsafeBytes(of:&x){Data($0)} }
+        func be64(_ value:Double)->Data { var x=value.bitPattern.bigEndian;return withUnsafeBytes(of:&x){Data($0)} }
+        let fields:[UInt32]=[UInt32(t),UInt32(l),UInt32(b),UInt32(r),0,1,UInt32(rowPitch),UInt32(colPitch),UInt32(rows),UInt32(cols)]
+        var payload=fields.reduce(Data()){$0+be32($1)}
+        payload+=be64(spacingY*Double(plan.sensorHeight)/ch)
+        payload+=be64(spacingX*Double(plan.sensorWidth)/cw)
+        payload+=be64((originY*Double(plan.sensorHeight)-cropY)/ch)
+        payload+=be64((originX*Double(plan.sensorWidth)-cropX)/cw)
+        payload+=be32(1)
+        for gain in gains { payload+=be32(gain.bitPattern) }
+        return be32(9)+be32(0x01030000)+be32(flags)+be32(UInt32(payload.count))+payload
+    }
+
 }
 struct SuperResolutionPlan {
     let width:Int,height:Int,sensorWidth:Int,sensorHeight:Int
@@ -55,18 +85,19 @@ struct SuperResolutionPlan {
         result.vignette=try DNGVignette.remap(frame.calibration.opcodeList3,plan:result,geometry:frame.calibration.geometry)
         return result
     }
-    func source(x:Int,y:Int,phase:Int)->(Double,Double) {
-        let px=Double(phase%2)*0.5+0.25,py=Double(phase/2)*0.5+0.25
-        return (originX+(Double(x)+px)/scaleX-px,originY+(Double(y)+py)/scaleY-py)
-    }
-    func gain(x:Int,y:Int,phase:Int)->Float {
-        let (qx,qy)=source(x:x,y:y,phase:phase)
-        return maps.reduce(Float(1)) { $0*$1.gain(x:qx*2+Double(phase%2)+0.5,y:qy*2+Double(phase/2)+0.5,phase:phase,sensorWidth:sensorWidth,sensorHeight:sensorHeight) }
-    }
     func calibration(_ original:BayerCalibration)->BayerCalibration {
-        var c=original;c.geometry=nil;c.opcodeList2=nil;c.opcodeList3=vignette
-        // GainMap is applied during mosaic packing in original sensor axes.
-        // Do not export an opcode whose geometry no longer matches the raster.
+        var c=original
+        c.geometry=DNGSensorGeometry(width:width*2,height:height*2,activeArea:[0,0,UInt32(height*2),UInt32(width*2)],cropOrigin:[0,0],cropSize:[Double(width*2),Double(height*2)])
+        let operations=maps.compactMap{$0.transformed(self)}
+        if operations.isEmpty { c.opcodeList2=nil }
+        else {
+            var count=UInt32(operations.count).bigEndian
+            var data:Data=withUnsafeBytes(of:&count){Data($0)}
+            for operation in operations { data.append(operation) };c.opcodeList2=data
+        }
+        c.opcodeList3=vignette
+        // Both opcode lists now describe the reconstructed raster, not the
+        // original full sensor. Gains remain in the developer's float domain.
         return c
     }
 }

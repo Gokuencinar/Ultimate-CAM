@@ -263,7 +263,7 @@ final class MetalBurstProcessor {
         }
         let mosaic=reconstruction == nil ? work.mean:work.srMeans[work.srSlot]
         let calibration=reconstruction?.calibration(first.calibration) ?? first.calibration
-        return (try FusedDNG.encode(quads:download(mosaic,cancellation:cancellation),width:mosaic.width,height:mosaic.height,calibration:calibration,noiseProfile:first.noiseProfile,zoom:reconstruction == nil ? first.zoom:1,capture:DNGCaptureInfo.read(reference:referenceJPEG,exposure:first.exposure),reconstruction:reconstruction),accepted)
+        return (try FusedDNG.encode(quads:download(mosaic,cancellation:cancellation),width:mosaic.width,height:mosaic.height,calibration:calibration,noiseProfile:first.noiseProfile,zoom:reconstruction == nil ? first.zoom:1,capture:DNGCaptureInfo.read(reference:referenceJPEG,exposure:first.exposure)),accepted)
         }
         // Fusion textures are released before full-resolution demosaicing/tone.
         guard let decoder=CIRAWFilter(imageData:fused.dng,identifierHint:"com.adobe.raw-image") else { throw CameraFailure.message("No se pudo revelar el mosaico fusionado.") }

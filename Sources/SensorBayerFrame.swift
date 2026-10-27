@@ -394,7 +394,7 @@ enum BayerQuadPacking {
 /// Calibrated uncompressed DNG for CIRAWFilter and optional computational RAW
 /// export. The original camera DNG remains the default export choice.
 enum FusedDNG {
-    static func encode(quads:Data,width:Int,height:Int,calibration c:BayerCalibration,noiseProfile:[Double]=[],zoom:Double=1,capture:DNGCaptureInfo?=nil,reconstruction:SuperResolutionPlan?=nil) throws -> Data {
+    static func encode(quads:Data,width:Int,height:Int,calibration c:BayerCalibration,noiseProfile:[Double]=[],zoom:Double=1,capture:DNGCaptureInfo?=nil) throws -> Data {
         guard width>0,height>0,width<=2048,height<=2048,quads.count==width*height*8,c.pattern.count==4,
               c.matrix.count==9,c.matrix.allSatisfy({$0.isFinite && abs($0)<32}),
               c.neutral.count==3,c.neutral.allSatisfy({$0.isFinite && $0>0 && $0<32}),
@@ -524,8 +524,8 @@ enum FusedDNG {
         try quads.withUnsafeBytes { bytes in
             guard let address=bytes.baseAddress,Int(bitPattern:address)%2==0 else { throw CameraFailure.message("Cuartetos RAW desalineados.") }
             let input=UnsafeBufferPointer(start:address.assumingMemoryBound(to:UInt16.self),count:width*height*4)
-            @inline(__always) func encoded(_ bits:UInt16,_ gain:Float=1) throws -> UInt16 {
-                let value=Float(Float16(bitPattern:UInt16(littleEndian:bits)))*gain
+            @inline(__always) func encoded(_ bits:UInt16) throws -> UInt16 {
+                let value=Float(Float16(bitPattern:UInt16(littleEndian:bits)))
                 guard value.isFinite else { throw CameraFailure.message("La fusión RAW devolvió un valor no finito.") }
                 let sample=min(Float(65535),max(0,(value*57343+4096).rounded()))
                 return UInt16(sample).littleEndian
@@ -535,8 +535,8 @@ enum FusedDNG {
                 let row=input.baseAddress!.advanced(by:y*width*4)
                 for x in 0..<width {
                     let q=row.advanced(by:x*4),pixel=x*2
-                    top[pixel]=try encoded(q[0],reconstruction?.gain(x:x,y:y,phase:0) ?? 1);top[pixel+1]=try encoded(q[1],reconstruction?.gain(x:x,y:y,phase:1) ?? 1)
-                    bottom[pixel]=try encoded(q[2],reconstruction?.gain(x:x,y:y,phase:2) ?? 1);bottom[pixel+1]=try encoded(q[3],reconstruction?.gain(x:x,y:y,phase:3) ?? 1)
+                    top[pixel]=try encoded(q[0]);top[pixel+1]=try encoded(q[1])
+                    bottom[pixel]=try encoded(q[2]);bottom[pixel+1]=try encoded(q[3])
                 }
             }
         }
