@@ -76,6 +76,7 @@ import Darwin
             do { _=try DNGMetadata.validatedOpcodes(Data([0,0,0,1])) } catch { rejectedOpcodes=true }
             try require(rejectedOpcodes,"Truncated lens shading metadata accepted")
             print("Core format: native 12MP packing")
+            try require(BayerQuadPacking.phaseIndices(originX:0,originY:0,anchorX:1,anchorY:1)==[3,2,1,0],"Black pattern origin did not follow ActiveArea")
             var sensor=[UInt16](repeating:1000,count:4032*3024)
             sensor[0]=1100;sensor[1]=1200;sensor[4032]=1300;sensor[4033]=1400
             let native=try sensor.withUnsafeBufferPointer { try BayerQuadPacking.pack($0,rowElements:4032,originX:0,originY:0,cropWidth:4032,cropHeight:3024,step:1,black:[100,100,100,100],white:16000) }

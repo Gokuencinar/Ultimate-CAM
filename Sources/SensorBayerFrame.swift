@@ -110,7 +110,8 @@ struct SensorBayerFrame {
         defer { CVPixelBufferUnlockBaseAddress(pixel,.readOnly) }
         let rowBytes=CVPixelBufferGetBytesPerRow(pixel)
         guard let base=CVPixelBufferGetBaseAddress(pixel),rowBytes>=w*2,rowBytes%2==0,Int(bitPattern:base)%2==0 else { throw CameraFailure.message("Stride o alineación Bayer inválidos.") }
-        let levels=phaseMap.map { Float(black[black.count==1 ? 0:$0]) }
+        let blackPhases=BayerQuadPacking.phaseIndices(originX:offsetX,originY:offsetY,anchorX:left,anchorY:top)
+        let levels=blackPhases.map { Float(black[black.count==1 ? 0:$0]) }
         let samples=UnsafeBufferPointer(start:base.assumingMemoryBound(to:UInt16.self),count:rowBytes/2*h)
         let packed=try BayerQuadPacking.pack(samples,rowElements:rowBytes/2,originX:offsetX,originY:offsetY,
             cropWidth:packedWidth,cropHeight:packedHeight,step:step,black:levels,white:Float(white))
@@ -176,6 +177,12 @@ enum SensorNoiseModel {
 }
 
 enum BayerQuadPacking {
+    static func phaseIndices(originX:Int,originY:Int,anchorX:Int=0,anchorY:Int=0)->[Int] {
+        (0..<4).map { phase in
+            let row=((originY+phase/2-anchorY)%2+2)%2,col=((originX+phase%2-anchorX)%2+2)%2
+            return row*2+col
+        }
+    }
     static func pack(_ input:UnsafeBufferPointer<UInt16>,rowElements:Int,originX:Int,originY:Int,
                      cropWidth:Int,cropHeight:Int,step:Int,black:[Float],white:Float) throws -> Data {
         guard rowElements>0,originX>=0,originY>=0,cropWidth>=4,cropHeight>=4,
@@ -254,7 +261,10 @@ enum FusedDNG {
         add(258,3,1,u16(16));add(259,3,1,u16(1));add(262,3,1,u16(32803))
         add(273,4,1,u32(0));add(274,3,1,u16(UInt16(c.orientation)))
         add(277,3,1,u16(1));add(278,4,1,u32(UInt32(h)));add(279,4,1,u32(UInt32(w*h*2)))
-        add(284,3,1,u16(1));add(33421,3,2,u16(2)+u16(2));add(33422,1,4,Data(c.pattern))
+        let active=c.geometry?.activeArea ?? [0,0,UInt32(h),UInt32(w)]
+        guard active.count==4 else { throw CameraFailure.message("Área activa DNG inválida.") }
+        let dngPattern=BayerQuadPacking.phaseIndices(originX:Int(active[1]),originY:Int(active[0])).map { c.pattern[$0] }
+        add(284,3,1,u16(1));add(33421,3,2,u16(2)+u16(2));add(33422,1,4,Data(dngPattern))
         add(50706,1,4,Data([1,4,0,0]));add(50707,1,4,Data([1,3,0,0]))
         let model=Data("UltimateCAM working mosaic\0".utf8);add(50708,2,UInt32(model.count),model)
         add(50710,1,3,Data([0,1,2]));add(50711,3,1,u16(1))

@@ -5,7 +5,7 @@ import UIKit
 import UniformTypeIdentifiers
 import PhotosUI
 
-private enum ControlPanel: String, CaseIterable, Identifiable {
+private enum ControlPanel: String, CaseIterable, Identifiable, Hashable {
     case capture = "Captura", manual = "Manual", processing = "Procesado", color = "Color", profiles = "Perfiles"
     var id: String { rawValue }
 }
@@ -76,6 +76,7 @@ struct CameraView: View {
     @State private var showQuickControls = false
     @State private var colorPanel = ColorPanel.basic
     @State private var panel: ControlPanel = ProcessInfo.processInfo.arguments.contains("-processing-controls") ? .processing : .capture
+    @State private var settingsPath=[ControlPanel]()
     @State private var bias: Double = 0
     @State private var manualWB = false
     @State private var temperature: Double = 5000
@@ -185,6 +186,7 @@ struct CameraView: View {
         .onChange(of: stack) { _, value in if value { rawEnabled = false; flash = .off } }
         .onChange(of: rawEnabled) { _, value in if value { flash = .off } }
         .sheet(isPresented: $showControls, onDismiss: {
+            settingsPath=[]
             if pendingPhotoImport { pendingPhotoImport = false; showPhotoPicker = true }
             else if pendingNativeNight { pendingNativeNight = false; nativeNight.open(camera:camera) }
         }) { settings }
@@ -345,7 +347,7 @@ struct CameraView: View {
         VStack(spacing: 10) {
             if videoMode { videoCaptureControls } else {
             HStack(spacing:12) {
-                Button { panel = .profiles; showControls = true } label: { Image(systemName:"person.crop.square").frame(width:44,height:44) }
+                Button { settingsPath=[.profiles];showControls = true } label: { Image(systemName:"person.crop.square").frame(width:44,height:44) }
                     .accessibilityLabel("Perfiles de lente")
                 Spacer(minLength:0)
                 HStack(spacing:4) {
@@ -358,7 +360,7 @@ struct CameraView: View {
                     }
                 }.padding(4).background(.black.opacity(0.6),in:Capsule())
                 Spacer(minLength:0)
-                Button { panel = .color; showControls = true } label: { Image(systemName:"cube.transparent").frame(width:44,height:44) }
+                Button { settingsPath=[.color];showControls = true } label: { Image(systemName:"cube.transparent").frame(width:44,height:44) }
                     .accessibilityLabel("LUT y color")
             }.disabled(!controlsEnabled)
             HStack {
@@ -532,8 +534,15 @@ struct CameraView: View {
     }
 
     private var settings: some View {
-        NavigationStack {
+        NavigationStack(path:$settingsPath) {
             settingsHome
+            .navigationDestination(for:ControlPanel.self) { item in
+                switch item {
+                case .color:cleanSettingsPage("Color y estilo") { colorSettings }
+                case .profiles:cleanSettingsPage("Perfiles") { profileSettings }
+                default:advancedSettings
+                }
+            }
             .navigationTitle("Ajustes").navigationBarTitleDisplayMode(.inline)
             .toolbar { ToolbarItem(placement:.confirmationAction) { Button("Listo") { showControls=false }.disabled(importingDocument) } }
             .tint(CameraPalette.accent)
