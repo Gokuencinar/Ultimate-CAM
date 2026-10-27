@@ -111,6 +111,21 @@ struct CameraView: View {
     @State private var focusPosition: Double = 0.5
     private var zoom: Double { camera.zoomFactor }
     private var lens: CameraLens { camera.selectedLens }
+    private var rawAvailable:Bool {
+        #if DEBUG && targetEnvironment(simulator)
+        // UI-only capability fixture. The actual model/session remains unable
+        // to capture RAW on the simulator; this code is absent on the device.
+        if ProcessInfo.processInfo.arguments.contains("-ui-test-raw-support") { return true }
+        #endif
+        return camera.supportsRAW
+    }
+    private var captureTitle:String {
+        if options.hdrBracketing { return options.hdrMetalRAW ? "HDR · RAW Metal":"HDR · 3 exposiciones" }
+        if options.nightStatic { return options.nightMetalRAW ? "Noche · RAW Metal":(options.nightRAW ? "Noche · RAW":"Noche · JPEG") }
+        if stack { return "Pila de \(stackCount)" }
+        if options.portraitAmount>0 { return "Retrato · personas" }
+        return rawEnabled ? "RAW + JPEG":"Cámara"
+    }
     private var movieBusy:Bool { [.recording,.finishing,.saving].contains(movie.phase) }
     private var controlsEnabled: Bool { !camera.busy && !movieBusy && !loadingPhoto && !nativeNight.opening && !openingVideo && countdown == 0 }
     private var intrinsicMetalFusion:Bool { (options.nightStatic && options.nightMetalRAW) || (options.hdrBracketing && options.hdrMetalRAW) }
@@ -232,8 +247,7 @@ struct CameraView: View {
                     .background(.black.opacity(0.55),in:Circle())
             }.accessibilityLabel("Ajustes rápidos").accessibilityIdentifier("camera.quickSettings")
             Spacer(minLength:0)
-            Text(options.hdrBracketing ? "HDR · 3 exposiciones" : (options.nightStatic ? "Noche · \((options.nightRAW && camera.supportsRAW) ? "RAW" : "JPEG")" :
-                (stack ? "Pila de \(stackCount)" : (options.portraitAmount>0 ? "Retrato · personas" : (rawEnabled ? "RAW + JPEG" : "Cámara")))))
+            Text(captureTitle)
                 .font(.system(size:12,weight:.medium)).foregroundStyle(.white.opacity(0.8))
             Spacer(minLength:0)
             Menu {
@@ -285,10 +299,14 @@ struct CameraView: View {
     }
 
     private var quickControls: some View {
+        VStack(spacing:8) {
         HStack(spacing: 8) {
-            quickButton(options.nightStatic ? ((options.nightRAW && camera.supportsRAW) ? "RAW*" : "JPEG") : (rawEnabled ? "RAW+" : "JPEG"),
-                        symbol: "square.stack.3d.up", selected: rawEnabled || (options.nightStatic && options.nightRAW && camera.supportsRAW)) { rawEnabled.toggle() }
-                .disabled(stack || !camera.supportsRAW)
+            quickButton(PhotoModePolicy.formatLabel(options,photoRAW:rawEnabled),symbol:"square.stack.3d.up",
+                        selected:options.nightStatic ? options.nightMetalRAW:(options.hdrBracketing ? options.hdrMetalRAW:rawEnabled)) {
+                let next=PhotoModePolicy.toggledRAW(options,photoRAW:rawEnabled,supportsRAW:rawAvailable)
+                options=next.options;rawEnabled=next.photoRAW
+            }.disabled(!rawAvailable || (stack && !options.nightStatic && !options.hdrBracketing))
+                .accessibilityIdentifier("camera.quickFormat").accessibilityValue(PhotoModePolicy.formatLabel(options,photoRAW:rawEnabled))
             Spacer()
             Menu {
                 ForEach(CameraFlash.allCases) { item in
@@ -307,6 +325,21 @@ struct CameraView: View {
             }
             quickButton("", symbol: "grid", selected: grid) { grid.toggle() }
         }
+        if !manualExposure { exposureCompensation }
+        }
+    }
+
+    private var exposureCompensation:some View {
+        HStack(spacing:10) {
+            Image(systemName:"sun.max.fill").foregroundStyle(CameraPalette.accent).accessibilityHidden(true)
+            Slider(value:$bias,in:-2...2,step:0.1).accessibilityLabel("Compensación de exposición")
+                .accessibilityIdentifier("camera.exposureBias")
+            Button { bias=0 } label: {
+                Text(String(format:"%+.1f EV",bias)).font(.system(size:12,weight:.semibold).monospacedDigit()).frame(minWidth:68,minHeight:40)
+            }.accessibilityLabel("Restablecer exposición").accessibilityIdentifier("camera.resetExposureBias")
+                .accessibilityValue(String(format:"%.1f",bias))
+        }.padding(.horizontal,12).background(.black.opacity(0.65),in:RoundedRectangle(cornerRadius:16))
+            .tint(CameraPalette.accent).disabled(!controlsEnabled)
     }
 
     private var focusInfo: some View {
@@ -409,7 +442,7 @@ struct CameraView: View {
             HStack(spacing:4) {
                 ScrollViewReader { proxy in ScrollView(.horizontal,showsIndicators:false) {
                     HStack(spacing:4) {
-                        modeButton("Noche",selected:options.nightStatic) { applyPreset("Noche estática") }.id("night")
+                        modeButton("Noche",selected:options.nightStatic) { applyPreset("Noche estática") }.accessibilityIdentifier("camera.mode.night").id("night")
                         modeButton("Cámara",selected:!stack && !options.nightStatic && !options.hdrBracketing && options.portraitAmount==0) { options.nightStatic=false;options.hdrBracketing=false;options.portraitAmount=0;stack=false }.accessibilityIdentifier("camera.mode.photo").id("photo")
                         modeButton("Retrato",selected:!stack && !options.hdrBracketing && options.portraitAmount>0) {
                             options.nightStatic=false;options.hdrBracketing=false;options.portraitAmount=0.5;stack=false
@@ -591,7 +624,7 @@ struct CameraView: View {
                 Picker(selection:$options.singlePhotoQuality) { ForEach(SinglePhotoQuality.allCases) { Text($0.label).tag($0) } }
                     label: { Label("Procesado",systemImage:"sparkles") }.disabled(videoMode || stack || rawEnabled || options.zeroShutterLagFusion)
                 Toggle(isOn:Binding(get:{rawEnabled},set:{rawEnabled=$0;if $0 { options.zeroShutterLagFusion=false }})) { Label("Formato RAW",systemImage:"camera.aperture") }
-                    .disabled(videoMode || !camera.supportsRAW || stack)
+                    .disabled(videoMode || !rawAvailable || stack)
                 Toggle(isOn:$options.preserveHDR) { Label("Conservar HDR",systemImage:"sun.max") }.accessibilityIdentifier("output.preserveHDR")
                 NavigationLink { cleanSettingsPage("Modo Noche") { nightOptions } } label: { Label("Modo Noche",systemImage:"moon.stars") }
                     .accessibilityIdentifier("settings.night")
@@ -625,8 +658,8 @@ struct CameraView: View {
                 .pickerStyle(.segmented)
             Toggle("Adaptar al movimiento",isOn:$options.nightMotionMetering)
             Toggle("RAW de alta calidad · beta",isOn:Binding(get:{options.nightMetalRAW},set:{ value in
-                options.nightMetalRAW=value;if value { options.nightRAW=true;options.nightSpectralFusion=false }
-            })).disabled(!camera.supportsRAW && !options.nightMetalRAW)
+                options.nightMetalRAW=value;options.nightRAW=value;if value { options.nightSpectralFusion=false }
+            })).disabled(!rawAvailable && !options.nightMetalRAW)
             Toggle("Guardar DNG fusionado",isOn:$options.saveFusedDNG).disabled(!options.nightMetalRAW)
                 .accessibilityIdentifier("night.saveFusedDNG")
             Button("Usar Noche de Apple") { pendingNativeNight=true;showControls=false }
@@ -722,7 +755,7 @@ struct CameraView: View {
             }
             if options.hdrBracketing {
                 Section("HDR por horquillado") {
-                    Toggle("HDR Bayer con Metal",isOn:$options.hdrMetalRAW).disabled(!camera.supportsRAW && !options.hdrMetalRAW).accessibilityIdentifier("hdr.metalRAW")
+                    Toggle("HDR Bayer con Metal",isOn:$options.hdrMetalRAW).disabled(!rawAvailable && !options.hdrMetalRAW).accessibilityIdentifier("hdr.metalRAW")
                     Toggle("Guardar DNG fusionado",isOn:$options.saveFusedDNG).disabled(!options.hdrMetalRAW)
                     if options.hdrMetalRAW { Text("HDR RAW de alta calidad en fase beta.").font(.footnote).foregroundStyle(.secondary) }
                     Picker("Separación respecto a la referencia",selection:$options.hdrSpan) { Text("±1 EV").tag(1.0);Text("±2 EV").tag(2.0);Text("±3 EV").tag(3.0) }
@@ -925,13 +958,13 @@ struct CameraView: View {
         rawEnabled = false; tint = 0; flash = .off
     }
     private func activateHDR() {
-        options=PhotoModePolicy.hdr(from:options,supportsRAW:camera.supportsRAW)
+        options=PhotoModePolicy.hdr(from:options,supportsRAW:rawAvailable)
         stack=true;rawEnabled=false;flash = .off;manualExposure=false
         camera.setManualExposure(iso:nil)
     }
     private func applyPreset(_ name: String) {
         let selected:PhotoProcessingPreset=name == "Noche estática" ? .night:(name == "Detalle" ? .detail:.natural)
-        options=PhotoModePolicy.preset(selected,from:options,supportsRAW:camera.supportsRAW)
+        options=PhotoModePolicy.preset(selected,from:options,supportsRAW:rawAvailable)
         if options.nightStatic {
             stack = true; rawEnabled = false; flash = .off; stackCount = 9
             options.maximumDimension = 4096
