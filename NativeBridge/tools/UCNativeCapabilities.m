@@ -16,7 +16,7 @@ static NSString *SystemString(const char *key) {
 
 static BOOL Relevant(NSString *name) {
     NSString *lower = name.lowercaseString;
-    for (NSString *part in @[@"night", @"lowlight", @"low_light", @"capture", @"exposure", @"photo", @"fusion", @"bracket", @"init", @"viewdid", @"capabilit", @"duration"]) {
+    for (NSString *part in @[@"digitalflash", @"night", @"lowlight", @"low_light", @"capture", @"exposure", @"photo", @"fusion", @"bracket", @"init", @"viewdid", @"capabilit", @"duration"]) {
         if ([lower containsString:part]) return YES;
     }
     return NO;
@@ -45,8 +45,8 @@ static NSDictionary *Code(NSString *className, NSString *selector) {
 #else
     void *address = (void *)implementation;
 #endif
-    NSMutableData *data = [NSMutableData dataWithLength:1024]; vm_size_t read = 0;
-    kern_return_t status = vm_read_overwrite(mach_task_self(),(vm_address_t)address,1024,(vm_address_t)data.mutableBytes,&read);
+    NSMutableData *data = [NSMutableData dataWithLength:4096]; vm_size_t read = 0;
+    kern_return_t status = vm_read_overwrite(mach_task_self(),(vm_address_t)address,4096,(vm_address_t)data.mutableBytes,&read);
     data.length = status == KERN_SUCCESS ? (NSUInteger)read : 0;
     Dl_info image = {0}; dladdr(address,&image);
     NSMutableArray *calls = [NSMutableArray array];
@@ -110,11 +110,23 @@ int main(void) {
         for (NSString *name in @[@"AVCapturePhotoSettings",@"AVCapturePhotoInitiationSettings",@"AVCaptureMomentCaptureSettings",@"AVCaptureResolvedPhotoSettings",@"AVCapturePhotoOutput",@"AVCaptureDevice",@"CUCaptureController",@"CAMGraphConfiguration",@"CAMCaptureCapabilities",@"CAMCaptureController",@"CAMCaptureEngine",@"CAMViewfinderViewController",@"CAMCaptureRequest",@"CAMStillImageCaptureRequest",@"CAMMutableStillImageCaptureRequest",@"CAMStillImageCaptureResolvedSettings",@"CAMStillImageCaptureResponse",@"CAMLowLightSlider",@"CAMLowLightStatusIndicator",@"CAMNightModeSlider",@"CAMNightModeStatusIndicator"]) {
             [classes addObject:Inspect(name)];
         }
+        // Locate the conversion owner from its observed selector, not a guessed class name.
+        unsigned classCount=0;Class *loaded=objc_copyClassList(&classCount);
+        for (unsigned i=0;i<classCount;++i) {
+            NSString *name=@(class_getName(loaded[i]));
+            if ([name hasPrefix:@"CAM"] && class_getClassMethod(loaded[i],sel_registerName("captureDigitalFlashModeForLowLightMode:")))
+                [classes addObject:Inspect(name)];
+        }
+        free(loaded);
         NSMutableArray *code = [NSMutableArray array];
         for (NSString *selector in @[@"_handleUserChangedToNightMode:",@"_handleNightModeIndicator",@"_isExpectedLowLightDurationCancelable",@"_lowLightModeForMode:captureMode:device:isBurst:",@"_resolvedLowLightMode",@"_desiredLowLightControlMode",@"viewDidAppear:"]) {
             [code addObject:Code(@"CAMViewfinderViewController",selector)];
         }
         [code addObject:Code(@"CAMStillImageCaptureRequest",@"_configurePhotoSettings:shouldIgnoreInitiationSettingsProperties:context:")];
+        for (NSArray *pair in @[@[@"AVCapturePhotoSettings",@"setDigitalFlashMode:"],
+            @[@"AVCapturePhotoSettings",@"digitalFlashMode"],@[@"CUCaptureController",@"changeToLowLightMode:"],
+            @[@"AVCapturePhotoOutput",@"_figCaptureIrisStillImageSettingsForAVCapturePhotoSettings:captureRequestIdentifier:delegate:connections:"]])
+            [code addObject:Code(pair[0],pair[1])];
         NSDictionary *report = @{@"schema":@2,@"hardware":SystemString("hw.machine"),@"system_build":SystemString("kern.osversion"),@"system_version":NSProcessInfo.processInfo.operatingSystemVersionString,@"loads":loads,@"classes":classes,@"code_inspection":code,@"camera_objects_instantiated":@0,@"private_selectors_invoked":@0,@"capture_requests":@0};
         NSError *error = nil;
         NSData *json = [NSJSONSerialization dataWithJSONObject:report options:NSJSONWritingSortedKeys error:&error];
