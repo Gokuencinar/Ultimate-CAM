@@ -104,7 +104,86 @@ import Darwin
             try require(SensorNoiseModel.validProfile([Double.nan,0])==nil,"Invalid noise profile accepted")
             let pair=SensorNoiseModel.pair(reference:FrameExposure(seconds:0.01,iso:100),referenceProfile:profile,sample:FrameExposure(seconds:0.04,iso:100),sampleProfile:profile,scale:0.25)
             try require(abs(pair.x-0.00125)<1e-8 && abs(pair.y-0.00002125)<1e-9,"Exposure-normalized noise variance is wrong")
+            try checkLuckyImaging(calibration:calibration)
+            try checkModeRecipes()
+            try checkNightMetering()
             print("Computational source checks passed; no capture session, app launch or GPU execution.")
         } catch { fputs("\(error)\n",stderr);exit(1) }
+    }
+
+    static func checkLuckyImaging(calibration:BayerCalibration) throws {
+        let width=256,height=192,qw=width/2,qh=height/2
+        func signal(_ x:Int,_ y:Int)->Double { 0.18+0.06*sin(Double(x)*Double.pi/4)+0.03*sin(Double(y)*Double.pi/5) }
+        func fixture(blurred:Bool)->Data {
+            var pixels=[UInt16](repeating:0,count:width*height)
+            for y in 0..<height { for x in 0..<width {
+                let qx=x/2,qy=y/2,phase=(y%2)*2+x%2
+                var value=signal(qx,qy)
+                if blurred {
+                    value=0
+                    for dy in -3...3 { for dx in -3...3 { value+=signal(qx+dx,qy+dy)/49 } }
+                }
+                // Non-green phases have unrelated fine texture. A green-only
+                // metric must rank true green detail rather than that texture.
+                if phase==0 || phase==3 { value=0.2+(x%4==0 ? 0.08:-0.08) }
+                pixels[y*width+x]=UInt16((100+value*15900).rounded())
+            } }
+            return pixels.withUnsafeBufferPointer {
+                try! BayerQuadPacking.pack($0,rowElements:width,originX:0,originY:0,cropWidth:width,cropHeight:height,step:1,black:[100,100,100,100],white:16000)
+            }
+        }
+        let sharp=fixture(blurred:false),blurred=fixture(blurred:true)
+        let sharpness=BayerQuadPacking.sharpness(quads:sharp,width:qw,height:qh,pattern:calibration.pattern)
+        let softness=BayerQuadPacking.sharpness(quads:blurred,width:qw,height:qh,pattern:calibration.pattern)
+        try require(sharpness>softness*2 && softness>=0,"Green-phase metric cannot distinguish sharp from blurred Bayer")
+        let exposure=FrameExposure(seconds:0.01,iso:100)
+        var frames=[
+            SensorBayerFrame(width:qw,height:qh,quads:blurred,calibration:calibration,exposure:exposure,timestamp:1,sharpness:softness),
+            SensorBayerFrame(width:qw,height:qh,quads:sharp,calibration:calibration,exposure:exposure,timestamp:2,sharpness:sharpness),
+            SensorBayerFrame(width:qw,height:qh,quads:sharp,calibration:calibration,exposure:FrameExposure(seconds:0.01,iso:3200),timestamp:3,sharpness:sharpness*10)
+        ]
+        try require(SensorBayerFrame.referenceIndex(in:frames,hdr:false)==1,"Lucky imaging selected a blurred frame or exposure outlier")
+        try require(SensorBayerFrame.referenceIndex(in:frames,hdr:true)==0,"HDR stopped using the short-exposure reference")
+        frames[1].sharpness = .nan
+        try require(SensorBayerFrame.referenceIndex(in:frames,hdr:false)==0,"Non-finite sharpness influenced reference selection")
+        print("Lucky imaging: green sharp/blur scores",sharpness,softness)
+    }
+
+    static func checkModeRecipes() throws {
+        var original=ProcessingOptions()
+        original.nightMetalRAW=true;original.nightRAW=true;original.hdrMetalRAW=true
+        original.lutID="user-look";original.lutIntensity=0.6;original.saturation=1.2;original.postExposure=0.3
+        original.color.hsl[0].saturation=0.2
+        let natural=PhotoModePolicy.preset(.natural,from:original,supportsRAW:true)
+        let night=PhotoModePolicy.preset(.night,from:natural,supportsRAW:true)
+        let hdr=PhotoModePolicy.hdr(from:night,supportsRAW:true)
+        let nightAgain=PhotoModePolicy.preset(.night,from:hdr,supportsRAW:true)
+        for recipe in [natural,night,hdr,nightAgain] {
+            _=try recipe.validated()
+            try require(recipe.nightMetalRAW && recipe.nightRAW && recipe.hdrMetalRAW,"Mode transition reset Metal RAW preferences")
+            try require(recipe.lutID==original.lutID && recipe.lutIntensity==original.lutIntensity && recipe.color==original.color &&
+                        recipe.saturation==original.saturation && recipe.postExposure==original.postExposure,"Mode transition reset the active color/LUT profile")
+        }
+        try require(night.nightStatic && !night.hdrBracketing && hdr.hdrBracketing && !hdr.nightStatic,"Capture mode flags overlap")
+        let jpeg=PhotoModePolicy.preset(.night,from:original,supportsRAW:false)
+        try require(!jpeg.nightMetalRAW && !jpeg.nightRAW && !jpeg.hdrMetalRAW,"Unsupported lens requested RAW")
+        let disabled=PhotoModePolicy.preset(.night,from:ProcessingOptions(),supportsRAW:true)
+        try require(!disabled.nightMetalRAW && !disabled.hdrMetalRAW,"Explicitly disabled Metal preference was overridden")
+        print("Photo mode recipe checks passed")
+    }
+
+    static func checkNightMetering() throws {
+        let subject=[Double](repeating:0.18,count:400)
+        let exposed=try NightTonePlan.make(luminances:subject,maximumGain:32)
+        let sky=try NightTonePlan.make(luminances:[Double](repeating:0.00001,count:600)+subject,maximumGain:32)
+        try require(sky.gain<2 && abs(sky.gain-exposed.gain)<0.1,"Black sky drove exposure gain despite exposed subjects")
+        let dark=try NightTonePlan.make(luminances:[Double](repeating:0.004,count:1000),maximumGain:32)
+        try require(dark.gain>8 && dark.gain<=32,"Dim scene no longer receives bounded exposure lift")
+        let black=try NightTonePlan.make(luminances:[Double](repeating:0,count:1000),maximumGain:32)
+        try require(black.gain==1,"Empty black scene was amplified")
+        var invalid=false
+        do { _=try NightTonePlan.make(luminances:[.nan],maximumGain:32) } catch { invalid=true }
+        try require(invalid,"Invalid tonal measurement accepted")
+        print("Night metering checks passed")
     }
 }
