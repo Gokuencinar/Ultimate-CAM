@@ -6,7 +6,7 @@ import UniformTypeIdentifiers
 import PhotosUI
 
 private enum ControlPanel: String, CaseIterable, Identifiable, Hashable {
-    case capture = "Fusión", manual = "Manual", processing = "Detalle", color = "Color", profiles = "Perfiles"
+    case capture = "Fusión", manual = "Manual", processing = "Detalle", color = "Color", profiles = "Perfiles", night = "Noche"
     var id: String { rawValue }
     static let advanced:[ControlPanel] = [.manual,.capture,.processing]
 }
@@ -638,6 +638,7 @@ struct CameraView: View {
                 switch item {
                 case .color:cleanSettingsPage("Color y estilo") { colorSettings }
                 case .profiles:cleanSettingsPage("Perfiles") { profileSettings }
+                case .night:cleanSettingsPage("Modo Noche") { nightOptions }
                 default:advancedSettings
                 }
             }
@@ -659,7 +660,7 @@ struct CameraView: View {
                 Toggle(isOn:Binding(get:{rawEnabled},set:{rawEnabled=$0;if $0 { options.zeroShutterLagFusion=false }})) { Label("Formato RAW",systemImage:"camera.aperture") }
                     .disabled(videoMode || !rawAvailable || stack)
                 Toggle(isOn:$options.preserveHDR) { Label("Conservar HDR",systemImage:"sun.max") }.accessibilityIdentifier("output.preserveHDR")
-                NavigationLink { cleanSettingsPage("Modo Noche") { nightOptions } } label: { Label("Modo Noche",systemImage:"moon.stars") }
+                NavigationLink(value:ControlPanel.night) { Label("Modo Noche",systemImage:"moon.stars") }
                     .accessibilityIdentifier("settings.night")
                 Picker("Temporizador",selection:$timerSeconds) { Text("No").tag(0);Text("3 s").tag(3);Text("10 s").tag(10) }
             } header: { Label("Calidad e imagen",systemImage:"camera") }.disabled(videoMode)
@@ -674,7 +675,7 @@ struct CameraView: View {
                 Toggle(isOn:$grid) { Label("Cuadrícula",systemImage:"grid") }
                 Toggle(isOn:$mirrorSelfies) { Label("Selfies reflejadas",systemImage:"arrow.left.and.right.righttriangle.left.righttriangle.right") }.accessibilityIdentifier("capture.mirrorSelfies")
                 Toggle(isOn:$hardwareButtons) { Label("Botones de volumen",systemImage:"speaker.wave.2") }.accessibilityIdentifier("capture.hardwareButtons")
-                NavigationLink { advancedSettings } label: { Label("Avanzado",systemImage:"slider.horizontal.3") }.accessibilityIdentifier("settings.advanced").disabled(videoMode)
+                NavigationLink(value:ControlPanel.capture) { Label("Avanzado",systemImage:"slider.horizontal.3") }.accessibilityIdentifier("settings.advanced").disabled(videoMode)
             } header: { Label("Controles",systemImage:"hand.tap") }
         }.scrollContentBackground(.hidden).listRowSpacing(6).listStyle(.insetGrouped)
             .environment(\.defaultMinListRowHeight,52)
@@ -720,7 +721,7 @@ struct CameraView: View {
                     case .capture: captureSettings
                     case .manual: manualSettings
                     case .processing: processingSettings
-                    case .color,.profiles: EmptyView()
+                    case .color,.profiles,.night: EmptyView()
                     }
                 }.disabled(camera.busy || countdown > 0 || importingDocument)
                     .scrollContentBackground(.hidden).background(CameraPalette.surface)

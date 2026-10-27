@@ -54,7 +54,7 @@ struct DNGMetadata {
             return value
         }
         guard try integer(2,2)==42 else { throw CameraFailure.message("Se requiere DNG TIFF clásico.") }
-        let wanted=Set(namedTags.values).union([UInt16(51009),33434,34855,33437,37386,42036])
+        let wanted=Set(namedTags.values).union([UInt16(51009),51022,33434,34855,33437,37386,42036])
         var pending=[Int(try integer(4,4))],visited=Set<Int>(),global=[UInt16:Field](),raw=[UInt16:Field]()
         while let offset=pending.popLast(),offset>0 {
             guard visited.count<16,visited.insert(offset).inserted else { throw CameraFailure.message("Directorios DNG cíclicos o excesivos.") }

@@ -43,14 +43,17 @@ struct SuperResolutionPlan {
     let width:Int,height:Int,sensorWidth:Int,sensorHeight:Int
     let originX:Double,originY:Double,scaleX:Double,scaleY:Double
     let maps:[BayerGainMap]
+    var vignette:Data?=nil
     static func make(_ frame:SensorBayerFrame,count:Int) throws -> Self? {
         guard frame.zoom>=1.25,count>=4 else { return nil }
         let crop=try BayerZoomCrop.geometry(width:frame.width*2,height:frame.height*2,original:frame.calibration.geometry,zoom:frame.zoom)
         let cw=crop.cropSize[0]/2,ch=crop.cropSize[1]/2,factor=min(frame.zoom,2)
         let w=min(2016,Int((cw*factor).rounded())),h=min(1512,Int((ch*factor).rounded()))
-        return Self(width:w,height:h,sensorWidth:frame.width*2,sensorHeight:frame.height*2,
+        var result=Self(width:w,height:h,sensorWidth:frame.width*2,sensorHeight:frame.height*2,
             originX:(Double(crop.activeArea[1])+crop.cropOrigin[0])/2,originY:(Double(crop.activeArea[0])+crop.cropOrigin[1])/2,
             scaleX:Double(w)/cw,scaleY:Double(h)/ch,maps:try BayerGainMap.read(frame.calibration.opcodeList2))
+        result.vignette=try DNGVignette.remap(frame.calibration.opcodeList3,plan:result,geometry:frame.calibration.geometry)
+        return result
     }
     func source(x:Int,y:Int,phase:Int)->(Double,Double) {
         let px=Double(phase%2)*0.5+0.25,py=Double(phase/2)*0.5+0.25
@@ -61,10 +64,45 @@ struct SuperResolutionPlan {
         return maps.reduce(Float(1)) { $0*$1.gain(x:qx*2+Double(phase%2)+0.5,y:qy*2+Double(phase/2)+0.5,phase:phase,sensorWidth:sensorWidth,sensorHeight:sensorHeight) }
     }
     func calibration(_ original:BayerCalibration)->BayerCalibration {
-        var c=original;c.geometry=nil;c.opcodeList2=nil
+        var c=original;c.geometry=nil;c.opcodeList2=nil;c.opcodeList3=vignette
         // GainMap is applied during mosaic packing in original sensor axes.
         // Do not export an opcode whose geometry no longer matches the raster.
         return c
+    }
+}
+
+/// Preserve Apple's post-demosaic radial shading in extended floating point.
+/// Rewriting the normalized polynomial avoids baking >1 gains into a 16-bit
+/// mosaic, where bright corners would clip before the RAW developer runs.
+enum DNGVignette {
+    static func remap(_ data:Data?,plan:SuperResolutionPlan,geometry:DNGSensorGeometry?) throws -> Data? {
+        guard let data else { return nil };_ = try DNGMetadata.validatedOpcodes(data)
+        guard abs(plan.scaleX/plan.scaleY-1)<0.001 else { throw CameraFailure.message("La corrección radial necesita una escala SR uniforme.") }
+        func u(_ o:Int)->Int { Int(data[o..<o+4].reduce(UInt32(0)){($0<<8)|UInt32($1)}) }
+        func d(_ o:Int)->Double { Double(bitPattern:data[o..<o+8].reduce(UInt64(0)){($0<<8)|UInt64($1)}) }
+        let area=geometry?.activeArea ?? [0,0,UInt32(plan.sensorHeight),UInt32(plan.sensorWidth)]
+        let ow=Double(area[3]-area[1]),oh=Double(area[2]-area[0])
+        let left=plan.originX*2-Double(area[1]),top=plan.originY*2-Double(area[0])
+        let cw=Double(plan.width)*2/plan.scaleX,ch=Double(plan.height)*2/plan.scaleY
+        var result=data,offset=4
+        for _ in 0..<u(0) {
+            let start=offset+16,length=u(offset+12)
+            guard u(offset)==3,length==56 else { throw CameraFailure.message("Super Res no puede reinterpretar esta corrección óptica.") }
+            var values:[Double]=(0..<7).map{d(start+$0*8)}
+            guard values.allSatisfy(\.isFinite),values.prefix(5).allSatisfy({abs($0)<1000}),(-1...2).contains(values[5]),(-1...2).contains(values[6]) else { throw CameraFailure.message("Corrección radial no válida.") }
+            let cx=values[5]*ow,cy=values[6]*oh
+            let radius=hypot(max(abs(cx),abs(ow-cx)),max(abs(cy),abs(oh-cy)))
+            let cropRadius=hypot(max(abs(cx-left),abs(left+cw-cx)),max(abs(cy-top),abs(top+ch-cy)))
+            guard radius>0,cropRadius>0 else { throw CameraFailure.message("Radio óptico no válido.") }
+            let ratio=cropRadius/radius
+            for index in 0..<5 { values[index]*=pow(ratio,Double((index+1)*2)) }
+            values[5]=(cx-left)/cw;values[6]=(cy-top)/ch
+            for index in values.indices {
+                var bits=values[index].bitPattern.bigEndian
+                withUnsafeBytes(of:&bits) { result.replaceSubrange(start+index*8..<start+(index+1)*8,with:$0) }
+            }
+            offset=start+length
+        };return result
     }
 }
 

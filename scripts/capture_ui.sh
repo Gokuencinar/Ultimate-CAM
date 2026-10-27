@@ -37,7 +37,7 @@ xcodebuild -project UltimateCAM.xcodeproj -scheme UltimateCAM-UI \
   CODE_SIGNING_ALLOWED=NO test > build/ui/interaction-tests.log 2>&1 || test_status=$?
 container=$(xcrun simctl get_app_container "$device" com.gokuencinar.ultimatecam data)
 xcrun xcresulttool export attachments --path build/ui/Interaction.xcresult --output-path build/ui/attachments
-if [ "$test_status" -ne 0 ]; then tail -n 100 build/ui/interaction-tests.log; exit "$test_status"; fi
+if [ "$test_status" -ne 0 ]; then grep -n -B 3 -A 6 "error:" build/ui/interaction-tests.log || true; tail -n 60 build/ui/interaction-tests.log; exit "$test_status"; fi
 cp "$container/Library/Caches/UltimateCAM-capture.jsonl" build/ui/UI-interaction-trace.jsonl
 python3 - <<'PY'
 import json, pathlib

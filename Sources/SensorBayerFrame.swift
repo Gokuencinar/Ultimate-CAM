@@ -12,6 +12,7 @@ struct BayerCalibration:Equatable {
     var baselineExposure:Double? = nil
     var geometry:DNGSensorGeometry? = nil
     var opcodeList2:Data? = nil
+    var opcodeList3:Data? = nil
 }
 
 struct DNGSensorGeometry:Equatable {
@@ -241,6 +242,7 @@ struct SensorBayerFrame {
             calibration.geometry=DNGSensorGeometry(width:w,height:h,activeArea:[UInt32(top),UInt32(left),UInt32(bottom),UInt32(right)],
                 cropOrigin:[Double(ox),Double(oy)],cropSize:[Double(cw),Double(ch)])
             if let opcode=rawMetadata.fields[51009],opcode.type==7 { calibration.opcodeList2=try DNGMetadata.validatedOpcodes(opcode.data) }
+            if let opcode=rawMetadata.fields[51022],opcode.type==7 { calibration.opcodeList3=try DNGMetadata.validatedOpcodes(opcode.data) }
         }
         let mapped=try BayerScratchStorage.store(packed)
         var frame=SensorBayerFrame(width:qw,height:qh,quads:mapped.data,calibration:calibration,exposure:exposure,timestamp:photo.timestamp.seconds)
@@ -441,6 +443,9 @@ enum FusedDNG {
             guard c.opcodeList2==nil else { throw CameraFailure.message("Falta la geometría original de la corrección de lente.") }
             add(50719,5,2,rational(0)+rational(0));add(50720,4,2,u32(UInt32(w))+u32(UInt32(h)))
             add(50829,4,4,u32(0)+u32(0)+u32(UInt32(h))+u32(UInt32(w)))
+        }
+        if let opcodes=c.opcodeList3 {
+            let data=try DNGMetadata.validatedOpcodes(opcodes);add(51022,7,UInt32(data.count),data)
         }
         add(50721,10,9,c.matrix.reduce(Data()) { $0+rational($1,signed:true) })
         add(50728,5,3,c.neutral.reduce(Data()) { $0+rational($1) });add(50778,3,1,u16(c.illuminant))

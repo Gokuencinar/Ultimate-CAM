@@ -148,9 +148,12 @@ final class CameraInteractionTests: XCTestCase {
         let app=XCUIApplication();app.launch()
         app.buttons["camera.settings"].tap()
         app.buttons["settings.night"].tap()
+        XCTAssertTrue(app.navigationBars["Modo Noche"].waitForExistence(timeout:3))
         let astro=app.switches["night.astro"]
         XCTAssertTrue(astro.waitForExistence(timeout:3))
         setSwitch(astro,to:"0");setSwitch(astro,to:"1")
+        XCTAssertTrue(app.navigationBars["Modo Noche"].exists)
+        app.navigationBars.buttons.element(boundBy:0).tap()
         XCTAssertTrue(app.buttons["Listo"].exists)
     }
     private func capture(_ app:XCUIApplication,_ name:String) {

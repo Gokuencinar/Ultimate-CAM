@@ -356,7 +356,20 @@ import Darwin
         let encoded=try FusedDNG.encode(quads:quads,width:plan.width,height:plan.height,calibration:plan.calibration(calibration),zoom:1,reconstruction:plan)
         let decoder=CIRAWFilter(imageData:encoded,identifierHint:"com.adobe.raw-image")
         try require(decoder?.outputImage?.extent.size==CGSize(width:512,height:384),"Reconstructed DNG retained the low-resolution crop")
-        // Preserve optical correction only when it is understood and baked.
+        func be32(_ value:UInt32)->Data { var v=value.bigEndian;return withUnsafeBytes(of:&v){Data($0)} }
+        func be64(_ value:Double)->Data { var v=value.bitPattern.bigEndian;return withUnsafeBytes(of:&v){Data($0)} }
+        let radial=be32(1)+be32(3)+be32(0x01030000)+be32(0)+be32(56)+[0.5,0.1,0,0,0,0.5,0.5].reduce(Data()){$0+be64($1)}
+        var optics=calibration;optics.opcodeList3=radial
+        let native=try FusedDNG.encode(quads:quads,width:256,height:192,calibration:optics)
+        try require(try DNGMetadata.read(native).fields[51022]?.data==radial,"Apple radial vignetting was dropped from a native DNG")
+        let opticalFrame=SensorBayerFrame(width:256,height:192,quads:quads,calibration:optics,exposure:frame.exposure,timestamp:1,zoom:2)
+        let opticalPlan=try SuperResolutionPlan.make(opticalFrame,count:4)!
+        let remapped=try DNGMetadata.validatedOpcodes(opticalPlan.vignette!)
+        func double(_ o:Int)->Double { Double(bitPattern:remapped[o..<o+8].reduce(UInt64(0)){($0<<8)|UInt64($1)}) }
+        try require(abs(double(20)-0.125)<1e-9 && abs(double(28)-0.00625)<1e-9 && double(60)==0.5,"SR radial shading was not transformed into the crop coordinates")
+        let opticalDNG=try FusedDNG.encode(quads:quads,width:256,height:192,calibration:opticalPlan.calibration(optics),reconstruction:opticalPlan)
+        try require(try DNGMetadata.read(opticalDNG).fields[51022]?.data==remapped,"SR DNG lost transformed optical shading")
+        guard let opticalDecoder=CIRAWFilter(imageData:opticalDNG,identifierHint:"com.adobe.raw-image"),opticalDecoder.outputImage != nil else { throw CameraFailure.message("Transformed optical DNG did not develop") }
         for lens in LensIdentity.allCases {
             let prior=LensCalibration.profile(lens)
             try require(prior.shot>0 && prior.read>0 && prior.sharpenRadius>0,"Invalid lens profile")
