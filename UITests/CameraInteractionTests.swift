@@ -33,6 +33,8 @@ final class CameraInteractionTests: XCTestCase {
         let originalFrame=finder.frame
         revealMode(app,"camera.mode.video").tap()
         XCTAssertTrue(app.buttons["video.record"].waitForExistence(timeout:8))
+        let transition=app.descendants(matching:.any).matching(identifier:"camera.modeTransition").firstMatch
+        XCTAssertTrue(transition.waitForNonExistence(timeout:5),"Video transition did not complete")
         XCTAssertTrue(app.buttons["video.quickResolution"].exists)
         XCTAssertTrue(app.buttons["video.quickFPS"].exists)
         XCTAssertTrue(app.scrollViews["camera.modes"].exists)
@@ -47,6 +49,7 @@ final class CameraInteractionTests: XCTestCase {
         app.buttons["Listo"].tap()
         revealMode(app,"camera.mode.photo").tap()
         XCTAssertTrue(app.buttons["camera.shutter"].waitForExistence(timeout:8))
+        XCTAssertTrue(transition.waitForNonExistence(timeout:5),"Photo transition did not complete")
         XCTAssertFalse(app.buttons["video.record"].exists)
         XCTAssertEqual(app.windows.count,windows)
     }
@@ -82,6 +85,26 @@ final class CameraInteractionTests: XCTestCase {
     }
     private func capture(_ app:XCUIApplication,_ name:String) {
         let image=XCTAttachment(screenshot:app.screenshot());image.name=name;image.lifetime = .keepAlways;add(image)
+    }
+    func testAdvancedHasOnlyTechnicalPanels() {
+        continueAfterFailure=false
+        let app=XCUIApplication();app.launch()
+        app.buttons["camera.settings"].tap()
+        let advanced=app.buttons["settings.advanced"]
+        for _ in 0..<7 { if advanced.isHittable { break };app.swipeUp() }
+        XCTAssertTrue(advanced.isHittable);advanced.tap()
+        XCTAssertTrue(app.navigationBars["Avanzado"].waitForExistence(timeout:3))
+        let tabs=app.scrollViews["settings.tabs"]
+        XCTAssertEqual(tabs.buttons.count,3)
+        XCTAssertFalse(tabs.buttons["settings.tab.Color"].exists)
+        XCTAssertFalse(tabs.buttons["settings.tab.Perfiles"].exists)
+        for title in ["Manual","Fusi\u{00f3}n","Detalle"] {
+            tabs.buttons["settings.tab."+title].tap()
+            XCTAssertFalse(app.switches["capture.hardwareButtons"].isHittable)
+            XCTAssertFalse(app.switches["capture.mirrorSelfies"].isHittable)
+            XCTAssertFalse(app.switches["output.preserveHDR"].isHittable)
+        }
+        capture(app,"settings-advanced")
     }
     private func revealMode(_ app:XCUIApplication,_ identifier:String) -> XCUIElement {
         let button=app.buttons[identifier],modes=app.scrollViews["camera.modes"]

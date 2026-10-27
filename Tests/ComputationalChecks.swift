@@ -114,7 +114,7 @@ import Darwin
     static func checkLuckyImaging(calibration:BayerCalibration) throws {
         let width=256,height=192,qw=width/2,qh=height/2
         func signal(_ x:Int,_ y:Int)->Double { 0.18+0.06*sin(Double(x)*Double.pi/4)+0.03*sin(Double(y)*Double.pi/5) }
-        func fixture(blurred:Bool)->Data {
+        func fixture(blurred:Bool) throws -> Data {
             var pixels=[UInt16](repeating:0,count:width*height)
             for y in 0..<height { for x in 0..<width {
                 let qx=x/2,qy=y/2,phase=(y%2)*2+x%2
@@ -128,11 +128,11 @@ import Darwin
                 if phase==0 || phase==3 { value=0.2+(x%4==0 ? 0.08:-0.08) }
                 pixels[y*width+x]=UInt16((100+value*15900).rounded())
             } }
-            return pixels.withUnsafeBufferPointer {
-                try! BayerQuadPacking.pack($0,rowElements:width,originX:0,originY:0,cropWidth:width,cropHeight:height,step:1,black:[100,100,100,100],white:16000)
+            return try pixels.withUnsafeBufferPointer {
+                try BayerQuadPacking.pack($0,rowElements:width,originX:0,originY:0,cropWidth:width,cropHeight:height,step:1,black:[100,100,100,100],white:16000)
             }
         }
-        let sharp=fixture(blurred:false),blurred=fixture(blurred:true)
+        let sharp=try fixture(blurred:false),blurred=try fixture(blurred:true)
         let sharpness=BayerQuadPacking.sharpness(quads:sharp,width:qw,height:qh,pattern:calibration.pattern)
         let softness=BayerQuadPacking.sharpness(quads:blurred,width:qw,height:qh,pattern:calibration.pattern)
         try require(sharpness>softness*2 && softness>=0,"Green-phase metric cannot distinguish sharp from blurred Bayer")

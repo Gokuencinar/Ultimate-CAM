@@ -1,6 +1,6 @@
 import Foundation
 
-enum PhotoProcessingPreset { case natural,detail,night }
+enum PhotoProcessingPreset:Equatable { case natural,detail,night }
 
 /// Mode changes affect the capture recipe, not the user's color/LUT or RAW
 /// preferences. A non-RAW lens uses JPEG without requesting an invalid format.
