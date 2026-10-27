@@ -118,6 +118,25 @@ struct ProcessorChecks {
         try require(capped.seconds <= 0.125 && Double(capped.count)*capped.seconds <= 2.0001,"Night exposure or integration limit exceeded")
         try require(abs(capped.iso*capped.seconds-1600.0/30)<0.001,"Shutter cap failed to compensate ISO within range")
         let processor = BurstProcessor()
+        try autoreleasepool {
+            let extent=CGRect(x:0,y:0,width:4032,height:3024)
+            let scene=CIImage(color:CIColor(red:0.3,green:0.45,blue:0.6)).cropped(to:extent)
+            guard let fixture=context.pngRepresentation(of:scene,format:.RGBA8,colorSpace:space) else {
+                throw CameraFailure.message("Cannot encode native-resolution fixture")
+            }
+            var nativeOptions=ProcessingOptions()
+            nativeOptions.maximumDimension=4096
+            nativeOptions.sharpening=0.1 // Exercise rendering rather than passthrough.
+            let nativeResult=try processor.process([fixture],options:nativeOptions)
+            guard let source=CGImageSourceCreateWithData(nativeResult.jpeg as CFData,nil),
+                  let properties=CGImageSourceCopyPropertiesAtIndex(source,0,nil) as? [String:Any] else {
+                throw CameraFailure.message("Native processor output unreadable")
+            }
+            try require(properties[kCGImagePropertyPixelWidth as String] as? Int == 4032 &&
+                        properties[kCGImagePropertyPixelHeight as String] as? Int == 3024,
+                        "Processor reduced native 4032x3024 geometry")
+        }
+        log("NATIVE 12MP PROCESSOR CHECK PASSED")
         let reference = try bitmap(png(seed: 1))
         let noisy = try [png(seed: 10, noise: 24), png(seed: 20, noise: 24), png(seed: 30, noise: 24)]
         let fixedReference = ProcessingOptions(chooseSharpestReference: false)
