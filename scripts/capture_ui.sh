@@ -45,4 +45,3 @@ events = {r['event'] for r in rows}
 assert {'ui.focus.tap', 'ui.focus.longPress'} <= events, 'Viewfinder touches did not reach UIKit'
 print('UI touch routing and settings interaction passed; simulator only, not optical focus.')
 PY
-printf '%s\n' 'Simulator UI only; no camera capture or photo quality validation.' > build/ui/README.txt

@@ -69,7 +69,7 @@ final class CameraInteractionTests: XCTestCase {
         XCTAssertTrue(color.isHittable)
         color.tap()
         XCTAssertTrue(app.navigationBars["Color y estilo"].waitForExistence(timeout:3))
-        XCTAssertTrue(app.sliders["Exposici\u{00f3}n del JPEG (EV)"].exists)
+        XCTAssertTrue(app.sliders["Exposici\u{00f3}n"].exists)
         capture(app,"settings-color")
         app.navigationBars.buttons.element(boundBy:0).tap()
         let mirror=app.switches["capture.mirrorSelfies"],hardware=app.switches["capture.hardwareButtons"]

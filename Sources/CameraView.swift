@@ -546,7 +546,7 @@ struct CameraView: View {
             .navigationTitle("Ajustes").navigationBarTitleDisplayMode(.inline)
             .toolbar { ToolbarItem(placement:.confirmationAction) { Button("Listo") { showControls=false }.disabled(importingDocument) } }
             .tint(CameraPalette.accent)
-        }.preferredColorScheme(.dark).presentationBackground(.ultraThinMaterial)
+        }.preferredColorScheme(.dark).tint(CameraPalette.accent).presentationBackground(.ultraThinMaterial)
             .presentationDetents([.large]).presentationDragIndicator(.visible).interactiveDismissDisabled(importingDocument)
             .fileImporter(isPresented:$importFile,allowedContentTypes:importingLUT ? [.data]:[.json],onCompletion:importDocument)
             .fileExporter(isPresented:$exportFile,document:exportData,contentType:.json,defaultFilename:"UltimateCAM-profile") { result in
@@ -564,10 +564,10 @@ struct CameraView: View {
                 NavigationLink { cleanSettingsPage("Modo Noche") { nightOptions } } label: { Label("Modo Noche",systemImage:"moon.stars") }
                     .accessibilityIdentifier("settings.night")
                 Picker("Temporizador",selection:$timerSeconds) { Text("No").tag(0);Text("3 s").tag(3);Text("10 s").tag(10) }
-            } header: { Label("Calidad e imagen",systemImage:"camera") }
+            } header: { Label("Calidad e imagen",systemImage:"camera") }.disabled(videoMode)
             Section {
                 MovieSettingsFields(camera:movie)
-            } header: { Label("Vídeo",systemImage:"video") } footer: { Text("Los cambios se aplican al entrar en Vídeo.").font(.caption) }
+            } header: { Label("Vídeo",systemImage:"video") } footer: { Text("Calidad según la lente seleccionada.").font(.caption) }
             Section {
                 NavigationLink { cleanSettingsPage("Color y estilo") { colorSettings } } label: { Label("Color y LUT",systemImage:"camera.filters") }.accessibilityIdentifier("settings.color")
                 NavigationLink { cleanSettingsPage("Perfiles") { profileSettings } } label: { Label("Mis perfiles",systemImage:"person.crop.square") }.accessibilityIdentifier("settings.profiles")
@@ -576,7 +576,7 @@ struct CameraView: View {
                 Toggle(isOn:$grid) { Label("Cuadrícula",systemImage:"grid") }
                 Toggle(isOn:$mirrorSelfies) { Label("Selfies reflejadas",systemImage:"arrow.left.and.right.righttriangle.left.righttriangle.right") }.accessibilityIdentifier("capture.mirrorSelfies")
                 Toggle(isOn:$hardwareButtons) { Label("Botones de volumen",systemImage:"speaker.wave.2") }.accessibilityIdentifier("capture.hardwareButtons")
-                NavigationLink { advancedSettings } label: { Label("Avanzado",systemImage:"slider.horizontal.3") }.accessibilityIdentifier("settings.advanced")
+                NavigationLink { advancedSettings } label: { Label("Avanzado",systemImage:"slider.horizontal.3") }.accessibilityIdentifier("settings.advanced").disabled(videoMode)
             } header: { Label("Controles",systemImage:"hand.tap") }
         }.scrollContentBackground(.hidden).listRowSpacing(6).listStyle(.insetGrouped)
             .environment(\.defaultMinListRowHeight,52)
@@ -879,7 +879,7 @@ struct CameraView: View {
             }
             if colorPanel == .basic {
             Section("Luz y color del resultado") {
-                optionSlider("Exposición del JPEG (EV)", value: $options.postExposure, range: -2...2)
+                optionSlider("Exposición", value: $options.postExposure, range: -2...2)
                 optionSlider("Compresión de luces", value: $options.highlightCompression, range: 0...1)
                 optionSlider("Contraste", value: $options.contrast, range: 0.5...1.5)
                 optionSlider("Saturación", value: $options.saturation, range: 0...2)
