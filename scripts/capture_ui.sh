@@ -4,7 +4,8 @@ mkdir -p build/ui
 if ! xcodebuild -project UltimateCAM.xcodeproj -scheme UltimateCAM \
   -configuration Debug -sdk iphonesimulator -destination 'generic/platform=iOS Simulator' \
   -derivedDataPath build/Simulator CODE_SIGNING_ALLOWED=NO build > build/ui/simulator-build.log 2>&1; then
-  tail -n 100 build/ui/simulator-build.log
+  grep -n -B 2 -A 5 ": error:" build/ui/simulator-build.log || true
+  tail -n 60 build/ui/simulator-build.log
   exit 1
 fi
 runtime=$(xcrun simctl list runtimes -j | python3 -c 'import json,sys; r=[r for r in json.load(sys.stdin)["runtimes"] if r.get("isAvailable") and ".iOS-" in r["identifier"]]; assert r, "No iOS runtime"; print(sorted(r,key=lambda r: tuple(int(v) for v in r["version"].split(".")),reverse=True)[0]["identifier"])')

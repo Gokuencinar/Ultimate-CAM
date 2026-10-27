@@ -31,9 +31,12 @@ struct BayerGainMap {
         let gx=min(Double(cols-1),max(0,(x/Double(sensorWidth)-originX)/spacingX))
         let gy=min(Double(rows-1),max(0,(y/Double(sensorHeight)-originY)/spacingY))
         let ix=Int(gx),iy=Int(gy),fx=Float(gx-Double(ix)),fy=Float(gy-Double(iy))
-        let a=gains[iy*cols+ix],b=gains[iy*cols+min(cols-1,ix+1)]
-        let c=gains[min(rows-1,iy+1)*cols+ix],d=gains[min(rows-1,iy+1)*cols+min(cols-1,ix+1)]
-        return (a*(1-fx)+b*fx)*(1-fy)+(c*(1-fx)+d*fx)*fy
+        let nextX:Int=min(cols-1,ix+1),nextY:Int=min(rows-1,iy+1)
+        let topRow:Int=iy*cols,bottomRow:Int=nextY*cols
+        let a:Float=gains[topRow+ix],b:Float=gains[topRow+nextX]
+        let c:Float=gains[bottomRow+ix],d:Float=gains[bottomRow+nextX]
+        let upper:Float=a*(1-fx)+b*fx,lower:Float=c*(1-fx)+d*fx
+        return upper*(1-fy)+lower*fy
     }
 }
 struct SuperResolutionPlan {

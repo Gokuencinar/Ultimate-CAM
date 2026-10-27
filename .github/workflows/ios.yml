@@ -57,6 +57,8 @@ jobs:
           build/port-checks
           xcrun --sdk macosx swiftc -O -import-objc-header Sources/FusionMath.h "${SOURCES[@]}" Tests/ProcessorChecks.swift -o build/processor-checks
           build/processor-checks
+          xcrun --sdk macosx swiftc -O -import-objc-header Sources/FusionMath.h "${SOURCES[@]}" Sources/MetalBurstProcessor.swift Tests/MetalChecks.swift -o build/metal-checks
+          build/metal-checks
           xcrun --sdk macosx swiftc -O -import-objc-header Sources/FusionMath.h "${SOURCES[@]}" Tests/MovieChecks.swift -o build/movie-checks
           build/movie-checks
           xcrun --sdk macosx swiftc -O -import-objc-header Sources/FusionMath.h "${SOURCES[@]}" Tests/PanoramaChecks.swift -o build/panorama-checks

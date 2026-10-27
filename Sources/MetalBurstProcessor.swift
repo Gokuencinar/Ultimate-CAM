@@ -1,7 +1,7 @@
 import CoreImage
 import Metal
 
-private struct MetalFusionParameters {
+struct MetalFusionParameters {
     var size=SIMD4<UInt32>(0,0,16,0)
     var search=SIMD4<Int32>(0,0,0,0)
     var control=SIMD4<Float>(1e-7,1,4,1)
