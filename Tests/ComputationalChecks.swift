@@ -152,7 +152,7 @@ import Darwin
     static func checkModeRecipes() throws {
         var original=ProcessingOptions()
         original.nightMetalRAW=true;original.nightRAW=true;original.hdrMetalRAW=true
-        original.lutID="user-look";original.lutIntensity=0.6;original.saturation=1.2;original.postExposure=0.3
+        original.lutID="8F1EC45C-875B-47A7-BDB9-4EE541334C66";original.lutIntensity=0.6;original.saturation=1.2;original.postExposure=0.3
         original.color.hsl[0].saturation=0.2
         let natural=PhotoModePolicy.preset(.natural,from:original,supportsRAW:true)
         let night=PhotoModePolicy.preset(.night,from:natural,supportsRAW:true)
