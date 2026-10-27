@@ -283,7 +283,7 @@ struct ProcessorChecks {
         try require(rmse(directBitmap,against:wrapperBitmap)<0.05,"Shared renderer applied the preparation a second time")
         let linear=CGColorSpace(name:CGColorSpace.extendedLinearSRGB)!
         var previous:Float=0
-        for level:Float in [0.25,1,4,64] {
+        for level in [Float(0.25),1,4,64] {
             let components:[Float]=[level,level/2,level/4,1]
             let bytes=components.withUnsafeBufferPointer { Data(buffer:$0) }
             let input=CIImage(bitmapData:bytes,bytesPerRow:16,size:CGSize(width:1,height:1),format:.RGBAf,colorSpace:linear)

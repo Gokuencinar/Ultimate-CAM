@@ -271,7 +271,7 @@ import Darwin
     static func checkZSLReference() throws {
         let context=CIContext(options:[.useSoftwareRenderer:true])
         let extent=CGRect(x:0,y:0,width:256,height:192)
-        let image=CIImage.empty().applyingFilter("CICheckerboardGenerator",parameters:["inputWidth":8]).cropped(to:extent)
+        guard let image=CIFilter(name:"CICheckerboardGenerator",parameters:["inputWidth":8])?.outputImage?.cropped(to:extent) else { throw CameraFailure.message("Could not create ZSL pattern") }
         let soft=image.clampedToExtent().applyingFilter("CIGaussianBlur",parameters:[kCIInputRadiusKey:4]).cropped(to:extent)
         guard let sharp=context.createCGImage(image,from:extent),let blur=context.createCGImage(soft,from:extent) else { throw CameraFailure.message("Could not create ZSL reference fixture") }
         try require(PreviewReferenceSelector.index(in:[sharp,blur,sharp,blur],context:context)==2,"ZSL chose the shutter-shaken last frame or a frame outside the latest three")
