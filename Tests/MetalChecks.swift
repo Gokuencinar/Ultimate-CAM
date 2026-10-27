@@ -97,6 +97,16 @@ import Darwin
         let field=read(ellipse),center=(16*32+16)*4
         let jxx=field[center],jxy=field[center+1],jyy=field[center+2]
         try require(jxx*jyy-jxy*jxy>0 && jxy < -1 && field[center+3]>0.5,"Structure tensor did not produce a bounded positive ellipse aligned with a diagonal edge")
+        let lensInput=try texture(32,32),lensOutput=try texture(32,32)
+        var lensPixels=[Float](repeating:1,count:32*32*4)
+        for y in 0..<32 { for x in 0..<32 { let i=(y*32+x)*4;lensPixels[i]=Float(x)/32;lensPixels[i+1]=0.5;lensPixels[i+2]=Float(y)/32 } }
+        upload(lensPixels,lensInput)
+        var optical=MetalFusionParameters();optical.control=SIMD4(16,16,sqrt(512),1);optical.sr=SIMD4(0.1,0.02,-0.08,0.01)
+        try execute("uc_lca",[lensInput,lensOutput],optical,lensOutput)
+        let corrected=read(lensOutput),i=(20*32+25)*4,r2:Float=(9.5*9.5+4.5*4.5)/512
+        let expectedR:Float=(25+9.5*(0.1*r2+0.02*r2*r2))/32
+        let expectedB:Float=(20+4.5*(-0.08*r2+0.01*r2*r2))/32
+        try require(abs(corrected[i]-expectedR)<0.002 && abs(corrected[i+2]-expectedB)<0.002 && corrected[i+1]==0.5,"Metal radial LCA disagreed with the calibrated RGB warp / moved green")
         print("Production Metal SR frequency recovery / separate phases / star vs sensor impulse passed")
     }
 }

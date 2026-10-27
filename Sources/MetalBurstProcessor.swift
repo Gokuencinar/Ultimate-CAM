@@ -44,7 +44,7 @@ final class MetalBurstProcessor {
         let library=try suppliedLibrary ?? device.makeDefaultLibrary(bundle:Bundle.main)
         guard library.device.registryID==device.registryID else { throw CameraFailure.message("La biblioteca Metal pertenece a otra GPU.") }
         var kernels=[String:MTLComputePipelineState]()
-        for name in ["uc_structure_tensor","uc_fuse_super_res","uc_clear","uc_initial_weights","uc_protect_bayer","uc_luma","uc_pyramid","uc_tile_flow","uc_regularize_flow","uc_fuse_tiles","uc_tone_luma","uc_night_tone"] {
+        for name in ["uc_lca","uc_structure_tensor","uc_fuse_super_res","uc_clear","uc_initial_weights","uc_protect_bayer","uc_luma","uc_pyramid","uc_tile_flow","uc_regularize_flow","uc_fuse_tiles","uc_tone_luma","uc_night_tone"] {
             guard let function=library.makeFunction(name:name) else { throw CameraFailure.message("Falta un shader del procesador Metal.") }
             kernels[name]=try device.makeComputePipelineState(function:function)
         }
@@ -174,6 +174,18 @@ final class MetalBurstProcessor {
             work.srMeans[work.srSlot],work.srWeights[work.srSlot],work.regularizedFlow[0],work.srMeans[next],work.srWeights[next],work.original,anchor ? work.original:work.sampleUpload,tensor],parameters:params)
         try finish(command,cancellation:cancellation);work.srSlot=next
     }
+    private func correctOptics(_ image:CIImage,lens:LensIdentity,center:SIMD2<Double>?,cancellation:ProcessingCancellation?) throws -> CIImage {
+        let plan=LensChromaticPlan.estimate(image,lens:lens,context:context,center:center)
+        guard plan.active else { return image }
+        let e=image.extent,w=Int(e.width),h=Int(e.height)
+        let normalized=image.transformed(by:CGAffineTransform(translationX:-e.minX,y:-e.minY))
+        let input=try load(normalized,width:w,height:h,cancellation:cancellation),output=try texture(w,h)
+        var parameters=MetalFusionParameters();parameters.sr=plan.coefficients;parameters.control=plan.geometry(normalized.extent)
+        let command=try command();try encode("uc_lca",command,textures:[input,output],parameters:parameters)
+        try finish(command,cancellation:cancellation)
+        guard let result=CIImage(mtlTexture:output,options:[.colorSpace:space]) else { throw CameraFailure.message("No se pudo corregir la óptica.") }
+        return result.transformed(by:CGAffineTransform(translationX:e.minX,y:e.minY))
+    }
     private func tone(_ image:CIImage,maximumGain:Double,night:Bool,lens:LensIdentity = .wide,cancellation:ProcessingCancellation?) throws -> (sdr:CIImage,hdr:CIImage) {
         let extent=image.extent.integral,w=Int(extent.width),h=Int(extent.height)
         let normalized=image.transformed(by:CGAffineTransform(translationX:-extent.minX,y:-extent.minY))
@@ -217,9 +229,10 @@ final class MetalBurstProcessor {
         // Unsupported optical opcodes retain the ordinary sensor-coordinate path.
         let reconstruction=try? SuperResolutionPlan.make(first,count:usable)
         defer { frames.forEach { $0.discardResidentPages() } }
-        let fused:(dng:Data,count:Int)=try autoreleasepool {
+        let fused:(dng:Data,count:Int,center:SIMD2<Double>?)=try autoreleasepool {
         var params=MetalFusionParameters();params.size.w=1;params.flags.x=options.astroCapture ? 1:0
         params.roi=try BayerFusionRegion.make(width:first.width,height:first.height,geometry:first.calibration.geometry,zoom:first.zoom).vector
+        params.tone.w=LensCalibration.profile(first.lens).motionTolerance
         params.luma=SIMD4<Float>(first.calibration.pattern[0]==1 ? 0.5:0,first.calibration.pattern[1]==1 ? 0.5:0,
             first.calibration.pattern[2]==1 ? 0.5:0,first.calibration.pattern[3]==1 ? 0.5:0)
         params.search.z=options.hdrBracketing ? 1:0
@@ -270,7 +283,7 @@ final class MetalBurstProcessor {
         }
         let mosaic=reconstruction == nil ? work.mean:work.srMeans[work.srSlot]
         let calibration=reconstruction?.calibration(first.calibration) ?? first.calibration
-        return (try FusedDNG.encode(quads:download(mosaic,cancellation:cancellation),width:mosaic.width,height:mosaic.height,calibration:calibration,noiseProfile:first.noiseProfile,zoom:reconstruction == nil ? first.zoom:1,capture:DNGCaptureInfo.read(reference:referenceJPEG,exposure:first.exposure)),accepted)
+        return (try FusedDNG.encode(quads:download(mosaic,cancellation:cancellation),width:mosaic.width,height:mosaic.height,calibration:calibration,noiseProfile:first.noiseProfile,zoom:reconstruction == nil ? first.zoom:1,capture:DNGCaptureInfo.read(reference:referenceJPEG,exposure:first.exposure)),accepted,calibration.developedOpticalCenter(width:mosaic.width*2,height:mosaic.height*2,zoom:reconstruction == nil ? first.zoom:1))
         }
         // Fusion textures are released before full-resolution demosaicing/tone.
         guard let decoder=CIRAWFilter(imageData:fused.dng,identifierHint:"com.adobe.raw-image") else { throw CameraFailure.message("No se pudo revelar el mosaico fusionado.") }
@@ -280,9 +293,10 @@ final class MetalBurstProcessor {
         if decoder.isColorNoiseReductionSupported { decoder.colorNoiseReductionAmount=0.5 }
         guard let developed=decoder.outputImage else { throw CameraFailure.message("El DNG de trabajo no se pudo revelar.") }
         progress?("Metal RAW · tono y color…")
-        let mapped=try tone(developed,maximumGain:options.hdrBracketing ? 64:32,night:!options.hdrBracketing,lens:first.lens,cancellation:cancellation)
+        let optical=options.lensCorrections ? try correctOptics(developed,lens:first.lens,center:fused.center,cancellation:cancellation):developed
+        let mapped=try tone(optical,maximumGain:options.hdrBracketing ? 64:32,night:!options.hdrBracketing,lens:first.lens,cancellation:cancellation)
         let prepared=try JPEGRenderer.prepare(mapped.sdr,extent:mapped.sdr.extent,options:options,context:context,
-            hdrSource:options.preserveHDR ? mapped.hdr:nil,hdrHeadroom:4)
+            hdrSource:options.preserveHDR ? mapped.hdr:nil,hdrHeadroom:4,opticsApplied:options.lensCorrections)
         let jpeg=try JPEGRenderer.encode(prepared,options:options,context:context,metadataReference:referenceJPEG,frames:fused.count)
         let companion:Data?
         if options.saveFusedDNG {

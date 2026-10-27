@@ -17,7 +17,8 @@ enum AdvancedProcessor {
         }
         if o.localContrast > 0 || o.fineDetail > 0 {
             let near = result.clampedToExtent().applyingFilter("CIGaussianBlur", parameters: [kCIInputRadiusKey: 1.5]).cropped(to: extent)
-            let far = result.clampedToExtent().applyingFilter("CIGaussianBlur", parameters: [kCIInputRadiusKey: 12]).cropped(to: extent)
+            let farRadius=o.lensCorrections && o.localContrast<0.9 ? LensCalibration.profile(o.lens).contrastRadius:12
+            let far = result.clampedToExtent().applyingFilter("CIGaussianBlur", parameters: [kCIInputRadiusKey: farRadius]).cropped(to: extent)
             guard let output = detailKernel?.apply(extent: extent, arguments: [result, near, far, o.fineDetail, o.localContrast]) else {
                 throw CameraFailure.message("No se pudo aplicar el contraste local.")
             }

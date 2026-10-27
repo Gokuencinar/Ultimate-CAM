@@ -15,6 +15,35 @@ struct BayerCalibration:Equatable {
     var opcodeList3:Data? = nil
 }
 
+extension BayerCalibration {
+    /// Vignette optical center is in upright sensor coordinates. Convert it to
+    /// the developed crop and its EXIF rotation before any RGB radial warp.
+    func developedOpticalCenter(width:Int,height:Int,zoom:Double)->SIMD2<Double>? {
+        guard let data=opcodeList3,(try? DNGMetadata.validatedOpcodes(data)) != nil else { return nil }
+        func u(_ o:Int)->Int { Int(data[o..<o+4].reduce(UInt32(0)){($0<<8)|UInt32($1)}) }
+        func d(_ o:Int)->Double { Double(bitPattern:data[o..<o+8].reduce(UInt64(0)){($0<<8)|UInt64($1)}) }
+        var offset=4
+        for _ in 0..<u(0) {
+            let count=u(offset+12),p=offset+16
+            if u(offset)==3 && count==56,let crop=try? BayerZoomCrop.geometry(width:width,height:height,original:geometry,zoom:zoom) {
+                let activeW=Double(crop.activeArea[3]-crop.activeArea[1]),activeH=Double(crop.activeArea[2]-crop.activeArea[0])
+                let x=(d(p+40)*activeW-crop.cropOrigin[0])/crop.cropSize[0],y=(d(p+48)*activeH-crop.cropOrigin[1])/crop.cropSize[1]
+                guard x.isFinite,y.isFinite else { return nil }
+                switch orientation {
+                case 2:return SIMD2(1-x,1-y)
+                case 3:return SIMD2(1-x,y)
+                case 4:return SIMD2(x,y)
+                case 5:return SIMD2(y,1-x)
+                case 6:return SIMD2(1-y,1-x)
+                case 7:return SIMD2(1-y,x)
+                case 8:return SIMD2(y,x)
+                default:return SIMD2(x,1-y)
+                }
+            };offset=p+count
+        };return nil
+    }
+}
+
 struct DNGSensorGeometry:Equatable {
     let width:Int,height:Int,activeArea:[UInt32],cropOrigin:[Double],cropSize:[Double]
     func valid(width:Int,height:Int)->Bool {
@@ -276,7 +305,9 @@ enum SensorNoiseModel {
         }
         let gain=Float(min(128,max(0.25,iso.isFinite ? iso/100:1)))
         let prior=LensCalibration.profile(lens)
-        return SIMD2<Float>(2e-5*gain*prior.shot,4.5e-7*gain*gain*prior.read)
+        var modeled=SIMD2<Float>(2e-5*gain*prior.shot,4.5e-7*gain*gain*prior.read)
+        if let floor=LensCalibration.vendorFloor(iso:iso,lens:lens) { modeled.x=max(modeled.x,floor.x);modeled.y=max(modeled.y,floor.y) }
+        return modeled
     }
     static func pair(reference:FrameExposure,referenceProfile:[Double],sample:FrameExposure,sampleProfile:[Double],scale:Float,referenceLens:LensIdentity = .wide,sampleLens:LensIdentity = .wide)->SIMD2<Float> {
         let a=coefficients(iso:reference.iso,profile:referenceProfile,lens:referenceLens),b=coefficients(iso:sample.iso,profile:sampleProfile,lens:sampleLens)

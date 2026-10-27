@@ -244,7 +244,8 @@ kernel void uc_fuse_tiles(texture2d<float,access::read> reference [[texture(0)]]
         float occlusion=1.0f-smoothstep(9.0f*variance,64.0f*variance,biasEnergy);
         // A coherent moved edge remains different across its neighbourhood;
         // independent sensor noise averages out instead of becoming a ghost.
-        float robust=exp(-energy/(18.0f*variance))*occlusion;
+        float motionTolerance=max(params.tone.w,1.0f);
+        float robust=exp(-energy/(18.0f*variance*motionTolerance*motionTolerance))*occlusion;
         robust*=1.0f-smoothstep(36.0f*variance,144.0f*variance,localEnergy);
         // A low-cost zero match is valid in smooth areas; a high-cost ambiguous
         // match is rejected. The reference always supplies weight one.
@@ -400,4 +401,17 @@ kernel void uc_fuse_super_res(texture2d<float,access::sample> reference [[textur
 }
 kernel void uc_clear(texture2d<float,access::write> output [[texture(0)]],uint2 p [[thread_position_in_grid]]) {
  if (p.x<output.get_width() && p.y<output.get_height()) output.write(float4(0),p);
+}
+
+// The RGB stage reuses sr for (R r²,r⁴,B r²,r⁴), control for center/radius.
+// Green is the geometric reference; CFA planes are never warped as RGB.
+kernel void uc_lca(texture2d<float,access::sample> input [[texture(0)]],texture2d<float,access::write> output [[texture(1)]],
+ constant FusionParameters &params [[buffer(0)]],uint2 p [[thread_position_in_grid]]) {
+ if(p.x>=output.get_width() || p.y>=output.get_height()) return;
+ float2 q=float2(p)+0.5f,d=q-params.control.xy;
+ float r2=dot(d,d)/max(params.control.z*params.control.z,1.0f),r4=r2*r2;
+ float4 pixel=input.sample(pixels,q);
+ pixel.r=input.sample(pixels,q+d*(params.sr.x*r2+params.sr.y*r4)).r;
+ pixel.b=input.sample(pixels,q+d*(params.sr.z*r2+params.sr.w*r4)).b;
+ output.write(pixel,p);
 }

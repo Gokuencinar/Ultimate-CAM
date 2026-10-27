@@ -87,6 +87,7 @@ struct ProcessorChecks {
 
     static func run() throws {
         try check017()
+        try check018Lens()
         let plan = try NightCapturePlan.make(iso: 1600, seconds: 1.0 / 30, isoRange: 25...3200, durationRange: 0.00001...0.333)
         try require(plan.seconds == 0.25 && plan.iso < 250 && plan.count == 16, "Static night did not trade ISO for exposure")
         try require(abs(plan.iso * plan.seconds - 1600.0 / 30) < 0.001, "Night plan changed metered brightness")
@@ -366,6 +367,33 @@ struct ProcessorChecks {
         let same=read(unchanged)
         try require(zip(same,read(guide)).allSatisfy{abs($0-$1)<0.002},"Zero ZSL correction changed native high-frequency detail")
         log("Guided edges, registered disparity and native-anchor ZSL passed")
+    }
+
+    static func check018Lens() throws {
+        let w=512,h=384,e=CGRect(x:0,y:0,width:w,height:h),cx=Double(w)/2,cy=Double(h)/2,radius=hypot(cx,cy)
+        let linear=CGColorSpace(name:CGColorSpace.extendedLinearSRGB)!,ctx=CIContext(options:[.workingColorSpace:CGColorSpace(name:CGColorSpace.extendedLinearSRGB)!])
+        func chart(_ x:Double,_ y:Double)->Double { 0.12+0.65*(0.5+0.5*tanh(1.2*(sin(x*0.12)+cos(y*0.1)))) }
+        var data=[Float](repeating:1,count:w*h*4)
+        for y in 0..<h { for x in 0..<w {
+            let dx=Double(x)+0.5-cx,dy=Double(y)+0.5-cy,r2=(dx*dx+dy*dy)/(radius*radius)
+            let rs=0.003*r2-0.0005*r2*r2,bs = -0.0025*r2+0.0003*r2*r2,i=(y*w+x)*4
+            data[i]=Float(chart(Double(x)+0.5-dx*rs,Double(y)+0.5-dy*rs))
+            data[i+1]=Float(chart(Double(x)+0.5,Double(y)+0.5))
+            data[i+2]=Float(chart(Double(x)+0.5-dx*bs,Double(y)+0.5-dy*bs))
+        } }
+        let image=CIImage(bitmapData:data.withUnsafeBufferPointer{Data(buffer:$0)},bytesPerRow:w*16,size:e.size,format:.RGBAf,colorSpace:linear)
+        let plan=LensChromaticPlan.estimate(image,lens:.wide,context:ctx)
+        var corrected=data
+        corrected.withUnsafeMutableBytes { ctx.render(plan.apply(image),toBitmap:$0.baseAddress!,rowBytes:w*16,bounds:e,format:.RGBAf,colorSpace:linear) }
+        var before=0.0,after=0.0
+        for y in 12..<h-12 { for x in 12..<w-12 {
+            let r2=(pow(Double(x)-cx,2)+pow(Double(y)-cy,2))/(radius*radius)
+            if r2<0.3 { continue };let i=(y*w+x)*4
+            before+=pow(Double(data[i]-data[i+1]),2)+pow(Double(data[i+2]-data[i+1]),2)
+            after+=pow(Double(corrected[i]-corrected[i+1]),2)+pow(Double(corrected[i+2]-corrected[i+1]),2)
+        } }
+        log("Radial LCA estimate \(plan.red) / \(plan.blue), corner chromatic error ratio \(after/before)")
+        try require(plan.active && after<before*0.8,"r²/r⁴ LCA correction did not improve held-out corner colour alignment")
     }
 
 }

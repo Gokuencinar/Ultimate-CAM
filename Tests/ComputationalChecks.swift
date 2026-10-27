@@ -379,6 +379,10 @@ import Darwin
             let after=mapped.gain(x:Double(x)+0.5,y:Double(y)+0.5,phase:0,sensorWidth:512,sensorHeight:384)
             try require(abs(before-after)<1e-5,"SR changed the original lens GainMap / highlight headroom")
         } }
+        let vendor=LensCalibration.vendorFloor(iso:100,lens:.wide,platform:"iPhone12,3/22H31")!
+        try require(abs(vendor.x-0.0000962327646289)<1e-9 && abs(vendor.y-0.0000013591362724)<1e-10,"D421 ISO noise floor was not preserved")
+        try require(LensCalibration.vendorFloor(iso:100,lens:.front,platform:"iPhone12,3/22H31")==nil && LensCalibration.vendorFloor(iso:100,lens:.wide,platform:"iPhone12,3/other")==nil,"Unmeasured front / different firmware was labelled calibrated")
+        try require(LensCalibration.profile(.ultraWide).aperture==2.4 && !LensCalibration.profile(.ultraWide).opticalStabilization && LensCalibration.profile(.telephoto).aperture==2,"Physical lens profile is inconsistent")
         for lens in LensIdentity.allCases {
             let prior=LensCalibration.profile(lens)
             try require(prior.shot>0 && prior.read>0 && prior.sharpenRadius>0,"Invalid lens profile")
