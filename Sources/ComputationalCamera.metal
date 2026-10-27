@@ -7,6 +7,7 @@ struct FusionParameters {
     float4 control; // noise variance, tone gain, white point, spare
     float4 luma;
     float4 noise; // Pair shot/read variance in the reference exposure domain.
+    float4 tone; // toe strength, deep-shadow chroma start/end, reserved.
 };
 constexpr sampler pixels(coord::pixel,address::clamp_to_edge,filter::linear);
 
@@ -81,8 +82,8 @@ kernel void uc_tile_flow(texture2d<float,access::sample> reference [[texture(0)]
     float c=reference.sample(pixels,center+float2(-5,5)).r,d=reference.sample(pixels,center+float2(5,5)).r;
     float contrast=max(max(a,b),max(c,d))-min(min(a,b),min(c,d));
     float floor=max(0.002f,2.0f*sqrt(max(params.control.x,1e-8f)));
-    float texture=smoothstep(floor,floor*3.0f,contrast);
-    float confidence=isfinite(best) ? clamp((second-bestScore)/max(second,1e-6f)*4.0f,0.0f,1.0f)*texture:0.0f;
+    float textureWeight=smoothstep(floor,floor*3.0f,contrast);
+    float confidence=isfinite(best) ? clamp((second-bestScore)/max(second,1e-6f)*4.0f,0.0f,1.0f)*textureWeight:0.0f;
     output.write(float4(refined,isfinite(best) ? best:1.0f,confidence),tile);
 }
 
@@ -177,25 +178,55 @@ kernel void uc_fuse_tiles(texture2d<float,access::read> reference [[texture(0)]]
     nextMean.write(fused,p);nextWeights.write(float4(weight),p);
 }
 
+// Compact luminance base: sixteen area samples, no full-resolution extra plane.
+kernel void uc_tone_luma(texture2d<float,access::sample> input [[texture(0)]],
+                         texture2d<float,access::write> output [[texture(1)]],uint2 p [[thread_position_in_grid]]) {
+    if (p.x>=output.get_width() || p.y>=output.get_height()) return;
+    float2 footprint=float2(input.get_width(),input.get_height())/float2(output.get_width(),output.get_height());
+    float luminance=0;
+    for (uint y=0;y<4;++y) for (uint x=0;x<4;++x) {
+        float2 q=(float2(p)+(float2(x,y)+0.5f)/4.0f)*footprint;
+        luminance+=max(dot(input.sample(pixels,q).rgb,float3(0.2126f,0.7152f,0.0722f)),0.0f);
+    }
+    output.write(float4(luminance/16.0f),p);
+}
+
+inline float uc_log_base(texture2d<float,access::sample> image,float2 uv,float logL) {
+    float2 center=uv*float2(image.get_width(),image.get_height());
+    float sum=0,weights=0;
+    for (int y=-2;y<=2;++y) for (int x=-2;x<=2;++x) {
+        float local=log2(max(image.sample(pixels,center+float2(x,y)).r,1e-6f));
+        float weight=exp(-float(x*x+y*y)/3.0f-abs(local-logL)*1.2f);
+        sum+=local*weight;weights+=weight;
+    }
+    return sum/max(weights,1e-12f);
+}
+
 kernel void uc_night_tone(texture2d<float,access::sample> input [[texture(0)]],
-                          texture2d<float,access::write> output [[texture(1)]],
+                          texture2d<float,access::sample> mediumBase [[texture(1)]],
+                          texture2d<float,access::sample> wideBase [[texture(2)]],
+                          texture2d<float,access::write> output [[texture(3)]],
                           constant FusionParameters &params [[buffer(0)]],uint2 p [[thread_position_in_grid]]) {
     if (p.x>=output.get_width() || p.y>=output.get_height()) return;
     float3 rgb=max(input.sample(pixels,float2(p)+0.5f).rgb,0.0f);
-    float luminance=max(dot(rgb,float3(0.2126f,0.7152f,0.0722f)),1e-6f),logL=log2(luminance);
-    float sum=0,weights=0;
-    for (int y=-2;y<=2;++y) for (int x=-2;x<=2;++x) {
-        float3 neighbor=max(input.sample(pixels,float2(p)+0.5f+float2(x,y)*6.0f).rgb,0.0f);
-        float local=log2(max(dot(neighbor,float3(0.2126f,0.7152f,0.0722f)),1e-6f));
-        float weight=exp(-float(x*x+y*y)/4.0f-abs(local-logL)*1.5f);
-        sum+=local*weight;weights+=weight;
-    }
-    float base=exp2(sum/max(weights,1e-6f)),scaled=base*params.control.y;
-    float white=max(params.control.z,1.0f);
+    float luminance=dot(rgb,float3(0.2126f,0.7152f,0.0722f));
+    if (luminance<=1e-6f) { output.write(float4(0,0,0,1),p);return; }
+    float logL=log2(luminance);
+    float2 uv=(float2(p)+0.5f)/float2(output.get_width(),output.get_height());
+    // Two edge-aware scales: ~32 px and ~128 px radii at native 12 MP.
+    float baseLog=mix(uc_log_base(mediumBase,uv,logL),uc_log_base(wideBase,uv,logL),0.7f);
+    float base=exp2(baseLog),scaled=base*params.control.y;
+    float white=max(params.control.z,2.0f);
     float compressed=scaled*(1.0f+scaled/(white*white))/(1.0f+scaled);
-    float detail=clamp(luminance/max(base,1e-6f),0.25f,4.0f);
-    float3 result=rgb*(compressed*detail/luminance);
-    // Scale all channels equally when a highlight exceeds the SDR container.
+    // Recombine full-resolution luminance without flattening fine detail.
+    float mapped=compressed*luminance/max(base,1e-6f);
+    float toe=max(params.tone.x,0.0f);
+    mapped=mapped*mapped/max(mapped+toe,1e-6f)*(0.18f+toe)/0.18f;
+    // Only low-signal chroma is attenuated. Luma and hue ratios in supported
+    // midtones/highlights are unchanged by the shadow chroma stage.
+    float chroma=smoothstep(params.tone.y,params.tone.z,luminance);
+    float3 clean=mix(float3(luminance),rgb,chroma);
+    float3 result=clean*(mapped/luminance);
     result/=max(1.0f,max(result.r,max(result.g,result.b)));
     output.write(float4(result,1),p);
 }

@@ -7,6 +7,7 @@ private struct MetalFusionParameters {
     var control=SIMD4<Float>(1e-7,1,4,1)
     var luma=SIMD4<Float>(0.2126,0.7152,0.0722,0)
     var noise=SIMD4<Float>(0,0,0,0)
+    var tone=SIMD4<Float>(0,0,0,0)
 }
 
 /// Own compute kernels, not the private Apple ISP or Google's proprietary HDR+.
@@ -34,7 +35,7 @@ final class MetalBurstProcessor {
         guard let device=MTLCreateSystemDefaultDevice(),let queue=device.makeCommandQueue() else { throw CameraFailure.message("Metal no está disponible.") }
         let library=try device.makeDefaultLibrary(bundle:Bundle.main)
         var kernels=[String:MTLComputePipelineState]()
-        for name in ["uc_initial_weights","uc_luma","uc_pyramid","uc_tile_flow","uc_regularize_flow","uc_fuse_tiles","uc_night_tone"] {
+        for name in ["uc_initial_weights","uc_luma","uc_pyramid","uc_tile_flow","uc_regularize_flow","uc_fuse_tiles","uc_tone_luma","uc_night_tone"] {
             guard let function=library.makeFunction(name:name) else { throw CameraFailure.message("Falta un shader del procesador Metal.") }
             kernels[name]=try device.makeComputePipelineState(function:function)
         }
@@ -146,6 +147,9 @@ final class MetalBurstProcessor {
         let extent=image.extent.integral,w=Int(extent.width),h=Int(extent.height)
         let normalized=image.transformed(by:CGAffineTransform(translationX:-extent.minX,y:-extent.minY))
         let input=try load(normalized,width:w,height:h,cancellation:cancellation),output=try texture(w,h)
+        let base=try texture(max(1,(w+15)/16),max(1,(h+15)/16),format:.r16Float)
+        let middleBase=try texture(max(1,base.width/2),max(1,base.height/2),format:.r16Float)
+        let wideBase=try texture(max(1,middleBase.width/2),max(1,middleBase.height/2),format:.r16Float)
         let reduced=normalized.transformed(by:CGAffineTransform(scaleX:48/CGFloat(w),y:48/CGFloat(w)))
         let rw=max(1,Int(reduced.extent.width)),rh=max(1,Int(reduced.extent.height))
         var pixels=[Float](repeating:0,count:rw*rh*4)
@@ -158,9 +162,15 @@ final class MetalBurstProcessor {
             guard value.isFinite else { throw CameraFailure.message("Medición tonal no válida.") }
             values.append(value)
         }
-        values.sort();let middle=values[values.count/2],high=values[min(values.count-1,Int(Double(values.count)*0.98))]
-        var params=MetalFusionParameters();params.control.y=Float(min(maximumGain,max(1,0.18/middle)));params.control.z=Float(max(1,high*Double(params.control.y)))
-        let command=try command();try encode("uc_night_tone",command,textures:[input,output],parameters:params);try finish(command,cancellation:cancellation)
+        let plan=try NightTonePlan.make(luminances:values,maximumGain:maximumGain)
+        var params=MetalFusionParameters();params.control.y=Float(plan.gain);params.control.z=Float(plan.whitePoint)
+        params.tone=SIMD4<Float>(0.003,0.002,0.02,0)
+        let command=try command()
+        try encode("uc_tone_luma",command,textures:[input,base])
+        try encode("uc_pyramid",command,textures:[base,middleBase])
+        try encode("uc_pyramid",command,textures:[middleBase,wideBase])
+        try encode("uc_night_tone",command,textures:[input,base,wideBase,output],parameters:params)
+        try finish(command,cancellation:cancellation)
         guard let result=CIImage(mtlTexture:output,options:[.colorSpace:space]) else { throw CameraFailure.message("La GPU no devolvió la imagen tonal.") }
         let expanded=normalized.applyingFilter("CIExposureAdjust",parameters:[kCIInputEVKey:log2(Double(params.control.y))])
         return (result,expanded)
@@ -211,6 +221,7 @@ final class MetalBurstProcessor {
         decoder.isGamutMappingEnabled=false;decoder.boostAmount=0;decoder.boostShadowAmount=0;decoder.exposure=0;decoder.shadowBias=0
         if decoder.isLocalToneMapSupported { decoder.localToneMapAmount=0 }
         if decoder.isLuminanceNoiseReductionSupported { decoder.luminanceNoiseReductionAmount=0 }
+        if decoder.isColorNoiseReductionSupported { decoder.colorNoiseReductionAmount=0.5 }
         guard let developed=decoder.outputImage else { throw CameraFailure.message("El DNG de trabajo no se pudo revelar.") }
         progress?("Metal RAW · tono y color…")
         let mapped=try tone(developed,maximumGain:options.hdrBracketing ? 64:32,cancellation:cancellation)
