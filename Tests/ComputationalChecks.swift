@@ -314,6 +314,16 @@ import Darwin
         options.singlePhotoQuality = .balanced
         try require(options.usesPreviewZSL,"Explicit reduced ZSL path unavailable")
         archive.reset();try require(archive.original(at:anchor)==nil,"RAW archive did not release its mappings")
+        var base=ProcessingOptions();base.nightStatic=true;base.nightMetalRAW=true;base.nightRAW=true;base.color.grain=0.2
+        let native=PhotoModePolicy.nativeNight(from:base)
+        _=try native.validated()
+        try require(native.nativeNight && !native.nightStatic && !native.hdrBracketing && !native.usesPreviewZSL,"Native night remained mixed with app-managed fusion")
+        try require(native.color==base.color && native.nightMetalRAW,"Native night erased the user's look/RAW preference")
+        let nativeRoundTrip=try JSONDecoder().decode(ProcessingOptions.self,from:JSONEncoder().encode(native))
+        try require(nativeRoundTrip==native,"Native night settings did not persist")
+        try require(PhotoModePolicy.toggledRAW(native,photoRAW:false,supportsRAW:true).options==native,"Native night requested incompatible Bayer RAW")
+        try require(!PhotoModePolicy.hdr(from:native,supportsRAW:true).nativeNight && !PhotoModePolicy.preset(.night,from:native,supportsRAW:true).nativeNight,"Photo modes did not leave native night")
+        print("Native night mode policy checks passed")
         print("0.16 HDR weights, ROI, indexed references, capture EXIF and native-quality ZSL checks passed")
     }
 

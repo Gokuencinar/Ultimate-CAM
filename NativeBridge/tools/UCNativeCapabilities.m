@@ -16,7 +16,7 @@ static NSString *SystemString(const char *key) {
 
 static BOOL Relevant(NSString *name) {
     NSString *lower = name.lowercaseString;
-    for (NSString *part in @[@"digitalflash", @"night", @"lowlight", @"low_light", @"capture", @"exposure", @"photo", @"fusion", @"bracket", @"init", @"viewdid", @"capabilit", @"duration"]) {
+    for (NSString *part in @[@"tonemap", @"digitalflash", @"night", @"lowlight", @"low_light", @"capture", @"exposure", @"photo", @"fusion", @"bracket", @"init", @"viewdid", @"capabilit", @"duration"]) {
         if ([lower containsString:part]) return YES;
     }
     return NO;

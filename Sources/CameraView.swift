@@ -59,7 +59,6 @@ struct CameraView: View {
     @StateObject private var movie = MovieCameraModel()
     @State private var videoMode = false
     @State private var showMovieReview = false
-    @StateObject private var nativeNight = NativeNightCoordinator()
     @StateObject private var profiles = ProcessingProfiles()
     @State private var guide = CompositionGuide.thirds
     @State private var profileName = ""
@@ -120,6 +119,7 @@ struct CameraView: View {
         return camera.supportsRAW
     }
     private var captureTitle:String {
+        if options.nativeNight { return "Noche · iOS" }
         if options.hdrBracketing { return options.hdrMetalRAW ? "HDR · RAW Metal":"HDR · 3 exposiciones" }
         if options.nightStatic { return options.nightMetalRAW ? "Noche · RAW Metal":(options.nightRAW ? "Noche · RAW":"Noche · JPEG") }
         if stack { return "Pila de \(stackCount)" }
@@ -128,13 +128,13 @@ struct CameraView: View {
         return rawEnabled ? "RAW + JPEG":"Cámara"
     }
     private var movieBusy:Bool { [.recording,.finishing,.saving].contains(movie.phase) }
-    private var controlsEnabled: Bool { !camera.busy && !movieBusy && !loadingPhoto && !nativeNight.opening && !openingVideo && countdown == 0 }
+    private var controlsEnabled: Bool { !camera.busy && !movieBusy && !loadingPhoto && !openingVideo && countdown == 0 }
     private var intrinsicMetalFusion:Bool { (options.nightStatic && options.nightMetalRAW) || (options.hdrBracketing && options.hdrMetalRAW) }
     private var intrinsicAdaptiveFusion:Bool { intrinsicMetalFusion || (options.nightStatic && (options.nightWeightedFusion || options.nightSpectralFusion)) }
     private var hardwareCaptureReady:Bool {
-        hardwareButtons && (videoMode ? (movie.phase == .recording || (movie.ready && movie.phase == .idle)) : camera.ready) && !camera.busy && !loadingPhoto && !nativeNight.opening && !openingVideo &&
+        hardwareButtons && (videoMode ? (movie.phase == .recording || (movie.ready && movie.phase == .idle)) : camera.ready) && !camera.busy && !loadingPhoto && !openingVideo &&
         scenePhase == .active && auxiliaryMode==nil && !showControls && !showResult && !showMovieReview && !showPhotoPicker &&
-        !importFile && !exportFile && !importingDocument && !nativeNight.showMessage && camera.importFailure==nil
+        !importFile && !exportFile && !importingDocument && camera.importFailure==nil
     }
 
     var body: some View {
@@ -183,7 +183,7 @@ struct CameraView: View {
         .onAppear { UIApplication.shared.isIdleTimerDisabled = true; if auxiliaryMode == nil && !openingVideo { if videoMode { movie.start(movie.configuration,lens:movie.lens) } else { camera.start() } }; loadProfile(profiles.options(for: lens.rawValue) ?? ProcessingOptions()) }
         .onDisappear { UIApplication.shared.isIdleTimerDisabled = false; cancelCountdown();cancelModeTransition(); profiles.flush() }
         .onChange(of: scenePhase) { _, phase in
-            if phase == .active { UIApplication.shared.isIdleTimerDisabled = true; if !nativeNight.opening && auxiliaryMode == nil && !openingVideo { nativeNight.returnedToApp(); if videoMode { movie.start(movie.configuration,lens:movie.lens) } else { camera.start() } } }
+            if phase == .active { UIApplication.shared.isIdleTimerDisabled = true; if auxiliaryMode == nil && !openingVideo { if videoMode { movie.start(movie.configuration,lens:movie.lens) } else { camera.start() } } }
             else if phase == .background {
                 UIApplication.shared.isIdleTimerDisabled = false
                 cancelCountdown()
@@ -211,7 +211,7 @@ struct CameraView: View {
         .sheet(isPresented: $showControls, onDismiss: {
             settingsPath=[]
             if pendingPhotoImport { pendingPhotoImport = false; showPhotoPicker = true }
-            else if pendingNativeNight { pendingNativeNight = false; nativeNight.open(camera:camera) }
+            else if pendingNativeNight { pendingNativeNight = false; activateNativeNight() }
         }) { settings }
         .sheet(isPresented: $showResult) { review }
         .sheet(isPresented: $showMovieReview) { MovieReview(camera:movie) }
@@ -237,10 +237,10 @@ struct CameraView: View {
         }
         .onChange(of: camera.importedPhotoID) { _, value in if value != nil { showResult = true } }
         .alert(camera.importFailure != nil ? "No se pudo importar" : "Noche nativa", isPresented: Binding(
-            get: { camera.importFailure != nil || nativeNight.showMessage },
-            set: { if !$0 { camera.clearImportError();nativeNight.showMessage=false } })) {
-            Button("Aceptar",role:.cancel) { camera.clearImportError();nativeNight.showMessage=false }
-        } message: { Text(camera.importFailure ?? nativeNight.message) }
+            get: { camera.importFailure != nil },
+            set: { if !$0 { camera.clearImportError() } })) {
+            Button("Aceptar",role:.cancel) { camera.clearImportError() }
+        } message: { Text(camera.importFailure ?? "") }
     }
 
     private var header: some View {
@@ -317,7 +317,7 @@ struct CameraView: View {
                         selected:options.nightStatic ? options.nightMetalRAW:(options.hdrBracketing ? options.hdrMetalRAW:rawEnabled)) {
                 let next=PhotoModePolicy.toggledRAW(options,photoRAW:rawEnabled,supportsRAW:rawAvailable)
                 options=next.options;rawEnabled=next.photoRAW
-            }.disabled(!rawAvailable || (stack && !options.nightStatic && !options.hdrBracketing))
+            }.disabled(options.nativeNight || !rawAvailable || (stack && !options.nightStatic && !options.hdrBracketing))
                 .accessibilityIdentifier("camera.quickFormat").accessibilityValue(PhotoModePolicy.formatLabel(options,photoRAW:rawEnabled))
             Spacer()
             Menu {
@@ -331,7 +331,7 @@ struct CameraView: View {
                     .padding(.horizontal, 10).frame(height: 40)
                     .background(.black.opacity(0.75), in: Capsule())
             }.accessibilityLabel("Flash \(flash.label)")
-                .disabled(!controlsEnabled || !camera.supportsFlash || stack || rawEnabled)
+                .disabled(!controlsEnabled || !camera.supportsFlash || stack || rawEnabled || options.nativeNight)
             quickButton(timerSeconds == 0 ? "OFF" : "\(timerSeconds)s", symbol: "timer", selected: timerSeconds > 0) {
                 timerSeconds = timerSeconds == 0 ? 3 : (timerSeconds == 3 ? 10 : 0)
             }
@@ -445,7 +445,7 @@ struct CameraView: View {
                         else if countdown > 0 { Image(systemName: "xmark").font(.title2.bold()).foregroundStyle(.black) }
                     }.frame(width: 72, height: 72)
                 }.accessibilityLabel(countdown > 0 ? "Cancelar temporizador" : (options.nightStatic ? "Capturar noche estática" : (stack ? "Capturar pila de \(stackCount) fotos" : "Tomar foto")))
-                    .accessibilityIdentifier("camera.shutter").disabled(camera.busy || loadingPhoto || nativeNight.opening || (!camera.ready && countdown == 0))
+                    .accessibilityIdentifier("camera.shutter").disabled(camera.busy || loadingPhoto || (!camera.ready && countdown == 0))
                 Spacer()
                 Button { camera.switchLens(lens == .front ? lastBackLens : .front) } label: {
                     Image(systemName: "arrow.triangle.2.circlepath.camera").font(.system(size: 23))
@@ -464,7 +464,7 @@ struct CameraView: View {
 
     private var capturePhaseText:String {
         guard camera.busy else { return camera.status }
-        if camera.opticalCaptureInProgress { return "Mantén firme el iPhone…" }
+        if camera.opticalCaptureInProgress { return options.nativeNight ? "Noche de iOS · mantén firme el iPhone…":"Mantén firme el iPhone…" }
         if camera.captureProgress>=1 || camera.processingInProgress { return "Procesando foto · ya puedes mover el iPhone" }
         return "Preparando captura…"
     }
@@ -474,16 +474,16 @@ struct CameraView: View {
                 ScrollViewReader { proxy in ScrollView(.horizontal,showsIndicators:false) {
                     HStack(spacing:4) {
                         modeButton("Noche",selected:options.nightStatic) { applyPreset("Noche estática") }.accessibilityIdentifier("camera.mode.night").id("night")
-                        modeButton("Cámara",selected:!stack && !options.nightStatic && !options.hdrBracketing && options.portraitAmount==0) { options.nightStatic=false;options.hdrBracketing=false;options.portraitAmount=0;stack=false }.accessibilityIdentifier("camera.mode.photo").id("photo")
+                        modeButton("Cámara",selected:!options.nativeNight && !stack && !options.nightStatic && !options.hdrBracketing && options.portraitAmount==0) { options.nativeNight=false;options.nightStatic=false;options.hdrBracketing=false;options.portraitAmount=0;stack=false }.accessibilityIdentifier("camera.mode.photo").id("photo")
                         modeButton("Retrato",selected:!stack && !options.hdrBracketing && options.portraitAmount>0) {
-                            options.nightStatic=false;options.hdrBracketing=false;options.portraitAmount=0.5;stack=false
+                            options.nativeNight=false;options.nightStatic=false;options.hdrBracketing=false;options.portraitAmount=0.5;stack=false
                         }.accessibilityIdentifier("camera.mode.portrait").id("portrait")
                         modeButton("HDR",selected:options.hdrBracketing) { activateHDR() }.accessibilityIdentifier("camera.mode.hdr").id("hdr")
-                        modeButton("Pila",selected:stack && !options.nightStatic && !options.hdrBracketing) { options.nightStatic=false;options.hdrBracketing=false;options.portraitAmount=0;stack=true }.accessibilityIdentifier("camera.mode.stack").id("stack")
+                        modeButton("Pila",selected:stack && !options.nightStatic && !options.hdrBracketing) { options.nativeNight=false;options.nightStatic=false;options.hdrBracketing=false;options.portraitAmount=0;stack=true }.accessibilityIdentifier("camera.mode.stack").id("stack")
                         modeButton("Vídeo",selected:videoMode,photoMode:false) { enterVideo() }.accessibilityIdentifier("camera.mode.video").id("video")
                         modeButton("Panorama",selected:false) { openAuxiliary(.panorama) }.accessibilityIdentifier("camera.mode.panorama")
                         modeButton("Esfera",selected:false) { openAuxiliary(.sphere) }.accessibilityIdentifier("camera.mode.sphere")
-                        modeButton("iOS",selected:false) { nativeNight.open(camera:camera) }.accessibilityIdentifier("camera.mode.nativeNight")
+                        modeButton("iOS",selected:options.nativeNight) { activateNativeNight() }.accessibilityIdentifier("camera.mode.nativeNight").id("native")
                     }
                 }.accessibilityIdentifier("camera.modes")
                     .onChange(of:selectedPhotoMode) { _,value in withAnimation(.easeOut(duration:0.2)) { proxy.scrollTo(value,anchor:.center) } }
@@ -496,7 +496,7 @@ struct CameraView: View {
 
     private var selectedPhotoMode:String {
         if videoMode { return "video" }
-        if options.nightStatic { return "night" };if options.hdrBracketing { return "hdr" }
+        if options.nativeNight { return "native" };if options.nightStatic { return "night" };if options.hdrBracketing { return "hdr" }
         if stack { return "stack" };return options.portraitAmount>0 ? "portrait":"photo"
     }
 
@@ -693,7 +693,9 @@ struct CameraView: View {
             })).disabled(!rawAvailable && !options.nightMetalRAW)
             Toggle("Guardar DNG fusionado",isOn:$options.saveFusedDNG).disabled(!options.nightMetalRAW)
                 .accessibilityIdentifier("night.saveFusedDNG")
-            Button("Usar Noche de Apple") { pendingNativeNight=true;showControls=false }
+            Picker("Noche de iOS",selection:$options.nativeNightMaximum) { Text("Auto").tag(false);Text("Máximo").tag(true) }
+            Text(camera.nativeNightIssue == nil ? "Noche de iOS disponible en esta cámara.":"Noche de iOS: " + (camera.nativeNightIssue ?? "No compatible")).font(.caption).foregroundStyle(.secondary)
+            Button("Usar Noche de iOS aquí") { pendingNativeNight=true;showControls=false }
                 .accessibilityIdentifier("processing.nativeNight")
         } footer: { Text("Apoya el iPhone para escenas oscuras inmóviles.") }
     }
@@ -819,7 +821,7 @@ struct CameraView: View {
     private var manualSettings: some View {
         Group {
             Section("Exposición") {
-                if options.nightStatic || options.hdrBracketing {
+                if options.nativeNight || options.nightStatic || options.hdrBracketing {
                     Text("Noche y HDR calculan ISO y exposición. El enfoque y el balance de blancos se pueden ajustar antes de capturar.")
                         .font(.footnote).foregroundStyle(.secondary)
                 }
@@ -990,6 +992,12 @@ struct CameraView: View {
     private func resetUIControls() {
         bias = 0; manualWB = false; manualExposure = false; manualFocus = false
         rawEnabled = false; tint = 0; flash = .off
+    }
+    private func activateNativeNight() {
+        options=PhotoModePolicy.nativeNight(from:options)
+        stack=false;rawEnabled=false;flash = .off;manualExposure=false
+        camera.setManualExposure(iso:nil)
+        if let issue=camera.nativeNightIssue { camera.reportImportError(issue) }
     }
     private func activateHDR() {
         options=PhotoModePolicy.hdr(from:options,supportsRAW:rawAvailable)

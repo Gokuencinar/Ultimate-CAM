@@ -6,12 +6,13 @@ enum PhotoProcessingPreset:Equatable { case natural,detail,night }
 /// preferences. A non-RAW lens uses JPEG without requesting an invalid format.
 enum PhotoModePolicy {
     static func formatLabel(_ options:ProcessingOptions,photoRAW:Bool)->String {
+        if options.nativeNight { return "JPEG · iOS" }
         if options.nightStatic { return options.nightMetalRAW ? "RAW*":"JPEG" }
         if options.hdrBracketing { return options.hdrMetalRAW ? "RAW*":"JPEG" }
         return photoRAW ? "RAW+":"JPEG"
     }
     static func toggledRAW(_ current:ProcessingOptions,photoRAW:Bool,supportsRAW:Bool)->(options:ProcessingOptions,photoRAW:Bool) {
-        guard supportsRAW else { return (current,photoRAW) }
+        guard supportsRAW,!current.nativeNight else { return (current,photoRAW) }
         var next=current
         if next.nightStatic {
             next.nightMetalRAW.toggle();next.nightRAW=next.nightMetalRAW
@@ -25,6 +26,7 @@ enum PhotoModePolicy {
     }
     static func preset(_ preset:PhotoProcessingPreset,from current:ProcessingOptions,supportsRAW:Bool)->ProcessingOptions {
         var next=current
+        next.nativeNight=false
         next.nightStatic=preset == .night;next.hdrBracketing=false;next.portraitAmount=0
         next.noiseReduction=next.nightStatic ? 0.012:0
         next.sharpening=preset == .detail ? 0.25:(next.nightStatic ? 0.1:0)
@@ -34,8 +36,15 @@ enum PhotoModePolicy {
     }
     static func hdr(from current:ProcessingOptions,supportsRAW:Bool)->ProcessingOptions {
         var next=current
+        next.nativeNight=false
         next.nightStatic=false;next.hdrBracketing=true;next.portraitAmount=0
         return rawCompatible(next,supportsRAW:supportsRAW)
+    }
+    static func nativeNight(from current:ProcessingOptions)->ProcessingOptions {
+        var next=current
+        next.nativeNight=true;next.nightStatic=false;next.hdrBracketing=false
+        next.zeroShutterLagFusion=false;next.portraitAmount=0;next.singlePhotoQuality = .quality
+        return next
     }
     private static func rawCompatible(_ value:ProcessingOptions,supportsRAW:Bool)->ProcessingOptions {
         var next=value

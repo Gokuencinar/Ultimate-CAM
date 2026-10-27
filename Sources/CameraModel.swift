@@ -99,6 +99,10 @@ final class CameraModel: NSObject, ObservableObject, AVCapturePhotoCaptureDelega
     private var opticalProgress=OpticalCaptureProgress()
     @Published private(set) var captureProgress:Double=0
     @Published private(set) var opticalCaptureInProgress=false
+    @Published private(set) var nativeNightIssue:String? = "Preparando cámara…"
+    private var requestedNativeMode=0
+    private var previousNativeMode:Int?
+    private var nativeModeDevice:String?
     private var temporalFeed=false
     private var hdrPlan: [FrameExposure] = []
     private var hdrExposures: [FrameExposure] = []
@@ -252,6 +256,7 @@ final class CameraModel: NSObject, ObservableObject, AVCapturePhotoCaptureDelega
             self.previewAnalyzer.setActive(false)
             self.focusToken = UUID()
             self.publish { self.ready = false }
+            self.restoreNativePreview()
             if self.session.isRunning { self.session.stopRunning() }
         }
     }
@@ -262,6 +267,7 @@ final class CameraModel: NSObject, ObservableObject, AVCapturePhotoCaptureDelega
             self.active=false;self.focusToken=UUID()
             self.rotationCoordinator=nil
             self.previewAnalyzer.setActive(false)
+            self.restoreNativePreview()
             if self.session.isRunning { self.session.stopRunning() }
             let stopped = !self.session.isRunning
             CaptureTrace.record("nativeNight.handoff",["sessionStopped":stopped])
@@ -333,6 +339,7 @@ final class CameraModel: NSObject, ObservableObject, AVCapturePhotoCaptureDelega
         defer { if !committed { session.commitConfiguration() } }
         session.sessionPreset = .photo
         let old = input
+        restoreNativePreview()
         if let old { session.removeInput(old) }
         guard session.canAddInput(next) else {
             if let old, session.canAddInput(old) { session.addInput(old) }
@@ -376,6 +383,9 @@ final class CameraModel: NSObject, ObservableObject, AVCapturePhotoCaptureDelega
         configurePreviewOutput()
         session.commitConfiguration()
         committed = true
+        let nativeIssue=UCNativePhotoNight.configure(output:output)
+        publish { self.nativeNightIssue=nativeIssue }
+        if nativeIssue==nil { applyNativePreview() }
         configuredLens=lens
         rotationCoordinator=AVCaptureDevice.RotationCoordinator(device:device,previewLayer:nil)
         let rawAvailable = !output.availableRawPhotoPixelFormatTypes.isEmpty
@@ -402,16 +412,42 @@ final class CameraModel: NSObject, ObservableObject, AVCapturePhotoCaptureDelega
 
     func setPreviewTools(_ tools:PreviewAnalysisOptions,processing:ProcessingOptions) {
         queue.async {
+            self.requestedNativeMode=processing.nativeNight ? (processing.nativeNightMaximum ? 2:1):0
             self.temporalFeed=(processing.usesPreviewZSL && !processing.nightStatic && !processing.hdrBracketing && processing.portraitAmount==0) || (processing.nightStatic && processing.nightMotionMetering)
             let graphChanged=self.session.outputs.contains(where:{$0===self.previewAnalyzer.output}) != (tools.enabled || self.temporalFeed)
             self.previewTools=tools;self.previewAnalyzer.configure(tools,processing:processing)
             guard self.configured,!self.inFlight else { return }
             if graphChanged { self.session.beginConfiguration();self.configurePreviewOutput();self.session.commitConfiguration() }
+            self.applyNativePreview()
             self.previewAnalyzer.setActive(self.active && !self.interrupted && (tools.enabled || self.temporalFeed))
             let rawAvailable = !self.output.availableRawPhotoPixelFormatTypes.isEmpty
             self.publish { self.supportsRAW=rawAvailable }
         }
     }
+    private func applyNativePreview() {
+        guard !inFlight,let device=input?.device else { return }
+        if requestedNativeMode==0 { restoreNativePreview();return }
+        if let issue=UCNativePhotoNight.configure(output:output) { publish { self.nativeNightIssue=issue };return }
+        if nativeModeDevice != device.uniqueID {
+            guard let previous=UCNativePhotoNight.previewMode(device:device)?.intValue else {
+                publish { self.nativeNightIssue="No se pudo leer el estado nocturno de esta lente." };return
+            }
+            previousNativeMode=previous;nativeModeDevice=device.uniqueID
+        }
+        if let issue=UCNativePhotoNight.setPreview(mode:requestedNativeMode,device:device) {
+            publish { self.nativeNightIssue=issue };return
+        }
+        publish { self.nativeNightIssue=nil }
+        CaptureTrace.record("nativeNight.preview",["requestedMode":requestedNativeMode,"device":device.localizedName])
+    }
+    private func restoreNativePreview() {
+        if let mode=previousNativeMode,let device=input?.device,nativeModeDevice==device.uniqueID {
+            let issue=UCNativePhotoNight.setPreview(mode:mode,device:device)
+            if let issue { CaptureTrace.record("nativeNight.restore.error",["description":issue]) }
+        }
+        previousNativeMode=nil;nativeModeDevice=nil
+    }
+
     private func configurePreviewOutput() {
         let data=previewAnalyzer.output
         if previewTools.enabled || temporalFeed {
@@ -620,6 +656,19 @@ final class CameraModel: NSObject, ObservableObject, AVCapturePhotoCaptureDelega
         guard self.active, self.session.isRunning, !self.interrupted, !self.inFlight, !self.captureRecoveryRequired,
               let device = self.input?.device else { return }
         do { _ = try options.validated() } catch { self.message(error.localizedDescription); return }
+        if options.nativeNight {
+            guard !stack,!raw,flash == .off,device.exposureMode != .custom,device.exposureMode != .locked else {
+                message("Noche de iOS necesita Foto JPEG, flash apagado y exposición automática.");return
+            }
+            requestedNativeMode=options.nativeNightMaximum ? 2:1
+            applyNativePreview()
+            guard UCNativePhotoNight.previewMode(device:device)?.intValue==requestedNativeMode else {
+                message("iOS no confirmó el modo nocturno. No se ha tomado ninguna foto.");return
+            }
+            if let issue=UCNativePhotoNight.apply(settings:AVCapturePhotoSettings(),output:output,mode:requestedNativeMode) {
+                message(issue);return
+            }
+        }
         let night = options.nightStatic, hdr = options.hdrBracketing
         let burst = stack || night || hdr
         guard !raw || (!burst && !self.output.availableRawPhotoPixelFormatTypes.isEmpty) else {
@@ -795,13 +844,16 @@ final class CameraModel: NSObject, ObservableObject, AVCapturePhotoCaptureDelega
         }
         settings.flashMode = requestedFlash.mode
         settings.maxPhotoDimensions = output.maxPhotoDimensions
-        let priority = PhotoCapturePolicy.priority(requested: processingOptions.singlePhotoQuality,
+        let priority = processingOptions.nativeNight ? SinglePhotoQuality.quality:PhotoCapturePolicy.priority(requested: processingOptions.singlePhotoQuality,
             count: desiredCount, raw: rawRequested, customExposure: input?.device.exposureMode == .custom,
             lockedExposure: input?.device.exposureMode == .locked)
         switch priority {
         case .speed: settings.photoQualityPrioritization = .speed
         case .balanced: settings.photoQualityPrioritization = .balanced
         case .quality: settings.photoQualityPrioritization = .quality
+        }
+        if processingOptions.nativeNight,let issue=UCNativePhotoNight.apply(settings:settings,output:output,mode:processingOptions.nativeNightMaximum ? 2:1) {
+            finishFailure(CameraFailure.message(issue));return
         }
         let identifier = settings.uniqueID
         captureStage = "requested"
@@ -814,7 +866,8 @@ final class CameraModel: NSObject, ObservableObject, AVCapturePhotoCaptureDelega
         expectedFrameCount = frames.count + 1
         output.capturePhoto(with: settings, delegate: self)
         CaptureTrace.record("capture.submitted", ["id": identifier])
-        queue.asyncAfter(deadline: .now() + 30) {
+        let captureTimeout:Double=processingOptions.nativeNight ? 90:30
+        queue.asyncAfter(deadline: .now() + captureTimeout) {
             guard self.captureID == identifier else { return }
             CaptureTrace.record("capture.timeout", ["id": identifier, "stage": self.captureStage])
             self.captureRecoveryRequired = true
@@ -959,6 +1012,11 @@ final class CameraModel: NSObject, ObservableObject, AVCapturePhotoCaptureDelega
                             result = try BurstProcessor().process(captured,options:options,rawFrames:rawBurst,cancellation:cancellation,progress:progress)
                         }
                         if !options.nightStatic && !(options.hdrBracketing && options.hdrMetalRAW) { result.raw = raw }
+                        if options.nativeNight {
+                            result=CaptureResult(jpeg:result.jpeg,reference:result.reference,
+                                details:"Noche de iOS solicitada · \(options.nativeNightMaximum ? "Máximo":"Auto"). " + result.details,
+                                mergedFrames:result.mergedFrames,source:"iOS-DigitalFlash-request")
+                        }
                         result.statistics = ImageStatistics.measure(result.jpeg)
                         return result
                     } catch {
@@ -1106,7 +1164,9 @@ final class CameraModel: NSObject, ObservableObject, AVCapturePhotoCaptureDelega
     }
 
     func photoOutput(_ output: AVCapturePhotoOutput, willBeginCaptureFor resolvedSettings: AVCaptureResolvedPhotoSettings) {
-        CaptureTrace.record("delegate.begin", ["id": resolvedSettings.uniqueID])
+        var info:[String:Any]=["id":resolvedSettings.uniqueID]
+        for (key,value) in UCNativePhotoNight.resolvedInfo(settings:resolvedSettings) { info[key]=value }
+        CaptureTrace.record("delegate.begin",info)
         queue.async { if self.captureID == resolvedSettings.uniqueID { self.captureStage = "began" } }
     }
 

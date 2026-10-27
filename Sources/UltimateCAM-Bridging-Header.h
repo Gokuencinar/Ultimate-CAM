@@ -2,3 +2,5 @@
 #include "../NativeBridge/UCNativeNightProtocol.h"
 
 #include "FusionMath.h"
+
+#import "UCNativePhotoNight.h"

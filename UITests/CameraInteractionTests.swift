@@ -41,6 +41,26 @@ final class CameraInteractionTests: XCTestCase {
         XCTAssertTrue(format.isEnabled)
     }
 
+    func testNativeNightStaysInsideUltimateCAMWithoutCapturing() {
+        continueAfterFailure=false
+        let app=XCUIApplication();app.launch()
+        let windows=app.windows.count
+        revealMode(app,"camera.mode.nativeNight").tap()
+        // Simulator has no native camera capability; dismiss the compatibility
+        // explanation, without faking hardware support or pressing a shutter.
+        let accept=app.alerts.buttons["Aceptar"]
+        if accept.waitForExistence(timeout:2) { accept.tap() }
+        XCTAssertTrue(app.staticTexts["Noche · iOS"].waitForExistence(timeout:3))
+        XCTAssertEqual(app.state,.runningForeground)
+        XCTAssertEqual(app.windows.count,windows)
+        XCTAssertTrue(app.buttons["camera.shutter"].exists)
+        app.buttons["camera.quickSettings"].tap()
+        XCTAssertEqual(app.buttons["camera.quickFormat"].value as? String,"JPEG · iOS")
+        XCTAssertFalse(app.buttons["camera.quickFormat"].isEnabled)
+        revealMode(app,"camera.mode.photo").tap()
+        XCTAssertTrue(app.staticTexts["Cámara"].exists)
+    }
+
     func testGuidedModesAndPreviewToolsWithoutTakingPhotos() {
         continueAfterFailure=false
         let app=XCUIApplication();app.launch()
