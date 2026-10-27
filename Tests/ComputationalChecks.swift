@@ -107,6 +107,11 @@ import Darwin
             try checkLuckyImaging(calibration:calibration)
             try checkModeRecipes()
             try checkNightMetering()
+            try checkImpulseProtection()
+            try checkZoomAndFusedExport(calibration:calibrated,quads:quadData,original:dng)
+            try checkQuickRAWControls()
+            try checkOpticalProgress()
+            try checkZSLReference()
             print("Computational source checks passed; no capture session, app launch or GPU execution.")
         } catch { fputs("\(error)\n",stderr);exit(1) }
     }
@@ -185,5 +190,91 @@ import Darwin
         do { _=try NightTonePlan.make(luminances:[.nan],maximumGain:32) } catch { invalid=true }
         try require(invalid,"Invalid tonal measurement accepted")
         print("Night metering checks passed")
+    }
+
+    static func checkImpulseProtection() throws {
+        let noise=SensorNoiseModel.coefficients(iso:100,profile:[])
+        let center=SIMD4<Float>(0.95,0.15,0.18,0.7)
+        let low=SIMD4<Float>(0.19,0.14,0.17,0.1),high=SIMD4<Float>(0.21,0.16,0.19,0.8)
+        var clean=center
+        for phase in 0..<4 { clean[phase]=BayerImpulseProtection.value(center[phase],minimum:low[phase],maximum:high[phase],noise:noise) }
+        try require(abs(clean.x-0.21)<1e-6,"Isolated Bayer hot pixel survived")
+        try require(clean.y==center.y && clean.z==center.z && clean.w==center.w,"Impulse correction mixed or changed unaffected phases/edges")
+        let cold=BayerImpulseProtection.value(-0.6,minimum:-0.02,maximum:0.02,noise:noise)
+        try require(abs(cold+0.02)<1e-6,"Cold impulse survived or negative sensor noise was clipped to zero")
+        let noisy=BayerImpulseProtection.value(0.22,minimum:0.19,maximum:0.20,noise:SIMD2<Float>(0,0.001))
+        try require(noisy==0.22,"Expected high-ISO noise was erased as an impulse")
+        // A corrected initial anchor can now accept a clean frame and converge;
+        // the original contaminated mean must not be retained at weight one.
+        let candidate:Float=0.2,variance=max(1e-8,noise.x*0.2+noise.y)
+        let residual=candidate-clean.x,weight=exp(-(residual*residual)/(18*variance))
+        let fused=(clean.x+candidate*weight)/(1+weight)
+        try require(weight>0.1 && fused<clean.x,"Corrected anchor still rejected clean aligned samples")
+        print("Bayer impulse checks passed")
+    }
+
+    static func checkZoomAndFusedExport(calibration:BayerCalibration,quads:Data,original:Data) throws {
+        let zoomed=try FusedDNG.encode(quads:quads,width:256,height:192,calibration:calibration,zoom:2)
+        let metadata=try DNGMetadata.read(zoomed)
+        try require(metadata[50719]==[128,96] && metadata[50720]==[256,192],"RAW zoom crop does not match 2x framing")
+        try require(metadata[50829]==[0,0,384,512] && metadata.fields[51009]?.data==calibration.opcodeList2,"Zoom moved the lens-shading coordinate system")
+        let native=try BayerZoomCrop.geometry(width:4032,height:3024,original:nil,zoom:3)
+        try require(native.cropSize==[1344,1008] && native.cropOrigin==[1344,1008],"Native RAW 3x crop is wrong")
+        try require((native.cropOrigin+native.cropSize).allSatisfy { Int($0)%2==0 },"Zoom split Bayer phase pairs")
+        let already=try BayerZoomCrop.geometry(width:512,height:384,original:DNGSensorGeometry(width:512,height:384,activeArea:[0,0,384,512],cropOrigin:[128,96],cropSize:[256,192]),zoom:2)
+        try require(already.cropOrigin==[128,96] && already.cropSize==[256,192],"Camera-supplied digital crop was zoomed twice")
+        guard let decoder=CIRAWFilter(imageData:zoomed,identifierHint:"com.adobe.raw-image"),let image=decoder.outputImage else { throw CameraFailure.message("Zoomed DNG did not develop") }
+        try require(image.extent.width==256 && image.extent.height==192,"RAW developer ignored the viewfinder zoom")
+        var options=ProcessingOptions()
+        try require(options.selectedRAW(original:original,fused:zoomed)==original,"Original DNG changed when fused export was off")
+        options.saveFusedDNG=true
+        let saved=options.selectedRAW(original:original,fused:zoomed)
+        let savedMetadata=try DNGMetadata.read(saved)
+        try require(saved==zoomed && savedMetadata[50720]==[256,192],"Computational DNG export lost zoom/calibration")
+        let decoded=try JSONDecoder().decode(ProcessingOptions.self,from:JSONEncoder().encode(options))
+        try require(decoded.saveFusedDNG,"Computational DNG preference did not persist")
+        var old=try JSONSerialization.jsonObject(with:JSONEncoder().encode(options)) as! [String:Any]
+        old.removeValue(forKey:"saveFusedDNG")
+        let oldOptions=try JSONDecoder().decode(ProcessingOptions.self,from:JSONSerialization.data(withJSONObject:old))
+        try require(!oldOptions.saveFusedDNG,"Older profiles enabled computational RAW unexpectedly")
+        print("RAW zoom and computational DNG checks passed")
+    }
+
+    static func checkQuickRAWControls() throws {
+        var options=ProcessingOptions();options.nightStatic=true;options.nightSpectralFusion=true
+        let night=PhotoModePolicy.toggledRAW(options,photoRAW:false,supportsRAW:true)
+        try require(night.options.nightMetalRAW && night.options.nightRAW && !night.options.nightSpectralFusion && !night.photoRAW,"Night quick RAW did not enable a coherent Metal recipe")
+        _=try night.options.validated()
+        try require(PhotoModePolicy.formatLabel(night.options,photoRAW:night.photoRAW)=="RAW*","Night quick format label is wrong")
+        let jpeg=PhotoModePolicy.toggledRAW(night.options,photoRAW:false,supportsRAW:true)
+        try require(!jpeg.options.nightMetalRAW && !jpeg.options.nightRAW && PhotoModePolicy.formatLabel(jpeg.options,photoRAW:false)=="JPEG","Night quick RAW did not disable both RAW paths")
+        let hdrRecipe=PhotoModePolicy.hdr(from:jpeg.options,supportsRAW:true)
+        let hdr=PhotoModePolicy.toggledRAW(hdrRecipe,photoRAW:false,supportsRAW:true)
+        try require(hdr.options.hdrMetalRAW && !hdr.options.nightStatic && !hdr.photoRAW,"HDR quick RAW toggled the wrong mode")
+        let unsupported=PhotoModePolicy.toggledRAW(options,photoRAW:false,supportsRAW:false)
+        try require(unsupported.options==options && !unsupported.photoRAW,"Unsupported RAW control changed the recipe")
+        var photo=ProcessingOptions();photo.zeroShutterLagFusion=true
+        let raw=PhotoModePolicy.toggledRAW(photo,photoRAW:false,supportsRAW:true)
+        try require(raw.photoRAW && !raw.options.zeroShutterLagFusion,"Photo RAW remained combined with preview ZSL")
+        print("Quick RAW mode checks passed")
+    }
+
+    static func checkOpticalProgress() throws {
+        var state=OpticalCaptureProgress();state.begin(total:3)
+        state.exposed(id:1);state.exposed(id:1)
+        try require(state.capturing && state.completed==1 && abs(state.fraction-1.0/3)<1e-8,"Duplicate photo callback advanced sensor progress")
+        state.exposed(id:2);state.exposed(id:3)
+        try require(!state.capturing && state.fraction==1,"Sensor progress did not end at the final exposure")
+        state.reset();try require(!state.capturing && state.fraction==0,"Failed capture retained optical progress")
+    }
+
+    static func checkZSLReference() throws {
+        let context=CIContext(options:[.useSoftwareRenderer:true])
+        let extent=CGRect(x:0,y:0,width:256,height:192)
+        let image=CIImage.empty().applyingFilter("CICheckerboardGenerator",parameters:["inputWidth":8]).cropped(to:extent)
+        let soft=image.clampedToExtent().applyingFilter("CIGaussianBlur",parameters:[kCIInputRadiusKey:4]).cropped(to:extent)
+        guard let sharp=context.createCGImage(image,from:extent),let blur=context.createCGImage(soft,from:extent) else { throw CameraFailure.message("Could not create ZSL reference fixture") }
+        try require(PreviewReferenceSelector.index(in:[sharp,blur,sharp,blur],context:context)==2,"ZSL chose the shutter-shaken last frame or a frame outside the latest three")
+        print("Recent ZSL reference check passed")
     }
 }

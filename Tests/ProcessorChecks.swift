@@ -273,6 +273,28 @@ struct ProcessorChecks {
         let hdrBitmap=try bitmap(hdrResult.jpeg)
         try require(hdrBitmap.width>size*9/10 && hdrBitmap.height>size*9/10,"HDR registration lost excessive field of view")
         log("HDR BRACKET CHECKS PASSED · synthetic clipped PNG bracket, not physical exposure validation")
+        var edit=ProcessingOptions()
+        edit.sharpening=0.3;edit.fineDetail=0.5;edit.localContrast=0.3;edit.chromaDenoise=0.2;edit.liftShadows=0.2
+        let prepared=try JPEGRenderer.prepare(cleanImage,extent:cleanImage.extent,options:edit,context:context)
+        let direct=try JPEGRenderer.encode(prepared,options:edit,context:context)
+        let wrapper=try JPEGRenderer.render(cleanImage,extent:cleanImage.extent,options:edit,context:context)
+        let directBitmap=try bitmap(direct.data),wrapperBitmap=try bitmap(wrapper.data)
+        try require(rmse(directBitmap,against:reference)>0.5,"Shared Metal preparation ignored detail/shadow edits")
+        try require(rmse(directBitmap,against:wrapperBitmap)<0.05,"Shared renderer applied the preparation a second time")
+        let linear=CGColorSpace(name:CGColorSpace.extendedLinearSRGB)!
+        var previous:Float=0
+        for level:Float in [0.25,1,4,64] {
+            let components:[Float]=[level,level/2,level/4,1]
+            let bytes=components.withUnsafeBufferPointer { Data(buffer:$0) }
+            let input=CIImage(bitmapData:bytes,bytesPerRow:16,size:CGSize(width:1,height:1),format:.RGBAf,colorSpace:linear)
+            let output=try AdaptiveHDR.rollOff(input,gain:16,headroom:4)
+            var pixel=[Float](repeating:0,count:4)
+            pixel.withUnsafeMutableBytes { context.render(output,toBitmap:$0.baseAddress!,rowBytes:16,bounds:input.extent,format:.RGBAf,colorSpace:linear) }
+            try require(pixel[0].isFinite && pixel[0]>previous && pixel[0]<4,"HDR roll-off clipped highlight ordering or exceeded its headroom")
+            try require(abs(pixel[1]/pixel[0]-0.5)<0.002 && abs(pixel[2]/pixel[0]-0.25)<0.002,"HDR roll-off changed highlight chromaticity")
+            previous=pixel[0]
+        }
+        log("METAL FINISHING / HDR ROLL-OFF CHECKS PASSED · synthetic host images")
         log("PROCESSOR CHECKS PASSED · synthetic fixtures only")
     }
 }
