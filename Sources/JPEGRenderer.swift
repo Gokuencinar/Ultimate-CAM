@@ -15,20 +15,22 @@ struct PreparedJPEG {
 /// Shared finishing path for a single frame, a temporal stack, and HDR.
 enum JPEGRenderer {
     static func render(_ input: CIImage, extent inputExtent: CGRect, options: ProcessingOptions, context: CIContext,
-                       hdrSource: CIImage? = nil,metadataReference:Data?=nil,frames:Int=1) throws -> RenderedJPEG {
-        let prepared=try prepare(input,extent:inputExtent,options:options,context:context,hdrSource:hdrSource)
+                       hdrSource: CIImage? = nil,metadataReference:Data?=nil,frames:Int=1,depth:PortraitDepth?=nil) throws -> RenderedJPEG {
+        let prepared=try prepare(input,extent:inputExtent,options:options,context:context,hdrSource:hdrSource,depth:depth)
         return try encode(prepared,options:options,context:context,metadataReference:metadataReference,frames:frames)
     }
 
     /// Exactly one shared portrait/detail/color preparation before encoding.
     /// Metal RAW and ZSL call this explicitly; the other processors use render.
-    static func prepare(_ input:CIImage,extent inputExtent:CGRect,options:ProcessingOptions,context:CIContext,
-                        hdrSource:CIImage?=nil,hdrHeadroom:Double=8) throws -> PreparedJPEG {
+    static func prepare(_ input:CIImage,extent inputExtent:CGRect,options supplied:ProcessingOptions,context:CIContext,
+                        hdrSource:CIImage?=nil,hdrHeadroom:Double=8,depth:PortraitDepth?=nil) throws -> PreparedJPEG {
+        let options=LensCalibration.profile(supplied.lens).recipe(supplied)
         var baseInput=input.cropped(to:inputExtent),hdrInput=hdrSource
+        if options.lensCorrections && hdrSource == nil { baseInput=LensCalibration.correct(baseInput,lens:options.lens,context:context) }
         if options.portraitAmount>0 {
             let mask=try PortraitProcessor.personMask(baseInput,extent:inputExtent,context:context)
-            baseInput=try PortraitProcessor.apply(baseInput,mask:mask,extent:inputExtent,amount:options.portraitAmount)
-            if let hdrSource { hdrInput=try PortraitProcessor.apply(hdrSource,mask:mask,extent:inputExtent,amount:options.portraitAmount) }
+            baseInput=try PortraitProcessor.apply(baseInput,mask:mask,extent:inputExtent,amount:options.portraitAmount,depth:depth,context:context)
+            if let hdrSource { hdrInput=try PortraitProcessor.apply(hdrSource,mask:mask,extent:inputExtent,amount:options.portraitAmount,depth:depth,context:context) }
         }
         let image = try finish(baseInput,options:options)
         let extent = AdvancedProcessor.crop(inputExtent, aspect: options.aspect)

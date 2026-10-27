@@ -24,7 +24,7 @@ final class BurstProcessor {
         .outputColorSpace: CGColorSpace(name: CGColorSpace.sRGB)!
     ])
 
-    func process(_ frames: [Data], options: ProcessingOptions = ProcessingOptions(), rawFrames: [Data]? = nil, cancellation: ProcessingCancellation? = nil, progress: ((String) -> Void)? = nil) throws -> CaptureResult {
+    func process(_ frames: [Data], options: ProcessingOptions = ProcessingOptions(), rawFrames: [Data]? = nil,depth:PortraitDepth?=nil, cancellation: ProcessingCancellation? = nil, progress: ((String) -> Void)? = nil) throws -> CaptureResult {
         defer { context.clearCaches() }
         try cancellation?.check()
         progress?("Preparando imágenes…")
@@ -243,7 +243,7 @@ final class BurstProcessor {
         // A temporal stack needs its own radiometric HDR merge, so never borrow
         // the reference's map for pixels assembled from different frames.
         let hdrSource = options.preserveHDR && frames.count == 1 && !isRAW && !options.nightStatic ? AdaptiveHDR.expanded(first) : nil
-        let rendered = try JPEGRenderer.render(accumulator,extent:common,options:options,context:context,hdrSource:hdrSource,metadataReference:referenceData,frames:accepted)
+        let rendered = try JPEGRenderer.render(accumulator,extent:common,options:options,context:context,hdrSource:hdrSource,metadataReference:referenceData,frames:accepted,depth:depth)
         try cancellation?.check()
         let details: String
         if frames.count == 1 {

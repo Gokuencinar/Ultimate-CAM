@@ -124,7 +124,7 @@ struct CameraView: View {
         if options.nightStatic { return options.nightMetalRAW ? "Noche · RAW Metal":(options.nightRAW ? "Noche · RAW":"Noche · JPEG") }
         if stack { return "Pila de \(stackCount)" }
         if options.portraitAmount>0 { return "Retrato · personas" }
-        if options.usesPreviewZSL && !rawEnabled { return "Cámara · ZSL Visor 1280p" }
+        if options.usesPreviewZSL && !rawEnabled { return "Cámara · HDR+ ZSL" }
         return rawEnabled ? "RAW + JPEG":"Cámara"
     }
     private var movieBusy:Bool { [.recording,.finishing,.saving].contains(movie.phase) }
@@ -199,7 +199,6 @@ struct CameraView: View {
             if next != .front { lastBackLens = next }
         }
         .onChange(of: options) { _, value in
-            if value.singlePhotoQuality == .quality && value.zeroShutterLagFusion { options.zeroShutterLagFusion=false }
             profiles.remember(options,lens:lens.rawValue)
         }
         .onChange(of: options) { _, value in camera.setPreviewTools(previewTools,processing:value) }
@@ -689,6 +688,8 @@ struct CameraView: View {
             Picker("Duración",selection:$options.nightBudget) { ForEach([2.0,4,8,16],id:\.self) { Text("\(Int($0)) s").tag($0) } }
                 .pickerStyle(.segmented)
             Toggle("Adaptar al movimiento",isOn:$options.nightMotionMetering)
+            Toggle("Astro automático en trípode",isOn:$options.astroEnabled).accessibilityIdentifier("night.astro")
+            if camera.astroActive { Label("Astro · 16 tomas",systemImage:"sparkles").foregroundStyle(CameraPalette.accent) }
             Toggle("RAW de alta calidad · beta",isOn:Binding(get:{options.nightMetalRAW},set:{ value in
                 options.nightMetalRAW=value;options.nightRAW=value;if value { options.nightSpectralFusion=false }
             })).disabled(!rawAvailable && !options.nightMetalRAW)
@@ -764,12 +765,12 @@ struct CameraView: View {
     private var captureSettings: some View {
         Group {
             Section("Fusión del visor") {
-                Toggle("Fusión del visor · 1280p",isOn:Binding(get:{options.usesPreviewZSL},set:{ value in
+                Toggle("Fusión HDR+ con ancla nativa",isOn:Binding(get:{options.usesPreviewZSL},set:{ value in
                     options.zeroShutterLagFusion=value
                     if value { options.singlePhotoQuality = .balanced }
                 }))
                     .disabled(rawEnabled || stack || options.portraitAmount>0).accessibilityIdentifier("capture.zsl")
-                Text("Salida reducida a 1280 px. Calidad iOS utiliza la captura nativa y desactiva esta fusión.").font(.caption).foregroundStyle(.secondary)
+                Text("Foto a resolución nativa con apoyo temporal del visor.").font(.caption).foregroundStyle(.secondary)
             }
             if options.nightStatic {
                 Section("Captura nocturna") {
@@ -879,6 +880,7 @@ struct CameraView: View {
     private var processingSettings: some View {
         Group {
             Section("Detalle y textura") {
+                Toggle("Corrección automática de lente",isOn:$options.lensCorrections).accessibilityIdentifier("image.lensCorrections")
                 optionSlider("Ruido de color", value: $options.chromaDenoise, range: 0...1)
                 optionSlider("Contraste local", value: $options.localContrast, range: 0...1.5)
                 optionSlider("Detalle fino", value: $options.fineDetail, range: 0...1)

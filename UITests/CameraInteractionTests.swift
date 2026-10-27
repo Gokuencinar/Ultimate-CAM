@@ -143,6 +143,16 @@ final class CameraInteractionTests: XCTestCase {
         app.buttons["Listo"].tap()
         XCTAssertTrue(app.buttons["camera.shutter"].exists)
     }
+    func testAstroPreferenceWithoutCapturing() {
+        continueAfterFailure=false
+        let app=XCUIApplication();app.launch()
+        app.buttons["camera.settings"].tap()
+        app.buttons["settings.night"].tap()
+        let astro=app.switches["night.astro"]
+        XCTAssertTrue(astro.waitForExistence(timeout:3))
+        setSwitch(astro,to:"0");setSwitch(astro,to:"1")
+        XCTAssertTrue(app.buttons["Listo"].exists)
+    }
     private func capture(_ app:XCUIApplication,_ name:String) {
         let image=XCTAttachment(screenshot:app.screenshot());image.name=name;image.lifetime = .keepAlways;add(image)
     }

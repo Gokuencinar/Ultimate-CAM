@@ -7,10 +7,11 @@ struct NightCapturePlan {
     let iso: Double
     let count: Int
     let compensationEV: Double
+    var astro:Bool=false
 
     static func make(iso: Double, seconds: Double, isoRange: ClosedRange<Double>,
                      durationRange: ClosedRange<Double>, targetOffset: Double = 0,
-                     budget: Double = 8, shutterLimit: Double = 1,motionLimit:Double?=nil) throws -> NightCapturePlan {
+                     budget: Double = 8, shutterLimit: Double = 1,motionLimit:Double?=nil,tripodStable:Bool=false,astroEnabled:Bool=true) throws -> NightCapturePlan {
         let values = [iso, seconds, isoRange.lowerBound, isoRange.upperBound,
                       durationRange.lowerBound, durationRange.upperBound]
         guard budget.isFinite, (1...16).contains(budget), shutterLimit.isFinite, (1.0/30...1).contains(shutterLimit),
@@ -26,6 +27,15 @@ struct NightCapturePlan {
         let meteredProduct = iso * seconds * pow(2, compensation)
         guard meteredProduct.isFinite, seconds <= 1 else {
             throw CameraFailure.message("La medición supera el presupuesto de captura nocturna.")
+        }
+        if astroEnabled && tripodStable && budget>=8 {
+            // Sixteen real integrations, bounded by both physical exposure and
+            // the user's total integration budget. Never silently turn 8 s into
+            // minutes; the physical limit is reached when the budget allows it.
+            let duration=min(durationRange.upperBound,budget/16)
+            guard duration>=durationRange.lowerBound else { throw CameraFailure.message("El formato no admite la serie Astro.") }
+            let sensitivity=min(isoRange.upperBound,max(isoRange.lowerBound,meteredProduct/duration))
+            return NightCapturePlan(seconds:duration,iso:sensitivity,count:16,compensationEV:compensation,astro:true)
         }
         let limit = min(shutterLimit,motionLimit ?? 1, durationRange.upperBound, budget/3)
         guard limit >= durationRange.lowerBound else { throw CameraFailure.message("El formato no permite el límite nocturno elegido.") }

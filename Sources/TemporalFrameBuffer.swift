@@ -39,6 +39,7 @@ struct PreviewMotionEstimate {
     let timestamp:Double
     let pixelsPerSecond:Double // In the 64-wide metering grid, not sensor pixels.
     let confidence:Double
+    var tripodStable:Bool=false
     var shutterLimit:Double? {
         guard confidence>=0.25 else { return nil }
         return min(1,max(1.0/250,0.35/max(0.35,pixelsPerSecond)))
@@ -47,8 +48,9 @@ struct PreviewMotionEstimate {
 final class PreviewMotionMeter {
     private var previous:[Float]?,previousTime=0.0
     private let lock=NSLock()
+    private var stableSince:Double?
     private var result:PreviewMotionEstimate?
-    func reset() { lock.lock();defer { lock.unlock() };previous=nil;previousTime=0;result=nil }
+    func reset() { lock.lock();defer { lock.unlock() };previous=nil;previousTime=0;result=nil;stableSince=nil }
     func estimate(at time:Double) -> PreviewMotionEstimate? {
         lock.lock();defer { lock.unlock() }
         guard let result,time>=result.timestamp,time-result.timestamp<0.4 else { return nil };return result
@@ -57,11 +59,11 @@ final class PreviewMotionMeter {
         guard pixels.count==64*48,time.isFinite,pixels.allSatisfy(\.isFinite) else { return }
         lock.lock();defer { lock.unlock() }
         defer { previous=pixels;previousTime=time }
-        guard let previous,time>previousTime,time-previousTime<0.3 else { result=nil;return }
+        guard let previous,time>previousTime,time-previousTime<0.3 else { result=nil;stableSince=nil;return }
         let mean=pixels.reduce(0,+)/Float(pixels.count)
         let oldMean=previous.reduce(0,+)/Float(previous.count)
         let variance=pixels.reduce(Float(0)) { $0+($1-mean)*($1-mean) }/Float(pixels.count)
-        guard variance>0.00015 else { result=nil;return }
+        guard variance>0.00015 else { result=nil;stableSince=nil;return }
         var best=Float.infinity,second=Float.infinity,dx=0,dy=0
         for y in -4...4 { for x in -4...4 {
             var cost:Float=0
@@ -71,8 +73,25 @@ final class PreviewMotionMeter {
             if cost<best { second=best;best=cost;dx=x;dy=y } else if cost<second { second=cost }
         } }
         let separation=Double(max(0,second-best)/max(second,0.0001))
-        // SAD also detects subject motion that cannot be explained by a pan.
-        let residual=Double(best/468),speed=hypot(Double(dx),Double(dy))/(time-previousTime)
-        result=PreviewMotionEstimate(timestamp:time,pixelsPerSecond:max(speed,residual*180),confidence:min(1,separation*4))
+        // Refine the global displacement by the image-gradient normal equations.
+        // Raw SAD includes shot noise: treating it as velocity prevents a noisy
+        // but stationary night scene from ever qualifying as a tripod exposure.
+        var xx=0.0,xy=0.0,yy=0.0,bx=0.0,by=0.0
+        for row in stride(from:6,to:42,by:2) { for col in stride(from:6,to:58,by:2) {
+            let i=(row+dy)*64+col+dx
+            let gx=Double(pixels[i+1]-pixels[i-1])*0.5,gy=Double(pixels[i+64]-pixels[i-64])*0.5
+            let delta=Double((previous[row*64+col]-oldMean)-(pixels[i]-mean))
+            xx+=gx*gx;xy+=gx*gy;yy+=gy*gy;bx+=gx*delta;by+=gy*delta
+        } }
+        let determinant=xx*yy-xy*xy
+        guard determinant>1e-7 else { result=nil;stableSince=nil;return }
+        let subX=min(0.5,max(-0.5,(yy*bx-xy*by)/determinant))
+        let subY=min(0.5,max(-0.5,(xx*by-xy*bx)/determinant))
+        let residual=Double(best/468)
+        let pps=hypot(Double(dx)+subX,Double(dy)+subY)/(time-previousTime)
+        let fit=max(0,1-residual/max(0.001,Double(sqrt(variance))*0.6))
+        let confidence=min(1,separation*4)*fit
+        if pps<0.08 && confidence>=0.6 { if stableSince==nil { stableSince=previousTime } } else { stableSince=nil }
+        result=PreviewMotionEstimate(timestamp:time,pixelsPerSecond:pps,confidence:confidence,tripodStable:stableSince.map { time-$0>=1.0 } ?? false)
     }
 }

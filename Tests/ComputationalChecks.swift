@@ -113,6 +113,7 @@ import Darwin
             try checkOpticalProgress()
             try checkZSLReference()
             try check016(calibration:calibration,quads:quadData)
+            try check017(calibration:calibration,quads:quadData)
             print("Computational source checks passed; no capture session, app launch or GPU execution.")
         } catch { fputs("\(error)\n",stderr);exit(1) }
     }
@@ -310,9 +311,9 @@ import Darwin
         try require(abs((tags[33434].first ?? 0)-0.02)<1e-6 && tags[34855]==[400],"Computational DNG lost anchor EXIF exposure/ISO")
         try require(tags.fields[42036] != nil && tags[37386]==[4.25],"Computational DNG lost lens metadata")
         var options=ProcessingOptions();options.zeroShutterLagFusion=true
-        try require(!options.usesPreviewZSL,"Quality priority silently selected 1280p")
+        try require(options.usesPreviewZSL,"Hybrid native-anchor ZSL was disabled at quality priority")
         options.singlePhotoQuality = .balanced
-        try require(options.usesPreviewZSL,"Explicit reduced ZSL path unavailable")
+        try require(options.usesPreviewZSL,"Hybrid ZSL path unavailable")
         archive.reset();try require(archive.original(at:anchor)==nil,"RAW archive did not release its mappings")
         var base=ProcessingOptions();base.nightStatic=true;base.nightMetalRAW=true;base.nightRAW=true;base.color.grain=0.2
         let native=PhotoModePolicy.nativeNight(from:base)
@@ -325,6 +326,67 @@ import Darwin
         try require(!PhotoModePolicy.hdr(from:native,supportsRAW:true).nativeNight && !PhotoModePolicy.preset(.night,from:native,supportsRAW:true).nativeNight,"Photo modes did not leave native night")
         print("Native night mode policy checks passed")
         print("0.16 HDR weights, ROI, indexed references, capture EXIF and native-quality ZSL checks passed")
+    }
+
+    static func check017(calibration:BayerCalibration,quads:Data) throws {
+        var frame=SensorBayerFrame(width:2016,height:1512,quads:Data(),calibration:calibration,exposure:FrameExposure(seconds:0.02,iso:400),timestamp:1,zoom:2)
+        guard let sr=try SuperResolutionPlan.make(frame,count:4) else { throw CameraFailure.message("2x SR did not activate") }
+        try require(sr.width==2016 && sr.height==1512 && sr.scaleX==2 && sr.scaleY==2,"SR failed to restore the 12 MP Bayer raster")
+        try require(sr.originX==504 && sr.originY==378,"SR changed the requested viewfinder framing")
+        try require(try SuperResolutionPlan.make(frame,count:3)==nil,"SR invented samples from an insufficient burst")
+        frame.zoom=1.1
+        try require(try SuperResolutionPlan.make(frame,count:4)==nil,"SR changed ordinary native photography")
+        let w=40,h=24
+        let shifts:[SIMD2<Float>]=[SIMD2(0,0),SIMD2(0.5,0),SIMD2(0,0.5),SIMD2(0.5,0.5)]
+        func scene(_ x:Float,_ y:Float)->Float { 0.4+0.2*cos(2*Float.pi*(0.65*x+0.08*y)) }
+        let samples=shifts.map { shift in (0..<w*h).map { scene(Float($0%w)-shift.x,Float($0/w)-shift.y) } }
+        let result=SuperResolutionReference.reconstruct(samples:samples,width:w,height:h,shifts:shifts)
+        var srError:Float=0,resizeError:Float=0
+        for y in 6..<h*2-6 { for x in 6..<w*2-6 {
+            let px=UCSRPosition(Float(x),0.25,0,2),py=UCSRPosition(Float(y),0.25,0,2)
+            let ix=Int(floor(px)),iy=Int(floor(py)),fx=px-Float(ix),fy=py-Float(iy)
+            let top=samples[0][iy*w+ix]*(1-fx)+samples[0][iy*w+ix+1]*fx
+            let bottom=samples[0][(iy+1)*w+ix]*(1-fx)+samples[0][(iy+1)*w+ix+1]*fx
+            let resized=top*(1-fy)+bottom*fy,truth=scene(px,py)
+            srError+=pow(result[y*w*2+x]-truth,2);resizeError+=pow(resized-truth,2)
+        } }
+        try require(srError<resizeError*0.75,"Shifted SR did not recover the synthetic 0.65-cycle/quad signal better than a single-frame resize")
+        let small=SensorBayerFrame(width:256,height:192,quads:quads,calibration:calibration,exposure:frame.exposure,timestamp:1,zoom:2)
+        let plan=try SuperResolutionPlan.make(small,count:4)!
+        let encoded=try FusedDNG.encode(quads:quads,width:plan.width,height:plan.height,calibration:plan.calibration(calibration),zoom:1,reconstruction:plan)
+        let decoder=CIRAWFilter(imageData:encoded,identifierHint:"com.adobe.raw-image")
+        try require(decoder?.outputImage?.extent.size==CGSize(width:512,height:384),"Reconstructed DNG retained the low-resolution crop")
+        // Preserve optical correction only when it is understood and baked.
+        for lens in LensIdentity.allCases {
+            let prior=LensCalibration.profile(lens)
+            try require(prior.shot>0 && prior.read>0 && prior.sharpenRadius>0,"Invalid lens profile")
+            let model=SensorNoiseModel.coefficients(iso:800,profile:[],lens:lens)
+            let measured=SensorNoiseModel.coefficients(iso:800,profile:[0.001,0.00002],lens:lens)
+            try require(abs(measured.x-0.001)<1e-7 && abs(measured.y-0.00002)<1e-8,"Lens prior overwrote measured DNG noise")
+            if lens != .wide { try require(model.y>SensorNoiseModel.coefficients(iso:800,profile:[],lens:.wide).y,"Lens read-noise prior was ignored") }
+            var recipe=ProcessingOptions();recipe.lens=lens;recipe.chromaDenoise=0.8;recipe.localContrast=1.2;recipe.sharpenRadius=3
+            let kept=prior.recipe(recipe)
+            try require(kept.chromaDenoise==0.8 && kept.localContrast==1.2 && kept.sharpenRadius==3,"Automatic lens recipe overwrote manual settings")
+        }
+        try require(UCTemporalPoint(0.7,0.01,0.68,0.01,0.001,0.5,0.0001,0.03)==1,"Aligned real point was clipped as an impulse")
+        try require(UCTemporalPoint(0.7,0.01,0.01,0.01,0.001,0.5,0.1,0)==0,"Isolated hot pixel gained temporal support")
+        try require(UCTemporalPoint(0.7,0.01,0.5,0.01,0.001,0.5,0.02,0)==0,"Sensor-fixed hot pixel was accepted under measurable motion")
+        try require(UCTemporalPoint(0.7,0.01,0.7,0.01,0.001,0,0,0)==1,"Indistinguishable stationary point was erased")
+        let meter=PreviewMotionMeter()
+        let texture=(0..<64*48).map { i -> Float in Float((i*7381^(i/64)*193)%239)/300 }
+        for index in 0..<18 { meter.append(texture,time:10+Double(index)*0.1) }
+        try require(meter.estimate(at:11.71)?.tripodStable==true,"Stable textured tripod did not qualify")
+        meter.reset();try require(meter.estimate(at:11.71)==nil,"Motion reset retained tripod state")
+        let astro=try NightCapturePlan.make(iso:1600,seconds:1.0/30,isoRange:25...3200,durationRange:0.0001...0.8,budget:16,tripodStable:true)
+        try require(astro.astro && astro.count==16 && astro.seconds==0.8,"Astro did not use the physical exposure limit")
+        let bounded=try NightCapturePlan.make(iso:1600,seconds:1.0/30,isoRange:25...3200,durationRange:0.0001...1,budget:8,tripodStable:true)
+        try require(bounded.astro && bounded.seconds*Double(bounded.count)<=8,"Astro exceeded the user's integration budget")
+        let blocked=try NightCapturePlan.make(iso:1600,seconds:1.0/30,isoRange:25...3200,durationRange:0.0001...1,budget:16,tripodStable:true,astroEnabled:false)
+        try require(!blocked.astro,"Disabled Astro still altered exposure scheduling")
+        let hdrScene=HDRSceneMeter(shadow:0.002,median:0.15,highlight:0.999,timestamp:1)
+        let adaptive=try HDRCapturePlan.make(iso:200,seconds:0.02,span:1,isoRange:25...3200,durationRange:0.0001...1,scene:hdrScene)
+        try require(adaptive[0].seconds==0.01 && adaptive[2].product/adaptive[0].product>4,"HDR ignored clipped highlights / scene span")
+        print("0.17 SR recovery, lens priors, temporal points, tripod scheduling and adaptive HDR passed")
     }
 
 }

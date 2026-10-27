@@ -10,6 +10,8 @@ struct FusionParameters {
     float4 noise; // Pair shot/read variance in the reference exposure domain.
     float4 tone; // toe strength, deep-shadow chroma start/end, reserved.
     float4 sensorNoise; // Reference shot/read, sample shot/read before scaling.
+    uint4 flags; // Astro / reserved.
+    float4 sr; // Crop origin in quads; output/source sampling scales.
     uint4 roi; // Half-open active quad box (or level-scaled box for flow).
 };
 constexpr sampler pixels(coord::pixel,address::clamp_to_edge,filter::linear);
@@ -166,6 +168,27 @@ kernel void uc_regularize_flow(texture2d<float,access::sample> reference [[textu
     output.write(current,tile);
 }
 
+// This expensive patch comparison runs only at reference pixels changed by
+// spatial impulse protection. Other pixels retain the cheap fusion path.
+inline float4 uc_point_support(texture2d<float,access::sample> rawReference,
+ texture2d<float,access::sample> rawSample,uint2 p,float2 q,float4 clean,
+ float2 displacement,constant FusionParameters &params) {
+ float4 peak=rawReference.read(p);
+ if (!any(peak-clean>1e-5f)) return float4(0);
+ float4 upper=float4(-INFINITY),alignedUpper=upper,alignedError=0,stationaryError=0;
+ for(int y=-1;y<=1;++y) for(int x=-1;x<=1;++x) {
+  uint2 r=uint2(clamp(int2(p)+int2(x,y),int2(0),int2(rawReference.get_width()-1,rawReference.get_height()-1)));
+  float4 a=rawReference.read(r),b=rawSample.sample(pixels,q+float2(x,y))*params.control.w;
+  float4 fixed=rawSample.read(r)*params.control.w;
+  alignedError+=(a-b)*(a-b)/9.0f;stationaryError+=(a-fixed)*(a-fixed)/9.0f;
+  if(x || y) { upper=max(upper,a);alignedUpper=max(alignedUpper,b); }
+ }
+ float4 candidate=rawSample.sample(pixels,q)*params.control.w;
+ float4 sigma=sqrt(max(params.noise.x*max(upper,0.0f)+params.noise.y,1e-8f)),result=0;
+ for(uint c=0;c<4;++c) result[c]=UCTemporalPoint(peak[c],upper[c],candidate[c],alignedUpper[c],sigma[c],length(displacement),alignedError[c],stationaryError[c]) ? 1.0f:0.0f;
+ return result;
+}
+
 kernel void uc_fuse_tiles(texture2d<float,access::read> reference [[texture(0)]],
                           texture2d<float,access::sample> sample [[texture(1)]],
                           texture2d<float,access::read> mean [[texture(2)]],
@@ -173,6 +196,8 @@ kernel void uc_fuse_tiles(texture2d<float,access::read> reference [[texture(0)]]
                           texture2d<float,access::read> flow [[texture(4)]],
                           texture2d<float,access::write> nextMean [[texture(5)]],
                           texture2d<float,access::write> nextWeights [[texture(6)]],
+                          texture2d<float,access::sample> rawReference [[texture(7)]],
+                          texture2d<float,access::sample> rawSample [[texture(8)]],
                           constant FusionParameters &params [[buffer(0)]],uint2 p [[thread_position_in_grid]]) {
     if (p.x>=reference.get_width() || p.y>=reference.get_height()) return;
     float4 anchor=reference.read(p);
@@ -191,15 +216,35 @@ kernel void uc_fuse_tiles(texture2d<float,access::read> reference [[texture(0)]]
         float4 motion=flow.read(index);float2 q=float2(p)+0.5f+motion.xy;
         if (q.x<0.5f || q.y<0.5f || q.x>sample.get_width()-0.5f || q.y>sample.get_height()-0.5f) continue;
         float4 sensor=sample.sample(pixels,q);
+        float4 pairAnchor=anchor;
+        if(params.size.w) {
+            float4 supported=uc_point_support(rawReference,rawSample,p,q,anchor,motion.xy,params);
+            pairAnchor=mix(anchor,rawReference.read(p),supported);
+            sensor=mix(sensor,rawSample.sample(pixels,q),supported);
+            // Restore the clipped reference contribution only after temporal
+            // support, including support first discovered in a later frame.
+            acc=mix(acc,max(acc,pairAnchor),supported);
+        }
         float4 candidate=sensor*params.control.w;
-        float4 residual=candidate-anchor;
+        float4 residual=candidate-pairAnchor;
         float energy=params.size.w ? dot(residual*residual,float4(0.25f)):dot(residual.rgb*residual.rgb,float3(1.0f/3));
         float variance=max(params.control.x,1e-7f);
         if (params.size.w) {
             float signal=UCRAWVarianceSignal(dot(anchor,float4(0.25f)),dot(candidate,float4(0.25f)));
             variance=max(params.noise.x*signal+params.noise.y,1e-8f);
         }
-        float robust=exp(-energy/(18.0f*variance));
+        float4 localResidual=0;float localEnergy=0;
+        for (int dy=-1;dy<=1;++dy) for (int dx=-1;dx<=1;++dx) {
+            uint2 rp=uint2(clamp(int2(p)+int2(dx,dy),int2(0),int2(reference.get_width()-1,reference.get_height()-1)));
+            float4 delta=sample.sample(pixels,q+float2(dx,dy))*params.control.w-reference.read(rp);
+            localResidual+=delta/9.0f;localEnergy+=dot(delta*delta,float4(0.25f))/9.0f;
+        }
+        float biasEnergy=dot(localResidual*localResidual,float4(0.25f));
+        float occlusion=1.0f-smoothstep(9.0f*variance,64.0f*variance,biasEnergy);
+        // A coherent moved edge remains different across its neighbourhood;
+        // independent sensor noise averages out instead of becoming a ghost.
+        float robust=exp(-energy/(18.0f*variance))*occlusion;
+        robust*=1.0f-smoothstep(36.0f*variance,144.0f*variance,localEnergy);
         // A low-cost zero match is valid in smooth areas; a high-cost ambiguous
         // match is rejected. The reference always supplies weight one.
         float reliable=motion.z<3.0f*sqrt(variance) ? 1.0f:motion.w;
@@ -271,4 +316,47 @@ kernel void uc_night_tone(texture2d<float,access::sample> input [[texture(0)]],
     float3 result=clean*(mapped/luminance);
     result/=max(1.0f,max(result.r,max(result.g,result.b)));
     output.write(float4(result,1),p);
+}
+
+// Gather measured CFA samples onto the dense grid. Four phase-specific weights
+// retain the physical half-quad offsets; no demosaicked resize is involved.
+kernel void uc_fuse_super_res(texture2d<float,access::sample> reference [[texture(0)]],
+ texture2d<float,access::read> sample [[texture(1)]],texture2d<float,access::read> mean [[texture(2)]],
+ texture2d<float,access::read> weights [[texture(3)]],texture2d<float,access::read> flow [[texture(4)]],
+ texture2d<float,access::write> nextMean [[texture(5)]],texture2d<float,access::write> nextWeights [[texture(6)]],
+ texture2d<float,access::sample> rawReference [[texture(7)]],texture2d<float,access::sample> rawSample [[texture(8)]],
+ constant FusionParameters &params [[buffer(0)]],uint2 p [[thread_position_in_grid]]) {
+ if (p.x>=nextMean.get_width() || p.y>=nextMean.get_height()) return;
+ float2 center=params.sr.xy+(float2(p)+0.5f)/params.sr.zw;
+ uint2 tile=min(uint2(max(center,0.0f)/16),uint2(flow.get_width()-1,flow.get_height()-1));
+ float4 motion=params.search.y ? flow.read(tile):float4(0,0,0,1);
+ float4 sum=0,total=0,previous=mean.read(p);
+ for (uint phase=0;phase<4;++phase) {
+  float2 phaseOffset=float2(phase&1,phase>>1)*0.5f+0.25f;
+  float2 native=float2(UCSRPosition(float(p.x),phaseOffset.x,params.sr.x,params.sr.z),UCSRPosition(float(p.y),phaseOffset.y,params.sr.y,params.sr.w));
+  float2 q=native+motion.xy;int2 base=int2(floor(q));
+  float4 clean=reference.sample(pixels,native+0.5f);
+  uint2 rp=uint2(clamp(round(native),float2(0),float2(reference.get_width()-1,reference.get_height()-1)));
+  float4 supported=params.search.y ? uc_point_support(rawReference,rawSample,rp,float2(rp)+0.5f+motion.xy,reference.read(rp),motion.xy,params):float4(0);
+  float anchor=mix(clean[phase],rawReference.sample(pixels,native+0.5f)[phase],supported[phase]);
+  if(supported[phase]>0.5f) previous[phase]=max(previous[phase],anchor);
+  float signal=max(anchor,0.0f),variance=max(params.noise.x*signal+params.noise.y,1e-6f);
+  float reliable=motion.z<3*sqrt(variance) ? 1.0f:motion.w;
+  for (int y=-1;y<=2;++y) for (int x=-1;x<=2;++x) {
+   int2 source=base+int2(x,y);if (any(source<0) || source.x>=int(sample.get_width()) || source.y>=int(sample.get_height())) continue;
+   float sensor=mix(sample.read(uint2(source))[phase],rawSample.read(uint2(source))[phase],supported[phase]),value=sensor*params.control.w;
+   float2 d=float2(source)-q;float radial=UCSRWeight(d.x,d.y);
+   // Allow genuine alias detail only for a registered, low-cost tile.
+   float robust=exp(-(value-anchor)*(value-anchor)/(18*variance));
+   if (motion.z<sqrt(variance)) robust=max(robust,0.15f);
+   float w=radial*robust*reliable;
+   if (params.search.z) w*=UCHDRExposureWeight(sensor,sensor,params.control.w);
+   sum[phase]+=value*w;total[phase]+=w;
+  }
+ }
+ float4 old=weights.read(p),combined=old+total;
+ nextMean.write((previous*old+sum)/max(combined,1e-8f),p);nextWeights.write(combined,p);
+}
+kernel void uc_clear(texture2d<float,access::write> output [[texture(0)]],uint2 p [[thread_position_in_grid]]) {
+ if (p.x<output.get_width() && p.y<output.get_height()) output.write(float4(0),p);
 }

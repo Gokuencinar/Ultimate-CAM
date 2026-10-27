@@ -115,6 +115,7 @@ struct SensorBayerFrame {
     var noiseProfile:[Double] = []
     var sharpness:Double = 0
     var zoom:Double = 1
+    var lens:LensIdentity = .wide
     func discardResidentPages() { backing?.discardResidentPages() }
 
     func matchesExposure(of other:SensorBayerFrame)->Bool {
@@ -138,7 +139,7 @@ struct SensorBayerFrame {
     }
 
     #if os(iOS)
-    static func capture(_ photo:AVCapturePhoto,dng:Data,zoom:Double=1) throws -> SensorBayerFrame {
+    static func capture(_ photo:AVCapturePhoto,dng:Data,zoom:Double=1,lens:LensIdentity = .wide) throws -> SensorBayerFrame {
         guard zoom.isFinite,(1...64).contains(zoom) else { throw CameraFailure.message("Zoom RAW inválido.") }
         guard photo.isRawPhoto,let pixel=photo.pixelBuffer,
               let source=CGImageSourceCreateWithData(dng as CFData,nil),
@@ -244,9 +245,9 @@ struct SensorBayerFrame {
         let mapped=try BayerScratchStorage.store(packed)
         var frame=SensorBayerFrame(width:qw,height:qh,quads:mapped.data,calibration:calibration,exposure:exposure,timestamp:photo.timestamp.seconds)
         frame.noiseProfile=SensorNoiseModel.validProfile(numbers("NoiseProfile")) ?? []
-        frame.zoom=zoom
+        frame.zoom=zoom;frame.lens=lens
         frame.sharpness=BayerQuadPacking.sharpness(quads:packed,width:qw,height:qh,pattern:croppedPattern,
-            noise:SensorNoiseModel.coefficients(iso:exposure.iso,profile:frame.noiseProfile))
+            noise:SensorNoiseModel.coefficients(iso:exposure.iso,profile:frame.noiseProfile,lens:lens))
         frame.backing=mapped.storage;return frame
     }
     #endif
@@ -264,7 +265,7 @@ enum SensorNoiseModel {
         }
         return values
     }
-    static func coefficients(iso:Double,profile:[Double])->SIMD2<Float> {
+    static func coefficients(iso:Double,profile:[Double],lens:LensIdentity = .wide)->SIMD2<Float> {
         if let profile=validProfile(profile) {
             var shot=0.0,read=0.0
             for pair in stride(from:0,to:profile.count,by:2) { shot+=profile[pair];read+=profile[pair+1] }
@@ -272,10 +273,11 @@ enum SensorNoiseModel {
             return SIMD2<Float>(Float(shot/planes),Float(read/planes))
         }
         let gain=Float(min(128,max(0.25,iso.isFinite ? iso/100:1)))
-        return SIMD2<Float>(2e-5*gain,4.5e-7*gain*gain)
+        let prior=LensCalibration.profile(lens)
+        return SIMD2<Float>(2e-5*gain*prior.shot,4.5e-7*gain*gain*prior.read)
     }
-    static func pair(reference:FrameExposure,referenceProfile:[Double],sample:FrameExposure,sampleProfile:[Double],scale:Float)->SIMD2<Float> {
-        let a=coefficients(iso:reference.iso,profile:referenceProfile),b=coefficients(iso:sample.iso,profile:sampleProfile)
+    static func pair(reference:FrameExposure,referenceProfile:[Double],sample:FrameExposure,sampleProfile:[Double],scale:Float,referenceLens:LensIdentity = .wide,sampleLens:LensIdentity = .wide)->SIMD2<Float> {
+        let a=coefficients(iso:reference.iso,profile:referenceProfile,lens:referenceLens),b=coefficients(iso:sample.iso,profile:sampleProfile,lens:sampleLens)
         return SIMD2<Float>(a.x+b.x*scale,a.y+b.y*scale*scale)
     }
 }
@@ -390,7 +392,7 @@ enum BayerQuadPacking {
 /// Calibrated uncompressed DNG for CIRAWFilter and optional computational RAW
 /// export. The original camera DNG remains the default export choice.
 enum FusedDNG {
-    static func encode(quads:Data,width:Int,height:Int,calibration c:BayerCalibration,noiseProfile:[Double]=[],zoom:Double=1,capture:DNGCaptureInfo?=nil) throws -> Data {
+    static func encode(quads:Data,width:Int,height:Int,calibration c:BayerCalibration,noiseProfile:[Double]=[],zoom:Double=1,capture:DNGCaptureInfo?=nil,reconstruction:SuperResolutionPlan?=nil) throws -> Data {
         guard width>0,height>0,width<=2048,height<=2048,quads.count==width*height*8,c.pattern.count==4,
               c.matrix.count==9,c.matrix.allSatisfy({$0.isFinite && abs($0)<32}),
               c.neutral.count==3,c.neutral.allSatisfy({$0.isFinite && $0>0 && $0<32}),
@@ -517,8 +519,8 @@ enum FusedDNG {
         try quads.withUnsafeBytes { bytes in
             guard let address=bytes.baseAddress,Int(bitPattern:address)%2==0 else { throw CameraFailure.message("Cuartetos RAW desalineados.") }
             let input=UnsafeBufferPointer(start:address.assumingMemoryBound(to:UInt16.self),count:width*height*4)
-            @inline(__always) func encoded(_ bits:UInt16) throws -> UInt16 {
-                let value=Float(Float16(bitPattern:UInt16(littleEndian:bits)))
+            @inline(__always) func encoded(_ bits:UInt16,_ gain:Float=1) throws -> UInt16 {
+                let value=Float(Float16(bitPattern:UInt16(littleEndian:bits)))*gain
                 guard value.isFinite else { throw CameraFailure.message("La fusión RAW devolvió un valor no finito.") }
                 let sample=min(Float(65535),max(0,(value*57343+4096).rounded()))
                 return UInt16(sample).littleEndian
@@ -528,8 +530,8 @@ enum FusedDNG {
                 let row=input.baseAddress!.advanced(by:y*width*4)
                 for x in 0..<width {
                     let q=row.advanced(by:x*4),pixel=x*2
-                    top[pixel]=try encoded(q[0]);top[pixel+1]=try encoded(q[1])
-                    bottom[pixel]=try encoded(q[2]);bottom[pixel+1]=try encoded(q[3])
+                    top[pixel]=try encoded(q[0],reconstruction?.gain(x:x,y:y,phase:0) ?? 1);top[pixel+1]=try encoded(q[1],reconstruction?.gain(x:x,y:y,phase:1) ?? 1)
+                    bottom[pixel]=try encoded(q[2],reconstruction?.gain(x:x,y:y,phase:2) ?? 1);bottom[pixel+1]=try encoded(q[3],reconstruction?.gain(x:x,y:y,phase:3) ?? 1)
                 }
             }
         }

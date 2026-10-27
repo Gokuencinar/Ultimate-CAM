@@ -16,6 +16,12 @@ final class PreviewAnalysisController:NSObject,AVCaptureVideoDataOutputSampleBuf
     private var previousBufferTime=0.0
     private var buffering=false
     private var motionEnabled=false
+    private var exposureMetering=false
+    private var exposureReading:HDRSceneMeter?
+    func exposure(at time:Double)->HDRSceneMeter? {
+        lock.lock();defer { lock.unlock() }
+        guard let exposureReading,time>=exposureReading.timestamp,time-exposureReading.timestamp<0.7 else { return nil };return exposureReading
+    }
     private var lastPTS=Double.nan
     private let queue=DispatchQueue(label:"com.gokuencinar.ultimatecam.preview-analysis",qos:.utility)
     private let context=CIContext(options:[.cacheIntermediates:false])
@@ -52,13 +58,14 @@ final class PreviewAnalysisController:NSObject,AVCaptureVideoDataOutputSampleBuf
             self.options=options;self.previousTime=0
             self.processing=processing;self.notice=nil
             self.buffering=processing.zeroShutterLagFusion && !processing.nightStatic && !processing.hdrBracketing && processing.portraitAmount==0
-            self.motionEnabled=processing.nightStatic && processing.nightMotionMetering
+            self.motionEnabled=processing.nightStatic && (processing.nightMotionMetering || processing.astroEnabled)
+            self.exposureMetering=processing.hdrBracketing
             self.history.reset();self.motion.reset();self.previousBufferTime=0;self.lastPTS = .nan
             do {
                 self.recipe=options.colorLook && processing.color.needsCube ? try ColorRecipeLUT.make(processing.color) : nil
                 self.customLUT=options.colorLook ? try processing.lutID.map { try ColorLUTStore.load($0) } : nil
             } catch { self.recipe=nil;self.customLUT=nil;self.notice="Vista de color: \(error.localizedDescription)" }
-            self.lock.lock();if self.configurationGeneration==token { self.configurationReady=true };self.lock.unlock()
+            self.lock.lock();if self.configurationGeneration==token { self.configurationReady=true;self.exposureReading=nil };self.lock.unlock()
             DispatchQueue.main.async { self.lock.lock();let valid=self.generation==token;self.lock.unlock();if valid { self.completion(nil) } }
         }
     }
@@ -66,14 +73,14 @@ final class PreviewAnalysisController:NSObject,AVCaptureVideoDataOutputSampleBuf
         lock.lock();let enabled=active && configurationReady,token=generation,pending=deliveryPending;lock.unlock()
         guard enabled,let pixel=CMSampleBufferGetImageBuffer(sampleBuffer),CVPixelBufferGetPlaneCount(pixel)>0 else { return }
         let host=ProcessInfo.processInfo.systemUptime
-        if (buffering || motionEnabled) && host-previousBufferTime>=1.0/15 {
+        if (buffering || motionEnabled || exposureMetering) && host-previousBufferTime>=1.0/15 {
             previousBufferTime=host
             let pts=CMSampleBufferGetPresentationTimeStamp(sampleBuffer).seconds
             if !pts.isFinite || (lastPTS.isFinite && pts<=lastPTS) { history.reset();motion.reset() }
             lastPTS=pts
             if pts.isFinite {
                 let image=CIImage(cvPixelBuffer:pixel)
-                if motionEnabled {
+                if motionEnabled || exposureMetering {
                     let thumbnail=image.transformed(by:CGAffineTransform(scaleX:64/image.extent.width,y:48/image.extent.height))
                     var values=[Float](repeating:0,count:64*48*4)
                     values.withUnsafeMutableBytes { context.render(thumbnail,toBitmap:$0.baseAddress!,rowBytes:64*16,bounds:CGRect(x:0,y:0,width:64,height:48),format:.RGBAf,colorSpace:CGColorSpace(name:CGColorSpace.sRGB)!) }
@@ -84,7 +91,8 @@ final class PreviewAnalysisController:NSObject,AVCaptureVideoDataOutputSampleBuf
                             let r=values[index*4],g=values[index*4+1],b=values[index*4+2]
                             luma[index]=r*0.2126+g*0.7152+b*0.0722
                         }
-                        motion.append(luma,time:host)
+                        if motionEnabled { motion.append(luma,time:host) }
+                        exposureReading=HDRSceneMeter.measure(luma,time:host)
                     }
                     lock.unlock()
                 }

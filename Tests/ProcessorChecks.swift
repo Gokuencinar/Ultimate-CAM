@@ -86,6 +86,7 @@ struct ProcessorChecks {
     }
 
     static func run() throws {
+        try check017()
         let plan = try NightCapturePlan.make(iso: 1600, seconds: 1.0 / 30, isoRange: 25...3200, durationRange: 0.00001...0.333)
         try require(plan.seconds == 0.25 && plan.iso < 250 && plan.count == 16, "Static night did not trade ISO for exposure")
         try require(abs(plan.iso * plan.seconds - 1600.0 / 30) < 0.001, "Night plan changed metered brightness")
@@ -309,4 +310,43 @@ struct ProcessorChecks {
         log("CALIBRATED RAW IMPORT CHECK PASSED · synthetic DNG")
         log("PROCESSOR CHECKS PASSED · synthetic fixtures only")
     }
+    static func check017() throws {
+        let w=192,h=128,e=CGRect(x:0,y:0,width:w,height:h)
+        let linear=CGColorSpace(name:CGColorSpace.extendedLinearSRGB)!
+        let ctx=CIContext(options:[.workingColorSpace:linear,.cacheIntermediates:false])
+        var pixels=[Float](repeating:1,count:w*h*4),matte=pixels,disparity=pixels
+        for y in 0..<h { for x in 0..<w {
+            let i=(y*w+x)*4,person=(x>=70 && x<122) || (x>=121 && x<125 && y>32 && y<96)
+            let value:Float=person ? 0.8:0.08
+            for c in 0..<3 { pixels[i+c]=value;matte[i+c]=person ? 1:0;disparity[i+c]=x<96 ? 0.7:0.2 }
+        } }
+        func image(_ p:[Float])->CIImage { CIImage(bitmapData:p.withUnsafeBufferPointer{Data(buffer:$0)},bytesPerRow:w*16,size:e.size,format:.RGBAf,colorSpace:linear) }
+        func read(_ image:CIImage)->[Float] {
+            var values=[Float](repeating:0,count:w*h*4)
+            values.withUnsafeMutableBytes { ctx.render(image,toBitmap:$0.baseAddress!,rowBytes:w*16,bounds:e,format:.RGBAf,colorSpace:linear) };return values
+        }
+        let guide=image(pixels),mask=image(matte)
+        let soft=mask.clampedToExtent().applyingFilter("CIGaussianBlur",parameters:[kCIInputRadiusKey:3]).cropped(to:e)
+        let refined=read(PortraitProcessor.guidedMask(soft,guide:guide,extent:e,radius:3,epsilon:0.0001)),blurred=read(soft)
+        let inside=(64*w+123)*4,outside=(64*w+127)*4
+        try require(refined[inside]-refined[outside]>blurred[inside]-blurred[outside]+0.15,"Guided filter failed to restore the fine foreground boundary")
+        try require(refined.allSatisfy(\.isFinite),"Guided mask generated non-finite values")
+        let depth=PortraitDepth(disparity:image(disparity),validity:CIImage(color:.white).cropped(to:e))
+        try require(depth.aligned(to:CGRect(x:0,y:0,width:384,height:256)) != nil && depth.aligned(to:CGRect(x:0,y:0,width:256,height:384))==nil,"Depth was stretched across incompatible orientation")
+        let bokeh=try PortraitProcessor.apply(guide,mask:mask,extent:e,amount:1,depth:depth,context:ctx)
+        let rendered=read(bokeh)
+        try require(rendered.allSatisfy(\.isFinite) && abs(rendered[(64*w+90)*4]-0.8)<0.02,"Hybrid depth bokeh damaged foreground / generated invalid pixels")
+        // A native 12 MP anchor keeps its fine spatial detail: support supplies
+        // only a low-frequency correction, never the final output dimensions.
+        let nativeExtent=CGRect(x:0,y:0,width:4032,height:3024)
+        let native=CIImage(color:CIColor(red:0.1,green:0.12,blue:0.14)).cropped(to:nativeExtent)
+        let support=CIImage(color:CIColor(red:0.11,green:0.13,blue:0.15)).cropped(to:CGRect(x:0,y:0,width:1280,height:960))
+        let hybrid=HybridZSL.inject(native:native,support:support)
+        try require(hybrid.extent==nativeExtent,"Hybrid ZSL lost the native 12 MP geometry")
+        let unchanged=HybridZSL.inject(native:guide,support:guide)
+        let same=read(unchanged)
+        try require(zip(same,read(guide)).allSatisfy{abs($0-$1)<0.002},"Zero ZSL correction changed native high-frequency detail")
+        log("Guided edges, registered disparity and native-anchor ZSL passed")
+    }
+
 }
