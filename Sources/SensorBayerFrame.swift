@@ -25,6 +25,28 @@ struct DNGSensorGeometry:Equatable {
     }
 }
 
+enum BayerZoomCrop {
+    static func geometry(width:Int,height:Int,original:DNGSensorGeometry?,zoom:Double) throws -> DNGSensorGeometry {
+        guard width>=4,height>=4,zoom.isFinite,(1...64).contains(zoom) else { throw CameraFailure.message("Zoom RAW fuera de rango.") }
+        let source=original ?? DNGSensorGeometry(width:width,height:height,activeArea:[0,0,UInt32(height),UInt32(width)],cropOrigin:[0,0],cropSize:[Double(width),Double(height)])
+        guard source.valid(width:width,height:height) else { throw CameraFailure.message("Geometría RAW de zoom inválida.") }
+        if zoom==1 { return source }
+        let activeWidth=Double(source.activeArea[3]-source.activeArea[1]),activeHeight=Double(source.activeArea[2]-source.activeArea[0])
+        // Some camera formats already encode the digital crop in their DNG.
+        // Never apply the viewfinder zoom a second time in that case.
+        if zoom>1.05,abs(activeWidth/source.cropSize[0]/zoom-1)<0.035,
+           abs(activeHeight/source.cropSize[1]/zoom-1)<0.035 { return source }
+        let cropW=floor(source.cropSize[0]/zoom/2)*2,cropH=floor(source.cropSize[1]/zoom/2)*2
+        guard cropW>=4,cropH>=4 else { throw CameraFailure.message("El encuadre RAW es demasiado pequeño.") }
+        let left=Double(source.activeArea[1]),top=Double(source.activeArea[0])
+        let x=floor((left+source.cropOrigin[0]+(source.cropSize[0]-cropW)/2)/2)*2-left
+        let y=floor((top+source.cropOrigin[1]+(source.cropSize[1]-cropH)/2)/2)*2-top
+        let result=DNGSensorGeometry(width:width,height:height,activeArea:source.activeArea,cropOrigin:[x,y],cropSize:[cropW,cropH])
+        guard result.valid(width:width,height:height),x>=source.cropOrigin[0],y>=source.cropOrigin[1] else { throw CameraFailure.message("Recorte RAW fuera del área original.") }
+        return result
+    }
+}
+
 /// A compact quad texture: RGGB/GRBG/BGGR/GBRG phases remain four separate
 /// channels through alignment and fusion. No interpolation across CFA colors.
 struct SensorBayerFrame {
@@ -36,6 +58,7 @@ struct SensorBayerFrame {
     var backing:BayerScratchStorage? = nil
     var noiseProfile:[Double] = []
     var sharpness:Double = 0
+    var zoom:Double = 1
     func discardResidentPages() { backing?.discardResidentPages() }
 
     func matchesExposure(of other:SensorBayerFrame)->Bool {
@@ -59,7 +82,8 @@ struct SensorBayerFrame {
     }
 
     #if os(iOS)
-    static func capture(_ photo:AVCapturePhoto,dng:Data) throws -> SensorBayerFrame {
+    static func capture(_ photo:AVCapturePhoto,dng:Data,zoom:Double=1) throws -> SensorBayerFrame {
+        guard zoom.isFinite,(1...64).contains(zoom) else { throw CameraFailure.message("Zoom RAW inválido.") }
         guard photo.isRawPhoto,let pixel=photo.pixelBuffer,
               let source=CGImageSourceCreateWithData(dng as CFData,nil),
               let props=CGImageSourceCopyPropertiesAtIndex(source,0,nil) as? [String:Any],
@@ -164,6 +188,7 @@ struct SensorBayerFrame {
         let mapped=try BayerScratchStorage.store(packed)
         var frame=SensorBayerFrame(width:qw,height:qh,quads:mapped.data,calibration:calibration,exposure:exposure,timestamp:photo.timestamp.seconds)
         frame.noiseProfile=SensorNoiseModel.validProfile(numbers("NoiseProfile")) ?? []
+        frame.zoom=zoom
         frame.sharpness=BayerQuadPacking.sharpness(quads:packed,width:qw,height:qh,pattern:croppedPattern,
             noise:SensorNoiseModel.coefficients(iso:exposure.iso,profile:frame.noiseProfile))
         frame.backing=mapped.storage;return frame
@@ -309,7 +334,7 @@ enum BayerQuadPacking {
 /// Minimal uncompressed DNG for CIRAWFilter demosaicing/color conversion of the
 /// fused mosaic. The saved user's RAW remains the original, never this working DNG.
 enum FusedDNG {
-    static func encode(quads:Data,width:Int,height:Int,calibration c:BayerCalibration,noiseProfile:[Double]=[]) throws -> Data {
+    static func encode(quads:Data,width:Int,height:Int,calibration c:BayerCalibration,noiseProfile:[Double]=[],zoom:Double=1) throws -> Data {
         guard width>0,height>0,width<=2048,height<=2048,quads.count==width*height*8,c.pattern.count==4,
               c.matrix.count==9,c.matrix.allSatisfy({$0.isFinite && abs($0)<32}),
               c.neutral.count==3,c.neutral.allSatisfy({$0.isFinite && $0>0 && $0<32}),
@@ -330,6 +355,7 @@ enum FusedDNG {
         var tags=[Tag]()
         func add(_ key:UInt16,_ type:UInt16,_ count:UInt32,_ data:Data) { tags.append(Tag(key:key,type:type,count:count,data:data)) }
         let w=width*2,h=height*2
+        let outputGeometry=try BayerZoomCrop.geometry(width:w,height:h,original:c.geometry,zoom:zoom)
         add(254,4,1,u32(0))
         add(256,4,1,u32(UInt32(w)));add(257,4,1,u32(UInt32(h)))
         add(258,3,1,u16(16));add(259,3,1,u16(1));add(262,3,1,u16(32803))
@@ -343,12 +369,16 @@ enum FusedDNG {
         let model=Data("UltimateCAM working mosaic\0".utf8);add(50708,2,UInt32(model.count),model)
         add(50710,1,3,Data([0,1,2]));add(50711,3,1,u16(1))
         add(50713,3,2,u16(1)+u16(1));add(50714,5,1,rational(4096));add(50717,4,1,u32(61439))
-        if let geometry=c.geometry {
+        if c.geometry != nil || zoom>1 {
+            let geometry=outputGeometry
             guard geometry.valid(width:w,height:h) else { throw CameraFailure.message("La corrección de lente no coincide con el mosaico.") }
             add(50719,5,2,geometry.cropOrigin.reduce(Data()) { $0+rational($1) })
             add(50720,5,2,geometry.cropSize.reduce(Data()) { $0+rational($1) })
             add(50829,4,4,geometry.activeArea.reduce(Data()) { $0+u32($1) })
-            if let opcodes=c.opcodeList2 { let data=try DNGMetadata.validatedOpcodes(opcodes);add(51009,7,UInt32(data.count),data) }
+            if let opcodes=c.opcodeList2 {
+                guard c.geometry != nil else { throw CameraFailure.message("Falta la geometría original de la corrección de lente.") }
+                let data=try DNGMetadata.validatedOpcodes(opcodes);add(51009,7,UInt32(data.count),data)
+            }
         } else {
             guard c.opcodeList2==nil else { throw CameraFailure.message("Falta la geometría original de la corrección de lente.") }
             add(50719,5,2,rational(0)+rational(0));add(50720,4,2,u32(UInt32(w))+u32(UInt32(h)))

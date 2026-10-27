@@ -92,12 +92,17 @@ kernel void uc_tile_flow(texture2d<float,access::sample> reference [[texture(0)]
     }
     float2 refined=float2(chosen);
     if (params.search.w && isfinite(best)) {
-        for (int y=-2;y<=2;++y) for (int x=-2;x<=2;++x) {
-            float2 shift=float2(chosen)+float2(x,y)*0.25f;
-            float cost=uc_tile_cost(reference,sample,tile,shift,params);
-            float2 deviation=shift-float2(prediction);
-            float score=cost+priorWeight*dot(deviation,deviation);
-            if (score<bestScore) { bestScore=score;best=cost;refined=shift; }
+        for (uint stage=0;stage<2;++stage) {
+            float step=stage==0 ? 0.5f:0.25f;
+            float2 origin=refined;
+            for (int y=-1;y<=1;++y) for (int x=-1;x<=1;++x) {
+                if (x==0 && y==0) continue;
+                float2 shift=origin+float2(x,y)*step;
+                float cost=uc_tile_cost(reference,sample,tile,shift,params);
+                float2 deviation=shift-float2(prediction);
+                float score=cost+priorWeight*dot(deviation,deviation);
+                if (score<bestScore) { bestScore=score;best=cost;refined=shift; }
+            }
         }
     }
     float a=reference.sample(pixels,center+float2(-5,-5)).r,b=reference.sample(pixels,center+float2(5,-5)).r;

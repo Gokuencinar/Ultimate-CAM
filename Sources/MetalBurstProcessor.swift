@@ -210,7 +210,7 @@ final class MetalBurstProcessor {
             try autoreleasepool {
             defer { frame.discardResidentPages() }
             try cancellation?.check()
-            guard frame.width==first.width,frame.height==first.height,frame.calibration==first.calibration else {
+            guard frame.width==first.width,frame.height==first.height,frame.calibration==first.calibration,abs(frame.zoom-first.zoom)<0.001 else {
                 throw CameraFailure.message("La pila RAW cambió de geometría, calibración, exposición o secuencia temporal.")
             }
             progress?("Metal RAW · alineando y fusionando \(index+1)/\(frames.count)…")
@@ -230,7 +230,7 @@ final class MetalBurstProcessor {
             accepted+=1
             }
         }
-        return (try FusedDNG.encode(quads:download(work.mean,cancellation:cancellation),width:first.width,height:first.height,calibration:first.calibration,noiseProfile:first.noiseProfile),accepted)
+        return (try FusedDNG.encode(quads:download(work.mean,cancellation:cancellation),width:first.width,height:first.height,calibration:first.calibration,noiseProfile:first.noiseProfile,zoom:first.zoom),accepted)
         }
         // Fusion textures are released before full-resolution demosaicing/tone.
         guard let decoder=CIRAWFilter(imageData:fused.dng,identifierHint:"com.adobe.raw-image") else { throw CameraFailure.message("No se pudo revelar el mosaico fusionado.") }
@@ -246,11 +246,13 @@ final class MetalBurstProcessor {
     }
     func processZSL(_ images:[CGImage],options:ProcessingOptions,captureAngle:Double,previewMirrored:Bool,mirrorOutput:Bool,
                     cancellation:ProcessingCancellation?) throws -> CaptureResult {
-        guard (3...8).contains(images.count),let first=images.last else { throw CameraFailure.message("El búfer ZSL todavía no está preparado.") }
+        guard (3...8).contains(images.count),let anchorIndex=PreviewReferenceSelector.index(in:images,context:context) else { throw CameraFailure.message("El búfer ZSL todavía no está preparado.") }
+        let first=images[anchorIndex]
         let reference=try load(CIImage(cgImage:first),width:first.width,height:first.height,cancellation:cancellation)
         let work=try workspace(reference:reference,raw:false,parameters:MetalFusionParameters(),cancellation:cancellation)
         let referenceNoise=try noisePatch(reference)
-        for image in images.dropLast().reversed() {
+        for index in images.indices.reversed() where index != anchorIndex {
+            let image=images[index]
             guard image.width==first.width,image.height==first.height else { throw CameraFailure.message("Cambió la geometría del búfer ZSL.") }
             try autoreleasepool {
                 let command=try command()

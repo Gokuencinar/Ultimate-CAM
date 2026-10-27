@@ -93,6 +93,7 @@ final class CameraModel: NSObject, ObservableObject, AVCapturePhotoCaptureDelega
     private var rawData: Data?
     private var nightRawFrames = [Data]()
     private var sensorFrames=[SensorBayerFrame]()
+    private var captureZoom:Double=1
     private var temporalFeed=false
     private var hdrPlan: [FrameExposure] = []
     private var hdrExposures: [FrameExposure] = []
@@ -626,6 +627,7 @@ final class CameraModel: NSObject, ObservableObject, AVCapturePhotoCaptureDelega
             return
         }
         self.requestedFlash = flash
+        self.captureZoom=Double(device.videoZoomFactor)
         self.inFlight = true
         self.transaction = UUID()
         self.frames = []
@@ -842,7 +844,7 @@ final class CameraModel: NSObject, ObservableObject, AVCapturePhotoCaptureDelega
                         if timestamp >= 0 { self.lastNightTimestamp = timestamp }
                     }
                     if (self.processingOptions.nightStatic && self.processingOptions.nightMetalRAW) || (self.processingOptions.hdrBracketing && self.processingOptions.hdrMetalRAW) {
-                        do { self.sensorFrames.append(try SensorBayerFrame.capture(photo,dng:data)) }
+                        do { self.sensorFrames.append(try SensorBayerFrame.capture(photo,dng:data,zoom:self.captureZoom)) }
                         catch { self.finishFailure(error);return }
                     }
                     self.rawData = data
