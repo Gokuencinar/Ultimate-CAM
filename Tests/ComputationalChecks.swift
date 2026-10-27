@@ -47,6 +47,34 @@ import Darwin
             guard let decoder=CIRAWFilter(imageData:dng,identifierHint:"com.adobe.raw-image"),let image=decoder.outputImage else { throw CameraFailure.message("CIRAWFilter refused the fused working mosaic") }
             print("Developed DNG:",decoder.nativeSize,image.extent,decoder.scaleFactor)
             try require(image.extent.width==512 && image.extent.height==384,"Working mosaic did not develop")
+            var calibrated=calibration
+            calibrated.extraColor[50722]=calibration.matrix
+            calibrated.extraColor[50964]=[0.4361,0.3851,0.1431,0.2225,0.7169,0.0606,0.0139,0.0971,0.7141]
+            calibrated.extraColor[50965]=calibrated.extraColor[50964]
+            calibrated.illuminant2=17;calibrated.baselineExposure = -0.25
+            calibrated.geometry=DNGSensorGeometry(width:512,height:384,activeArea:[0,0,384,512],cropOrigin:[0,0],cropSize:[512,384])
+            func be32(_ value:UInt32)->Data { var bits=value.bigEndian;return withUnsafeBytes(of:&bits) { Data($0) } }
+            func be64(_ value:Double)->Data { var bits=value.bitPattern.bigEndian;return withUnsafeBytes(of:&bits) { Data($0) } }
+            var gainMap=[UInt32(0),0,384,512,0,1,1,1,2,2].reduce(Data()) { $0+be32($1) }
+            gainMap+=be64(1)+be64(1)+be64(0)+be64(0)+be32(1)
+            gainMap+=[Float(1),1,1,1].reduce(Data()) { $0+be32($1.bitPattern) }
+            calibrated.opcodeList2=be32(1)+be32(9)+be32(0x01030000)+be32(0)+be32(UInt32(gainMap.count))+gainMap
+            let richer=try FusedDNG.encode(quads:quadData,width:256,height:192,calibration:calibrated,noiseProfile:[0.001,0.00002])
+            let metadata=try DNGMetadata.read(richer)
+            try require(metadata[50722]==calibration.matrix && metadata[50779]==[17],"Second illuminant/color matrix lost")
+            try require(metadata[50964]==calibrated.extraColor[50964]! && metadata[50965]==calibrated.extraColor[50965]!,"Forward matrices lost")
+            try require(metadata[50730]==[-0.25] && metadata[51041]==[0.001,0.00002],"Exposure/noise calibration lost")
+            try require(metadata[50719]==[0,0] && metadata[50720]==[512,384] && metadata[50829]==[0,0,384,512],"Original geometry metadata lost")
+            try require(metadata.fields[51009]?.data==calibrated.opcodeList2,"Lens shading opcode payload changed")
+            guard let richerDecoder=CIRAWFilter(imageData:richer,identifierHint:"com.adobe.raw-image"),let richerImage=richerDecoder.outputImage else { throw CameraFailure.message("Calibrated DNG could not develop") }
+            try require(richerImage.extent.width==512 && richerImage.extent.height==384,"Lens shading changed output geometry")
+            var badGeometry=calibrated;badGeometry.geometry=nil
+            var rejectedGeometry=false
+            do { _=try FusedDNG.encode(quads:quadData,width:256,height:192,calibration:badGeometry) } catch { rejectedGeometry=true }
+            try require(rejectedGeometry,"Forwarded gain map without original geometry")
+            var rejectedOpcodes=false
+            do { _=try DNGMetadata.validatedOpcodes(Data([0,0,0,1])) } catch { rejectedOpcodes=true }
+            try require(rejectedOpcodes,"Truncated lens shading metadata accepted")
             print("Core format: native 12MP packing")
             var sensor=[UInt16](repeating:1000,count:4032*3024)
             sensor[0]=1100;sensor[1]=1200;sensor[4032]=1300;sensor[4033]=1400

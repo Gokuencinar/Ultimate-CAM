@@ -200,11 +200,11 @@ final class MetalBurstProcessor {
             try fuse(work,parameters:params,cancellation:cancellation)
             }
         }
-        return try FusedDNG.encode(quads:download(work.mean,cancellation:cancellation),width:first.width,height:first.height,calibration:first.calibration)
+        return try FusedDNG.encode(quads:download(work.mean,cancellation:cancellation),width:first.width,height:first.height,calibration:first.calibration,noiseProfile:first.noiseProfile)
         }
         // Fusion textures are released before full-resolution demosaicing/tone.
         guard let decoder=CIRAWFilter(imageData:dng,identifierHint:"com.adobe.raw-image") else { throw CameraFailure.message("No se pudo revelar el mosaico fusionado.") }
-        decoder.isGamutMappingEnabled=false;decoder.boostAmount=0;decoder.boostShadowAmount=0;decoder.baselineExposure=0;decoder.exposure=0;decoder.shadowBias=0
+        decoder.isGamutMappingEnabled=false;decoder.boostAmount=0;decoder.boostShadowAmount=0;decoder.exposure=0;decoder.shadowBias=0
         if decoder.isLocalToneMapSupported { decoder.localToneMapAmount=0 }
         if decoder.isLuminanceNoiseReductionSupported { decoder.luminanceNoiseReductionAmount=0 }
         guard let developed=decoder.outputImage else { throw CameraFailure.message("El DNG de trabajo no se pudo revelar.") }

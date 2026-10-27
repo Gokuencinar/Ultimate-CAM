@@ -37,7 +37,7 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p build
-          xcrun --sdk macosx swiftc -g -O Sources/CameraFailure.swift Sources/TemporalFrameBuffer.swift Sources/BayerScratchStorage.swift Sources/SensorBayerFrame.swift Sources/HDRCapturePlan.swift Sources/NightCapturePlan.swift Sources/ProcessingOptions.swift Sources/PhotoCapturePolicy.swift Sources/ColorRecipe.swift Sources/CubeLUT.swift Tests/ComputationalChecks.swift -o build/computational-checks
+          xcrun --sdk macosx swiftc -g -O Sources/CameraFailure.swift Sources/TemporalFrameBuffer.swift Sources/BayerScratchStorage.swift Sources/DNGMetadata.swift Sources/SensorBayerFrame.swift Sources/HDRCapturePlan.swift Sources/NightCapturePlan.swift Sources/ProcessingOptions.swift Sources/PhotoCapturePolicy.swift Sources/ColorRecipe.swift Sources/CubeLUT.swift Tests/ComputationalChecks.swift -o build/computational-checks
           build/computational-checks
       - name: Build for iPhone without signing
         run: |

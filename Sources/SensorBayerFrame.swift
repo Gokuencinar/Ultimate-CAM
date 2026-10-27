@@ -9,6 +9,20 @@ struct BayerCalibration:Equatable {
     let orientation:UInt32
     var extraColor:[UInt16:[Double]] = [:]
     var illuminant2:UInt16 = 0
+    var baselineExposure:Double? = nil
+    var geometry:DNGSensorGeometry? = nil
+    var opcodeList2:Data? = nil
+}
+
+struct DNGSensorGeometry:Equatable {
+    let width:Int,height:Int,activeArea:[UInt32],cropOrigin:[Double],cropSize:[Double]
+    func valid(width:Int,height:Int)->Bool {
+        guard self.width==width,self.height==height,activeArea.count==4,cropOrigin.count==2,cropSize.count==2,
+              (cropOrigin+cropSize).allSatisfy({$0.isFinite && $0>=0}),cropSize.allSatisfy({$0>=1}),
+              activeArea[0]<activeArea[2],activeArea[1]<activeArea[3],activeArea[2]<=UInt32(height),activeArea[3]<=UInt32(width) else { return false }
+        return cropOrigin[0]+cropSize[0]<=Double(activeArea[3]-activeArea[1]) &&
+               cropOrigin[1]+cropSize[1]<=Double(activeArea[2]-activeArea[0])
+    }
 }
 
 /// A compact quad texture: RGGB/GRBG/BGGR/GBRG phases remain four separate
@@ -31,7 +45,9 @@ struct SensorBayerFrame {
               let tags=props[kCGImagePropertyDNGDictionary as String] as? [String:Any] else {
             throw CameraFailure.message("El RAW no contiene plano Bayer y calibración DNG accesibles.")
         }
+        let rawMetadata=try DNGMetadata.read(dng)
         func numbers(_ key:String) -> [Double] {
+            if let tag=DNGMetadata.namedTags[key],let field=rawMetadata.fields[tag] { return field.numbers }
             if let n=tags[key] as? NSNumber { return [n.doubleValue] }
             return (tags[key] as? [NSNumber])?.map(\.doubleValue) ?? []
         }
@@ -75,15 +91,20 @@ struct SensorBayerFrame {
         let ox=origin.isEmpty ? 0:Int(origin[0]),oy=origin.isEmpty ? 0:Int(origin[1])
         let cw=crop.isEmpty ? right-left-ox:Int(crop[0]),ch=crop.isEmpty ? bottom-top-oy:Int(crop[1])
         guard top<bottom,left<right,bottom<=h,right<=w,cw>=4,ch>=4,ox+cw<=right-left,oy+ch<=bottom-top else { throw CameraFailure.message("El recorte DNG excede el plano del sensor.") }
-        let offsetX=left+ox,offsetY=top+oy
+        // Retain the original sensor axes (including masked borders) when the
+        // native buffer fits. DefaultCrop remains metadata, not an early crop:
+        // OpcodeList2 gain maps must see the exact original pixel coordinates.
+        let keepGeometry=w<=4096 && h<=4096 && w%2==0 && h%2==0
+        let offsetX=keepGeometry ? 0:left+ox,offsetY=keepGeometry ? 0:top+oy
+        let packedWidth=keepGeometry ? w:cw,packedHeight=keepGeometry ? h:ch
         var phaseMap=[Int]()
         for phase in 0..<4 {
             let row=(offsetY+phase/2)%2,col=(offsetX+phase%2)%2
             phaseMap.append(row*2+col)
         }
         let croppedPattern=phaseMap.map { pattern[$0] }
-        let step=max(1,Int(ceil(Double(max(cw,ch))/4096)))
-        let qw=cw/(2*step),qh=ch/(2*step)
+        let step=max(1,Int(ceil(Double(max(packedWidth,packedHeight))/4096)))
+        let qw=packedWidth/(2*step),qh=packedHeight/(2*step)
         let status=CVPixelBufferLockBaseAddress(pixel,.readOnly)
         guard status==kCVReturnSuccess else { throw CameraFailure.message("No se pudo leer el plano Bayer.") }
         defer { CVPixelBufferUnlockBaseAddress(pixel,.readOnly) }
@@ -92,23 +113,32 @@ struct SensorBayerFrame {
         let levels=phaseMap.map { Float(black[black.count==1 ? 0:$0]) }
         let samples=UnsafeBufferPointer(start:base.assumingMemoryBound(to:UInt16.self),count:rowBytes/2*h)
         let packed=try BayerQuadPacking.pack(samples,rowElements:rowBytes/2,originX:offsetX,originY:offsetY,
-            cropWidth:cw,cropHeight:ch,step:step,black:levels,white:Float(white))
+            cropWidth:packedWidth,cropHeight:packedHeight,step:step,black:levels,white:Float(white))
         let exif=props[kCGImagePropertyExifDictionary as String] as? [String:Any] ?? [:]
         let exposure=FrameExposure(seconds:(exif[kCGImagePropertyExifExposureTime as String] as? NSNumber)?.doubleValue ?? 0,
             iso:(exif[kCGImagePropertyExifISOSpeedRatings as String] as? [NSNumber])?.first?.doubleValue ?? 0)
         guard exposure.isValid,photo.timestamp.seconds.isFinite else { throw CameraFailure.message("El RAW no incluye exposición y tiempo válidos.") }
         var extra=[UInt16:[Double]]()
-        for (key,tag,count) in [("ColorMatrix2",UInt16(50722),9),("CameraCalibration1",UInt16(50723),9),("CameraCalibration2",UInt16(50724),9),("AnalogBalance",UInt16(50727),3)] {
+        for (key,tag,count) in [("ColorMatrix2",UInt16(50722),9),("CameraCalibration1",UInt16(50723),9),("CameraCalibration2",UInt16(50724),9),("AnalogBalance",UInt16(50727),3),("ForwardMatrix1",UInt16(50964),9),("ForwardMatrix2",UInt16(50965),9)] {
             let values=numbers(key)
             guard values.isEmpty || (values.count==count && values.allSatisfy({$0.isFinite && abs($0)<32}) && (tag != 50727 || values.allSatisfy({$0>0}))) else { throw CameraFailure.message("Calibración de color RAW inválida.") }
             if !values.isEmpty { extra[tag]=values }
         }
         let secondIlluminant=numbers("CalibrationIlluminant2").first ?? 0
-        guard extra[50722]==nil || (secondIlluminant>=1 && secondIlluminant<=255 && secondIlluminant.rounded()==secondIlluminant) else { throw CameraFailure.message("Falta el segundo iluminante del DNG.") }
+        let needsSecond=extra[50722] != nil || extra[50965] != nil
+        guard !needsSecond || (secondIlluminant>=1 && secondIlluminant<=255 && secondIlluminant.rounded()==secondIlluminant) else { throw CameraFailure.message("Falta el segundo iluminante del DNG.") }
         let orientation=(props[kCGImagePropertyOrientation as String] as? NSNumber)?.uint32Value ?? 1
         guard (1...8).contains(orientation) else { throw CameraFailure.message("Orientación RAW inválida.") }
         var calibration=BayerCalibration(pattern:croppedPattern,matrix:matrix,neutral:neutral,illuminant:UInt16(illumination),orientation:orientation)
-        calibration.extraColor=extra;calibration.illuminant2=extra[50722]==nil ? 0:UInt16(secondIlluminant)
+        calibration.extraColor=extra;calibration.illuminant2=needsSecond ? UInt16(secondIlluminant):0
+        let baseline=numbers("BaselineExposure")
+        guard baseline.isEmpty || (baseline.count==1 && baseline[0].isFinite && abs(baseline[0])<=16) else { throw CameraFailure.message("Exposición base DNG inválida.") }
+        calibration.baselineExposure=baseline.first
+        if keepGeometry {
+            calibration.geometry=DNGSensorGeometry(width:w,height:h,activeArea:[UInt32(top),UInt32(left),UInt32(bottom),UInt32(right)],
+                cropOrigin:[Double(ox),Double(oy)],cropSize:[Double(cw),Double(ch)])
+            if let opcode=rawMetadata.fields[51009],opcode.type==7 { calibration.opcodeList2=try DNGMetadata.validatedOpcodes(opcode.data) }
+        }
         let mapped=try BayerScratchStorage.store(packed)
         var frame=SensorBayerFrame(width:qw,height:qh,quads:mapped.data,calibration:calibration,exposure:exposure,timestamp:photo.timestamp.seconds)
         frame.noiseProfile=SensorNoiseModel.validProfile(numbers("NoiseProfile")) ?? []
@@ -198,13 +228,14 @@ enum BayerQuadPacking {
 /// Minimal uncompressed DNG for CIRAWFilter demosaicing/color conversion of the
 /// fused mosaic. The saved user's RAW remains the original, never this working DNG.
 enum FusedDNG {
-    static func encode(quads:Data,width:Int,height:Int,calibration c:BayerCalibration) throws -> Data {
+    static func encode(quads:Data,width:Int,height:Int,calibration c:BayerCalibration,noiseProfile:[Double]=[]) throws -> Data {
         guard width>0,height>0,width<=2048,height<=2048,quads.count==width*height*8,c.pattern.count==4,
               c.matrix.count==9,c.matrix.allSatisfy({$0.isFinite && abs($0)<32}),
               c.neutral.count==3,c.neutral.allSatisfy({$0.isFinite && $0>0 && $0<32}),
               c.pattern.sorted()==[0,1,1,2],(1...8).contains(c.orientation),(1...255).contains(c.illuminant) else { throw CameraFailure.message("Mosaico fusionado inválido.") }
         func u16(_ n:UInt16)->Data { var x=n.littleEndian;return withUnsafeBytes(of:&x) { Data($0) } }
         func u32(_ n:UInt32)->Data { var x=n.littleEndian;return withUnsafeBytes(of:&x) { Data($0) } }
+        func f64(_ n:Double)->Data { var x=n.bitPattern.littleEndian;return withUnsafeBytes(of:&x) { Data($0) } }
         func rational(_ n:Double,signed:Bool=false)->Data {
             if n.rounded()==n {
                 let numerator=signed ? UInt32(bitPattern:Int32(n)):UInt32(n)
@@ -228,18 +259,35 @@ enum FusedDNG {
         let model=Data("UltimateCAM working mosaic\0".utf8);add(50708,2,UInt32(model.count),model)
         add(50710,1,3,Data([0,1,2]));add(50711,3,1,u16(1))
         add(50713,3,2,u16(1)+u16(1));add(50714,5,1,rational(4096));add(50717,4,1,u32(61439))
-        add(50719,5,2,rational(0)+rational(0));add(50720,4,2,u32(UInt32(w))+u32(UInt32(h)))
-        add(50829,4,4,u32(0)+u32(0)+u32(UInt32(h))+u32(UInt32(w)))
+        if let geometry=c.geometry {
+            guard geometry.valid(width:w,height:h) else { throw CameraFailure.message("La corrección de lente no coincide con el mosaico.") }
+            add(50719,5,2,geometry.cropOrigin.reduce(Data()) { $0+rational($1) })
+            add(50720,5,2,geometry.cropSize.reduce(Data()) { $0+rational($1) })
+            add(50829,4,4,geometry.activeArea.reduce(Data()) { $0+u32($1) })
+            if let opcodes=c.opcodeList2 { let data=try DNGMetadata.validatedOpcodes(opcodes);add(51009,7,UInt32(data.count),data) }
+        } else {
+            guard c.opcodeList2==nil else { throw CameraFailure.message("Falta la geometría original de la corrección de lente.") }
+            add(50719,5,2,rational(0)+rational(0));add(50720,4,2,u32(UInt32(w))+u32(UInt32(h)))
+            add(50829,4,4,u32(0)+u32(0)+u32(UInt32(h))+u32(UInt32(w)))
+        }
         add(50721,10,9,c.matrix.reduce(Data()) { $0+rational($1,signed:true) })
         add(50728,5,3,c.neutral.reduce(Data()) { $0+rational($1) });add(50778,3,1,u16(c.illuminant))
         for (tag,values) in c.extraColor {
-            guard [50722,50723,50724,50727].contains(tag),values.count==(tag==50727 ? 3:9),values.allSatisfy({$0.isFinite && abs($0)<32}),tag != 50727 || values.allSatisfy({$0>0}) else { throw CameraFailure.message("Etiquetas de color DNG fuera de rango.") }
+            guard [50722,50723,50724,50727,50964,50965].contains(tag),values.count==(tag==50727 ? 3:9),values.allSatisfy({$0.isFinite && abs($0)<32}),tag != 50727 || values.allSatisfy({$0>0}) else { throw CameraFailure.message("Etiquetas de color DNG fuera de rango.") }
             add(tag,tag==50727 ? 5:10,UInt32(values.count),values.reduce(Data()) { $0+rational($1,signed:tag != 50727) })
         }
         if c.illuminant2>0 { add(50779,3,1,u16(c.illuminant2)) }
+        if let baseline=c.baselineExposure {
+            guard baseline.isFinite,abs(baseline)<=16 else { throw CameraFailure.message("Exposición base DNG fuera de rango.") }
+            add(50730,10,1,rational(baseline,signed:true))
+        }
+        if !noiseProfile.isEmpty {
+            guard let profile=SensorNoiseModel.validProfile(noiseProfile) else { throw CameraFailure.message("Modelo de ruido DNG inválido.") }
+            add(51041,12,UInt32(profile.count),profile.reduce(Data()) { $0+f64($1) })
+        }
         // Canonical TIFF/EP layout: reduced RGB IFD0 plus full Bayer SubIFD.
         // Keep global DNG/color tags in IFD0 as well as the raw directory.
-        let globalTags:Set<UInt16>=[50706,50707,50708,50721,50722,50723,50724,50727,50728,50778,50779]
+        let globalTags:Set<UInt16>=[50706,50707,50708,50721,50722,50723,50724,50727,50728,50730,50778,50779,50964,50965]
         var preview=tags.filter { globalTags.contains($0.key) }
         func thumb(_ key:UInt16,_ type:UInt16,_ count:UInt32,_ data:Data) { preview.append(Tag(key:key,type:type,count:count,data:data)) }
         thumb(254,4,1,u32(1));thumb(256,4,1,u32(16));thumb(257,4,1,u32(16))
