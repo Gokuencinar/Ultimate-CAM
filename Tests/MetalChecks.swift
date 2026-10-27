@@ -107,6 +107,51 @@ import Darwin
         let expectedR:Float=(25+9.5*(0.1*r2+0.02*r2*r2))/32
         let expectedB:Float=(20+4.5*(-0.08*r2+0.01*r2*r2))/32
         try require(abs(corrected[i]-expectedR)<0.002 && abs(corrected[i+2]-expectedB)<0.002 && corrected[i+1]==0.5,"Metal radial LCA disagreed with the calibrated RGB warp / moved green")
+        // Differential Astro flow: a supported sky displacement must not be
+        // replaced by three confident stationary landscape neighbours.
+        func scalar(_ values:[Float],_ target:MTLTexture) {
+            let halves=values.map{Float16($0).bitPattern}
+            halves.withUnsafeBytes { target.replace(region:MTLRegionMake2D(0,0,target.width,target.height),mipmapLevel:0,withBytes:$0.baseAddress!,bytesPerRow:target.width*2) }
+        }
+        let skyGuide=try texture(48,48,.r16Float),shiftedSky=try texture(48,48,.r16Float)
+        var skyValues=[Float](repeating:0,count:48*48),shiftedValues=skyValues
+        for y in 0..<48 { for x in 0..<48 {
+            let dx=Float(x)-24,dy=Float(y)-24
+            skyValues[y*48+x]=0.01+0.6*exp(-(dx*dx+dy*dy)/0.85)
+            shiftedValues[y*48+x]=0.01+0.6*exp(-((dx-2.125)*(dx-2.125)+dy*dy)/0.85)
+        } }
+        scalar(skyValues,skyGuide);scalar(shiftedValues,shiftedSky)
+        let skyFlow=try texture(3,3,.rgba32Float),skyRegular=try texture(3,3,.rgba32Float),skyEstimated=try texture(3,3,.rgba32Float)
+        var skyVectors=[Float](repeating:0,count:36)
+        for j in 0..<9 { skyVectors[j*4+3]=0.9 };skyVectors[16]=2.125;skyVectors[19]=0.1
+        skyVectors.withUnsafeBytes { skyFlow.replace(region:MTLRegionMake2D(0,0,3,3),mipmapLevel:0,withBytes:$0.baseAddress!,bytesPerRow:48) }
+        func readFlow(_ t:MTLTexture)->[Float] {
+            var values=[Float](repeating:0,count:t.width*t.height*4)
+            values.withUnsafeMutableBytes { t.getBytes($0.baseAddress!,bytesPerRow:t.width*16,from:MTLRegionMake2D(0,0,t.width,t.height),mipmapLevel:0) };return values
+        }
+        var skyParams=MetalFusionParameters();skyParams.size.w=1;skyParams.flags.x=1;skyParams.search=SIMD4(3,0,0,1)
+        skyParams.roi=SIMD4(0,0,48,48);skyParams.sensorNoise=SIMD4(0,1e-6,0,1e-6);skyParams.control.x=0.001
+        try execute("uc_regularize_flow",[skyGuide,shiftedSky,skyFlow,skyRegular],skyParams,skyRegular)
+        try require(abs(readFlow(skyRegular)[16]-2.125)<0.0001,"Landscape flow erased a photometrically supported star displacement")
+        try execute("uc_tile_flow",[skyGuide,shiftedSky,skyFlow,skyEstimated],skyParams,skyEstimated)
+        let skyVector=readFlow(skyEstimated)
+        print("Astro fine flow",skyVector[16],skyVector[17])
+        try require(abs(skyVector[16]-2.125)<=0.126 && abs(skyVector[17])<=0.125,"Astro point flow lost sub-quarter-pixel refinement")
+        let nightInput=try texture(32,32),nightPlain=try texture(32,32),nightClean=try texture(32,32),nightBase=try texture(2,2,.r16Float)
+        var castPixels=[Float](repeating:1,count:32*32*4)
+        for y in 0..<32 { for x in 0..<32 {
+            let j=(y*32+x)*4,warm=x>=16
+            castPixels[j]=warm ? 0.8:0.02;castPixels[j+1]=warm ? 0.35:0.045;castPixels[j+2]=warm ? 0.07:0.006
+        } }
+        upload(castPixels,nightInput);scalar([log2(0.037),log2(0.425),log2(0.037),log2(0.425)],nightBase)
+        var nightParams=MetalFusionParameters();nightParams.control.y=2;nightParams.control.z=4;nightParams.tone=SIMD4(0.003,0.002,0.02,0)
+        try execute("uc_night_tone",[nightInput,nightBase,nightBase,nightPlain],nightParams,nightPlain)
+        nightParams.tone.w=0.4
+        try execute("uc_night_tone",[nightInput,nightBase,nightBase,nightClean],nightParams,nightClean)
+        let unclean=read(nightPlain),castClean=read(nightClean),darkIndex=(16*32+5)*4,warmIndex=(16*32+26)*4
+        let beforeCast=unclean[darkIndex+1]-unclean[darkIndex+2],afterCast=castClean[darkIndex+1]-castClean[darkIndex+2]
+        try require(afterCast<beforeCast*0.97,"Dark green/yellow cast was not attenuated")
+        for c in 0..<3 { try require(abs(castClean[warmIndex+c]-unclean[warmIndex+c])<0.001,"Night chromaticity changed supported warm lamp colour") }
         print("Production Metal SR frequency recovery / separate phases / star vs sensor impulse passed")
     }
 }

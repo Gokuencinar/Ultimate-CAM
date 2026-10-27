@@ -27,3 +27,20 @@ struct NightTonePlan {
         return NightTonePlan(gain:gain,whitePoint:max(2,highlight*gain))
     }
 }
+
+/// A scene statistic only sets the bounded strength of a local low-signal gate.
+/// Bright sodium/LED lights never contribute to this estimate.
+enum NightChromaticityPlan {
+    static func strength(_ rgba:[Float])->Float {
+        var dark=0,extreme=0
+        for i in stride(from:0,to:rgba.count-3,by:4) {
+            let r=max(0,rgba[i]),g=max(0,rgba[i+1]),b=max(0,rgba[i+2])
+            let l:Float=0.2126*r+0.7152*g+0.0722*b
+            guard l>0.005,l<0.07 else { continue };dark+=1
+            let excess=max(max(0,g-max(r,b)),max(0,min(r,g)-1.8*b))
+            if excess/l>0.35 { extreme+=1 }
+        }
+        guard dark>=8 else { return 0.15 }
+        return min(0.4,0.15+0.5*Float(extreme)/Float(dark))
+    }
+}

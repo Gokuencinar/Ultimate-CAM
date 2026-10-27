@@ -207,7 +207,7 @@ final class MetalBurstProcessor {
         }
         let plan=try NightTonePlan.make(luminances:values,maximumGain:maximumGain)
         var params=MetalFusionParameters();params.control.y=Float(plan.gain);params.control.z=Float(plan.whitePoint)
-        params.tone=night ? SIMD4<Float>(0.003,LensCalibration.profile(lens).shadowChroma,0.02,0):SIMD4<Float>(repeating:0)
+        params.tone=night ? SIMD4<Float>(0.003,LensCalibration.profile(lens).shadowChroma,0.02,NightChromaticityPlan.strength(pixels)):SIMD4<Float>(repeating:0)
         let command=try command()
         try encode("uc_tone_luma",command,textures:[input,base])
         try encode("uc_pyramid",command,textures:[base,middleBase])

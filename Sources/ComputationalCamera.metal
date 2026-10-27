@@ -56,9 +56,29 @@ kernel void uc_pyramid(texture2d<float,access::read> input [[texture(0)]],
     output.write(float4(value),p);
 }
 
+// Locate an isolated, high-SNR guide peak once per Astro tile, not once per
+// candidate displacement. Extended edges are not classified as stars.
+inline float3 uc_astro_point(texture2d<float,access::sample> reference,uint2 tile,
+ constant FusionParameters &params) {
+ if (!params.flags.x || !params.search.w) return float3(0);
+ float peak=0;float2 location=0;
+ for(uint y=1;y<15;++y) for(uint x=1;x<15;++x) {
+  float2 q=float2(tile*16+uint2(x,y))+0.5f;
+  if(q.x>=reference.get_width()-1 || q.y>=reference.get_height()-1) continue;
+  float v=reference.sample(pixels,q).r;if(v>peak) { peak=v;location=q; }
+ }
+ float sum=0,upper=0;
+ for(int y=-1;y<=1;++y) for(int x=-1;x<=1;++x) {
+  if(x==0 && y==0) continue;
+  float v=reference.sample(pixels,location+float2(x,y)).r;sum+=v;upper=max(upper,v);
+ }
+ float floor=6*sqrt(max(params.sensorNoise.x*max(sum/8,0.0f)+params.sensorNoise.y,1e-8f));
+ return float3(location,peak-upper>max(floor,0.01f) && peak-sum/8>2*floor ? 1.0f:0.0f);
+}
+
 inline float uc_tile_cost(texture2d<float,access::sample> reference,
                           texture2d<float,access::sample> sample,uint2 tile,float2 shift,
-                          constant FusionParameters &params) {
+                          constant FusionParameters &params,float3 point=float3(0)) {
     float cost=0;uint count=0;
     for (uint y=0;y<16;y+=2) for (uint x=0;x<16;x+=2) {
         float2 p=float2(tile*16+uint2(x,y))+0.5f,q=p+shift;
@@ -67,7 +87,17 @@ inline float uc_tile_cost(texture2d<float,access::sample> reference,
         float a=reference.sample(pixels,p).r,b=sample.sample(pixels,q).r*params.control.w;
         cost+=min(abs(a-b),0.25f);++count;
     }
-    return count>=12 ? cost/float(count):INFINITY;
+    if(count<12) return INFINITY;
+    float average=cost/float(count);
+    if(point.z>0) {
+        float pointCost=0;
+        for(int y=-1;y<=1;++y) for(int x=-1;x<=1;++x) {
+            float2 q=point.xy+float2(x,y);
+            pointCost+=abs(reference.sample(pixels,q).r-sample.sample(pixels,q+shift).r*params.control.w);
+        }
+        average=mix(average,pointCost/9,0.65f);
+    }
+    return average;
 }
 
 // One thread per tile. Coarse-to-fine bounded search; phase channels are never
@@ -88,25 +118,26 @@ kernel void uc_tile_flow(texture2d<float,access::sample> reference [[texture(0)]
         uint2 index=min(uint2(center*0.5f/16.0f),uint2(seed.get_width()-1,seed.get_height()-1));
         float4 prior=seed.read(index);prediction=int2(round(prior.xy*2.0f));seedConfidence=prior.w;
     }
-    float priorWeight=1e-5f+2e-4f*seedConfidence;
-    float best=uc_tile_cost(reference,sample,tile,float2(prediction),params),second=INFINITY;
+    float3 point=uc_astro_point(reference,tile,params);
+    float priorWeight=(1e-5f+2e-4f*seedConfidence)*(point.z>0 ? 0.1f:1.0f);
+    float best=uc_tile_cost(reference,sample,tile,float2(prediction),params,point),second=INFINITY;
     float bestScore=best;int2 chosen=prediction;
     for (int dy=-params.search.x;dy<=params.search.x;++dy) for (int dx=-params.search.x;dx<=params.search.x;++dx) {
         if (dx==0 && dy==0) continue;
         int2 shift=prediction+int2(dx,dy);
-        float cost=uc_tile_cost(reference,sample,tile,float2(shift),params);
+        float cost=uc_tile_cost(reference,sample,tile,float2(shift),params,point);
         float score=cost+priorWeight*float(dx*dx+dy*dy);
         if (score<bestScore) { second=bestScore;bestScore=score;best=cost;chosen=shift; } else second=min(second,score);
     }
     float2 refined=float2(chosen);
     if (params.search.w && isfinite(best)) {
-        for (uint stage=0;stage<2;++stage) {
-            float step=stage==0 ? 0.5f:0.25f;
+        for (uint stage=0;stage<(point.z>0 ? 3u:2u);++stage) {
+            float step=0.5f/float(1u<<stage);
             float2 origin=refined;
             for (int y=-1;y<=1;++y) for (int x=-1;x<=1;++x) {
                 if (x==0 && y==0) continue;
                 float2 shift=origin+float2(x,y)*step;
-                float cost=uc_tile_cost(reference,sample,tile,shift,params);
+                float cost=uc_tile_cost(reference,sample,tile,shift,params,point);
                 float2 deviation=shift-float2(prediction);
                 float score=cost+priorWeight*dot(deviation,deviation);
                 if (score<bestScore) { bestScore=score;best=cost;refined=shift; }
@@ -117,7 +148,7 @@ kernel void uc_tile_flow(texture2d<float,access::sample> reference [[texture(0)]
     float c=reference.sample(pixels,center+float2(-5,5)).r,d=reference.sample(pixels,center+float2(5,5)).r;
     float contrast=max(max(a,b),max(c,d))-min(min(a,b),min(c,d));
     float floor=max(0.002f,2.0f*sqrt(max(params.control.x,1e-8f)));
-    float textureWeight=smoothstep(floor,floor*3.0f,contrast);
+    float textureWeight=max(point.z,smoothstep(floor,floor*3.0f,contrast));
     float confidence=isfinite(best) ? clamp((second-bestScore)/max(second,1e-6f)*4.0f,0.0f,1.0f)*textureWeight:0.0f;
     output.write(float4(refined,isfinite(best) ? best:1.0f,confidence),tile);
 }
@@ -157,10 +188,13 @@ kernel void uc_regularize_flow(texture2d<float,access::sample> reference [[textu
                 if (neighbor.w>=0.25f && distance(neighbor.xy,median)<1.5f) ++support;
             }
             if (support>=3 && distance(current.xy,median)>1.5f) {
-                float cost=uc_tile_cost(reference,sample,tile,median,params);
+                float3 point=uc_astro_point(reference,tile,params);
+                float cost=uc_tile_cost(reference,sample,tile,median,params,point);
+                float original=uc_tile_cost(reference,sample,tile,current.xy,params,point);
+                float allowance=point.z>0 ? 1e-7f:sqrt(max(params.control.x,1e-8f));
                 // Photometric veto: never borrow flow across an object edge
                 // when it explains the local tile worse than the original.
-                if (isfinite(cost) && cost<=current.z+sqrt(max(params.control.x,1e-8f)))
+                if (isfinite(cost) && cost<=original+allowance)
                     current=float4(median,cost,min(0.5f,confidence/float(count)));
             }
         }
@@ -315,6 +349,15 @@ kernel void uc_night_tone(texture2d<float,access::sample> input [[texture(0)]],
     // midtones/highlights are unchanged by the shadow chroma stage.
     float chroma=params.tone.z>params.tone.y ? smoothstep(params.tone.y,params.tone.z,luminance):1.0f;
     float3 clean=mix(float3(luminance),rgb,chroma);
+    // Local chromaticity regularisation, not a global white-balance change.
+    // Dark, smooth green/yellow casts are reduced; lamps and supported colour
+    // in midtones are excluded. Preserve luminance and avoid a blue countercast.
+    float greenExcess=max(0.0f,clean.g-max(clean.r,clean.b));
+    float yellowExcess=max(0.0f,min(clean.r,clean.g)-clean.b*1.8f);
+    float cast=smoothstep(0.15f,0.9f,max(greenExcess,yellowExcess)/max(luminance,1e-6f));
+    float dark=1-smoothstep(0.015f,0.07f,luminance);
+    float smooth=1-smoothstep(0.5f,2.0f,abs(logL-baseLog));
+    clean=mix(clean,float3(luminance),clamp(params.tone.w,0.0f,0.45f)*cast*dark*smooth);
     float3 result=clean*(mapped/luminance);
     result/=max(1.0f,max(result.r,max(result.g,result.b)));
     output.write(float4(result,1),p);
