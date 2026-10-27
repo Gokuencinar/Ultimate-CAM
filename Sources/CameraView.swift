@@ -455,7 +455,7 @@ struct CameraView: View {
             }
             }
             modeSelector
-            if !videoMode && (camera.busy || !camera.ready) {
+            if !videoMode && (camera.busy || !camera.ready || (options.nativeNight && camera.nativeNightIssue != nil)) {
                 Text(capturePhaseText).font(.system(size:12,weight:.medium)).foregroundStyle(.white.opacity(0.75))
                     .multilineTextAlignment(.center).lineLimit(2).frame(maxWidth:.infinity,minHeight:30).accessibilityIdentifier("camera.status")
             }
@@ -463,6 +463,7 @@ struct CameraView: View {
     }
 
     private var capturePhaseText:String {
+        if options.nativeNight,let issue=camera.nativeNightIssue,!camera.busy { return issue }
         guard camera.busy else { return camera.status }
         if camera.opticalCaptureInProgress { return options.nativeNight ? "Noche de iOS · mantén firme el iPhone…":"Mantén firme el iPhone…" }
         if camera.captureProgress>=1 || camera.processingInProgress { return "Procesando foto · ya puedes mover el iPhone" }
@@ -997,7 +998,6 @@ struct CameraView: View {
         options=PhotoModePolicy.nativeNight(from:options)
         stack=false;rawEnabled=false;flash = .off;manualExposure=false
         camera.setManualExposure(iso:nil)
-        if let issue=camera.nativeNightIssue { camera.reportImportError(issue) }
     }
     private func activateHDR() {
         options=PhotoModePolicy.hdr(from:options,supportsRAW:rawAvailable)
