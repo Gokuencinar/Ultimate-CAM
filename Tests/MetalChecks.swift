@@ -95,8 +95,8 @@ import Darwin
         diagonal.withUnsafeBytes { guide.replace(region:MTLRegionMake2D(0,0,32,32),mipmapLevel:0,withBytes:$0.baseAddress!,bytesPerRow:64) }
         try execute("uc_structure_tensor",[guide,ellipse],params,ellipse)
         let field=read(ellipse),center=(16*32+16)*4
-        let a=field[center],b=field[center+1],c=field[center+2]
-        try require(a*c-b*b>0 && b < -1 && field[center+3]>0.5,"Structure tensor did not produce a bounded positive ellipse aligned with a diagonal edge")
+        let jxx=field[center],jxy=field[center+1],jyy=field[center+2]
+        try require(jxx*jyy-jxy*jxy>0 && jxy < -1 && field[center+3]>0.5,"Structure tensor did not produce a bounded positive ellipse aligned with a diagonal edge")
         print("Production Metal SR frequency recovery / separate phases / star vs sensor impulse passed")
     }
 }
