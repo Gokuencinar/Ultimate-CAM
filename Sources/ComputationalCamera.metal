@@ -325,20 +325,23 @@ kernel void uc_structure_tensor(texture2d<float,access::read> luma [[texture(0)]
  texture2d<float,access::write> output [[texture(1)]],constant FusionParameters &params [[buffer(0)]],uint2 p [[thread_position_in_grid]]) {
  if(p.x>=output.get_width() || p.y>=output.get_height()) return;
  int2 edge=int2(luma.get_width()-1,luma.get_height()-1);
- float xx=0,xy=0,yy=0,total=0;
+ float xx=0,xy=0,yy=0,total=0;float2 gradient=0;
  for(int y=-1;y<=1;++y) for(int x=-1;x<=1;++x) {
   int2 q=int2(p)+int2(x,y);float weight=float((x==0 ? 2:1)*(y==0 ? 2:1));
   float gx=0.5f*(luma.read(uint2(clamp(q+int2(1,0),int2(0),edge))).r-luma.read(uint2(clamp(q-int2(1,0),int2(0),edge))).r);
   float gy=0.5f*(luma.read(uint2(clamp(q+int2(0,1),int2(0),edge))).r-luma.read(uint2(clamp(q-int2(0,1),int2(0),edge))).r);
-  xx+=weight*gx*gx;xy+=weight*gx*gy;yy+=weight*gy*gy;total+=weight;
+  xx+=weight*gx*gx;xy+=weight*gx*gy;yy+=weight*gy*gy;gradient+=weight*float2(gx,gy);total+=weight;
  }
+ float polarity=dot(gradient/total,gradient/total)/max((xx+yy)/total,1e-8f);
  float variance=max(params.sensorNoise.x*max(luma.read(p).r,0.0f)+params.sensorNoise.y,1e-8f);
  xx=max(0.0f,xx/total-0.25f*variance);yy=max(0.0f,yy/total-0.25f*variance);
  xy=clamp(xy/total,-sqrt(xx*yy),sqrt(xx*yy));
  float difference=sqrt(max((xx-yy)*(xx-yy)+4*xy*xy,0.0f));
  float largest=0.5f*(xx+yy+difference),smallest=max(0.0f,0.5f*(xx+yy-difference));
  float coherence=(largest-smallest)/max(largest+smallest,1e-8f);
- float strength=coherence*smoothstep(0.002f+2*sqrt(variance),0.01f+6*sqrt(variance),sqrt(largest));
+ // Oscillatory CFA alias gradients have a stable second-moment orientation
+ // but alternating signs. Do not stretch kernels along that false edge.
+ float strength=coherence*smoothstep(0.25f,0.75f,polarity)*smoothstep(0.002f+2*sqrt(variance),0.01f+6*sqrt(variance),sqrt(largest));
  float2 normal=float2(xy,largest-xx);
  normal=dot(normal,normal)>1e-12f ? normalize(normal):float2(1,0);
  float2 tangent=float2(-normal.y,normal.x);

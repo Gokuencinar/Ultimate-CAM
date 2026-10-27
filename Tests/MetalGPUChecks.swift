@@ -85,6 +85,11 @@ import Darwin
         try require(srError<bilinearError && srContrast>bilinearContrast,"Full RAW alignment + SR did not beat a single-frame bilinear crop")
         print(String(format:"Directional SR MSE / isotropic %.4f; HF contrast %.4f / %.4f",srError/isotropicError,srContrast/energy,isotropicContrast/energy))
         try require(srError<=isotropicError*1.05 && srContrast>=isotropicContrast*0.98,"Directional reconstruction regressed against the isotropic production path")
+        let edgeBurst=makeFrames(count:6,noise:[0.000002,0.0000001],shifts:shifts,zoom:2,scene:edge)
+        let sharpEdge=try execute(edgeBurst,options),roundEdge=try execute(edgeBurst,options,engine:isotropicEngine)
+        let edgeDirectional=mtf50(sharpEdge.values),edgeIsotropic=mtf50(roundEdge.values)
+        print(String(format:"SR diagonal-edge MTF50 directional %.4f / isotropic %.4f",edgeDirectional,edgeIsotropic))
+        try require(edgeDirectional>=edgeIsotropic*1.025,"Directional SR did not improve slanted-edge acutance")
         var hdr=options;hdr.nightStatic=false;hdr.nightRAW=false;hdr.nightMetalRAW=false;hdr.hdrBracketing=true;hdr.hdrMetalRAW=true
         let hdrScene:(Double,Double)->Double={ x,y in x<Double(w)*0.45 ? 0.003:0.65+0.08*sin(y*0.3) }
         let bracket=makeFrames(count:3,noise:noise,exposures:[1,4,16],scene:hdrScene)
