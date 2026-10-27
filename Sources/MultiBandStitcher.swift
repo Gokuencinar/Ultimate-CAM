@@ -67,9 +67,14 @@ enum MultiBandStitcher {
         let radius=max(2,min(24,Double(max(w,h))*0.008))
         func low(_ color:CIImage,_ coverage:CIImage) throws -> CIImage {
             guard let premult=productKernel?.apply(extent:local,arguments:[color,coverage]) else { throw CameraFailure.message("No se pudo separar la luminancia de la unión.") }
-            let support=coverage.clampedToExtent().applyingFilter("CIGaussianBlur",parameters:[kCIInputRadiusKey:radius])
-            let blurred=premult.clampedToExtent().applyingFilter("CIGaussianBlur",parameters:[kCIInputRadiusKey:radius])
-            guard let normalized=divideKernel?.apply(extent:local,arguments:[blurred,support]) else { throw CameraFailure.message("No se pudo normalizar la unión.") };return normalized
+            // Gaussian low bands live on a quarter-size pyramid. Keeping
+            // several full 16 MP blurred planes alive would waste phone RAM.
+            let down=CGAffineTransform(scaleX:0.25,y:0.25),up=CGAffineTransform(scaleX:4,y:4)
+            let small=local.applying(down)
+            let support=coverage.transformed(by:down).clampedToExtent().applyingFilter("CIGaussianBlur",parameters:[kCIInputRadiusKey:radius*0.25])
+            let blurred=premult.transformed(by:down).clampedToExtent().applyingFilter("CIGaussianBlur",parameters:[kCIInputRadiusKey:radius*0.25])
+            guard let normalized=divideKernel?.apply(extent:small,arguments:[blurred,support]) else { throw CameraFailure.message("No se pudo normalizar la unión.") }
+            return normalized.transformed(by:up).cropped(to:local)
         }
         let al=try low(aa,ca),bl=try low(bb,cb)
         guard var combined=blendKernel?.apply(extent:local,arguments:[aa,bb,al,bl,masks,ca,cb]) else { throw CameraFailure.message("No se pudo fusionar la costura.") }

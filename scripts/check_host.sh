@@ -52,8 +52,8 @@ SOURCES=(
   Sources/PhotoModePolicy.swift
 )
 case "${1:-all}" in
-  gpu) checks=(MetalGPUChecks MetalChecks) ;;
-  rest) checks=(PortChecks ProcessorChecks MovieChecks PanoramaChecks SphereChecks SpectralChecks) ;;
+  gpu) checks=(MetalGPUChecks MetalChecks PanoramaChecks SphereChecks) ;;
+  rest) checks=(PortChecks ProcessorChecks MovieChecks SpectralChecks) ;;
   all) checks=(ComputationalChecks MetalGPUChecks MetalChecks PortChecks ProcessorChecks MovieChecks PanoramaChecks SphereChecks SpectralChecks) ;;
   *) echo "Usage: $0 [all|gpu|rest]" >&2; exit 2 ;;
 esac

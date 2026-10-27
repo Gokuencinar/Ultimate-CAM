@@ -143,13 +143,14 @@ import Darwin
             let j=(y*32+x)*4,warm=x>=16
             castPixels[j]=warm ? 0.8:0.02;castPixels[j+1]=warm ? 0.35:0.045;castPixels[j+2]=warm ? 0.07:0.006
         } }
-        upload(castPixels,nightInput);scalar([log2(0.037),log2(0.425),log2(0.037),log2(0.425)],nightBase)
+        upload(castPixels,nightInput);scalar([0.037,0.425,0.037,0.425],nightBase)
         var nightParams=MetalFusionParameters();nightParams.control.y=2;nightParams.control.z=4;nightParams.tone=SIMD4(0.003,0.002,0.02,0)
         try execute("uc_night_tone",[nightInput,nightBase,nightBase,nightPlain],nightParams,nightPlain)
         nightParams.tone.w=0.4
         try execute("uc_night_tone",[nightInput,nightBase,nightBase,nightClean],nightParams,nightClean)
         let unclean=read(nightPlain),castClean=read(nightClean),darkIndex=(16*32+5)*4,warmIndex=(16*32+26)*4
         let beforeCast=unclean[darkIndex+1]-unclean[darkIndex+2],afterCast=castClean[darkIndex+1]-castClean[darkIndex+2]
+        print("Dark chromaticity residual ratio",afterCast/beforeCast)
         try require(afterCast<beforeCast*0.97,"Dark green/yellow cast was not attenuated")
         for c in 0..<3 { try require(abs(castClean[warmIndex+c]-unclean[warmIndex+c])<0.001,"Night chromaticity changed supported warm lamp colour") }
         print("Production Metal SR frequency recovery / separate phases / star vs sensor impulse passed")

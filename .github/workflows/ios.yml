@@ -39,7 +39,7 @@ jobs:
           mkdir -p build
           xcrun --sdk macosx swiftc -g -O -import-objc-header Sources/FusionMath.h Sources/CameraFailure.swift Sources/CaptureProgress.swift Sources/PreviewReferenceSelector.swift Sources/TemporalFrameBuffer.swift Sources/BayerScratchStorage.swift Sources/DNGMetadata.swift Sources/SensorBayerFrame.swift Sources/SuperResolution.swift Sources/LensCalibration.swift Sources/HDRCapturePlan.swift Sources/NightCapturePlan.swift Sources/NightTonePlan.swift Sources/ProcessingOptions.swift Sources/PhotoModePolicy.swift Sources/PhotoCapturePolicy.swift Sources/ColorRecipe.swift Sources/CubeLUT.swift Tests/ComputationalChecks.swift -o build/computational-checks
           build/computational-checks
-      - name: Check full RAW GPU pipeline
+      - name: Check GPU pipeline and optical joins
         run: bash scripts/check_host.sh gpu
       - name: Build for iPhone without signing
         run: |
