@@ -627,6 +627,8 @@ struct CameraView: View {
             Toggle("RAW de alta calidad · beta",isOn:Binding(get:{options.nightMetalRAW},set:{ value in
                 options.nightMetalRAW=value;if value { options.nightRAW=true;options.nightSpectralFusion=false }
             })).disabled(!camera.supportsRAW && !options.nightMetalRAW)
+            Toggle("Guardar DNG fusionado",isOn:$options.saveFusedDNG).disabled(!options.nightMetalRAW)
+                .accessibilityIdentifier("night.saveFusedDNG")
             Button("Usar Noche de Apple") { pendingNativeNight=true;showControls=false }
                 .accessibilityIdentifier("processing.nativeNight")
         } footer: { Text("Apoya el iPhone para escenas oscuras inmóviles.") }
@@ -721,6 +723,7 @@ struct CameraView: View {
             if options.hdrBracketing {
                 Section("HDR por horquillado") {
                     Toggle("HDR Bayer con Metal",isOn:$options.hdrMetalRAW).disabled(!camera.supportsRAW && !options.hdrMetalRAW).accessibilityIdentifier("hdr.metalRAW")
+                    Toggle("Guardar DNG fusionado",isOn:$options.saveFusedDNG).disabled(!options.hdrMetalRAW)
                     if options.hdrMetalRAW { Text("HDR RAW de alta calidad en fase beta.").font(.footnote).foregroundStyle(.secondary) }
                     Picker("Separación respecto a la referencia",selection:$options.hdrSpan) { Text("±1 EV").tag(1.0);Text("±2 EV").tag(2.0);Text("±3 EV").tag(3.0) }
                     Text("Combina tres exposiciones para recuperar luces y sombras.").font(.footnote).foregroundStyle(.secondary)
@@ -980,8 +983,8 @@ struct CameraView: View {
                     Text(camera.resultDetails).font(.subheadline).frame(maxWidth: .infinity, alignment: .leading)
                     if !showReference, let statistics = camera.resultStatistics { ResultHistogram(statistics: statistics) }
                     if camera.hasRAWResult {
-                        Label("RAW original + JPEG", systemImage: "square.stack.3d.up").font(.subheadline.bold()).foregroundStyle(CameraPalette.accent)
-                        Text("Fotos recibirá el DNG de referencia con su JPEG de cámara. El JPEG fusionado o editado se guarda aparte; el DNG no está fusionado.")
+                        Label(camera.hasFusedRAWResult ? "RAW fusionado + JPEG":"RAW original + JPEG", systemImage: "square.stack.3d.up").font(.subheadline.bold()).foregroundStyle(CameraPalette.accent)
+                        Text(camera.hasFusedRAWResult ? "El DNG contiene el mosaico fusionado. El JPEG con ajustes se guarda aparte.":"Fotos recibirá el DNG original con su JPEG de cámara. El JPEG editado se guarda aparte.")
                             .font(.footnote).foregroundStyle(.secondary)
                     } else if camera.hasSeparateReference {
                         Toggle("Guardar también la referencia", isOn: $includeReference)

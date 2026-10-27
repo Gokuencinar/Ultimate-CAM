@@ -7,13 +7,23 @@ struct RenderedJPEG {
     var encodingDescription: String { adaptiveHDR ? "JPEG con mapa HDR adaptativo." : "JPEG SDR." }
 }
 
+struct PreparedJPEG {
+    let image:CIImage,originalSDR:CIImage,hdrSource:CIImage?,extent:CGRect
+    let hdrHeadroom:Double
+}
+
 /// Shared finishing path for a single frame, a temporal stack, and HDR.
 enum JPEGRenderer {
     static func render(_ input: CIImage, extent inputExtent: CGRect, options: ProcessingOptions, context: CIContext,
                        hdrSource: CIImage? = nil,metadataReference:Data?=nil,frames:Int=1) throws -> RenderedJPEG {
-        func metadata(_ data:Data) throws -> Data {
-            if let metadataReference { return try CaptureMetadata.attach(to:data,reference:metadataReference,frames:frames) };return data
-        }
+        let prepared=try prepare(input,extent:inputExtent,options:options,context:context,hdrSource:hdrSource)
+        return try encode(prepared,options:options,context:context,metadataReference:metadataReference,frames:frames)
+    }
+
+    /// Exactly one shared portrait/detail/color preparation before encoding.
+    /// Metal RAW and ZSL call this explicitly; the other processors use render.
+    static func prepare(_ input:CIImage,extent inputExtent:CGRect,options:ProcessingOptions,context:CIContext,
+                        hdrSource:CIImage?=nil,hdrHeadroom:Double=8) throws -> PreparedJPEG {
         var baseInput=input.cropped(to:inputExtent),hdrInput=hdrSource
         if options.portraitAmount>0 {
             let mask=try PortraitProcessor.personMask(baseInput,extent:inputExtent,context:context)
@@ -22,15 +32,24 @@ enum JPEGRenderer {
         }
         let image = try finish(baseInput,options:options)
         let extent = AdvancedProcessor.crop(inputExtent, aspect: options.aspect)
+        return PreparedJPEG(image:image,originalSDR:baseInput,hdrSource:hdrInput,extent:extent,hdrHeadroom:hdrHeadroom)
+    }
+
+    static func encode(_ prepared:PreparedJPEG,options:ProcessingOptions,context:CIContext,
+                       metadataReference:Data?=nil,frames:Int=1) throws -> RenderedJPEG {
+        func metadata(_ data:Data) throws -> Data {
+            if let metadataReference { return try CaptureMetadata.attach(to:data,reference:metadataReference,frames:frames) };return data
+        }
+        let image=prepared.image,extent=prepared.extent
         let outputSpace = CGColorSpace(name: options.outputColor == .displayP3 ? CGColorSpace.displayP3 : CGColorSpace.sRGB)!
         guard let cg = context.createCGImage(image, from: extent,
                     format: .RGBA8, colorSpace: outputSpace) else {
             throw CameraFailure.message("No se pudo renderizar la pila.")
         }
-        if options.preserveHDR, let hdrSource=hdrInput {
+        if options.preserveHDR, let hdrSource=prepared.hdrSource {
             let base = CIImage(cgImage: cg).transformed(by: CGAffineTransform(translationX: extent.minX, y: extent.minY))
-            let data = try AdaptiveHDR.encode(base: base, originalSDR: baseInput, originalHDR: hdrSource,
-                extent: extent, colorSpace: outputSpace, quality: options.jpegQuality ?? 0.95, context: context)
+            let data = try AdaptiveHDR.encode(base: base, originalSDR: prepared.originalSDR, originalHDR: hdrSource,
+                extent: extent, colorSpace: outputSpace, quality: options.jpegQuality ?? 0.95, context: context,maximumHeadroom:prepared.hdrHeadroom)
             return RenderedJPEG(data: try metadata(data), width: Int(extent.width), height: Int(extent.height), adaptiveHDR: true)
         }
         let data = NSMutableData()

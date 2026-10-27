@@ -10,6 +10,8 @@ struct CaptureResult {
     var raw: Data? = nil
     var source = "JPEG"
     var statistics: ImageStatistics? = nil
+    var rawIsFused=false
+    var rawCompanion:Data? = nil
 }
 
 /// RAW / JPEG burst processing with a noise-aware reference selection, translational

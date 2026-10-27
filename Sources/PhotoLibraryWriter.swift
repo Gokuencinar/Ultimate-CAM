@@ -55,9 +55,10 @@ enum PhotoLibraryWriter {
                 let jpegOptions = PHAssetResourceCreationOptions()
                 jpegOptions.originalFilename = stem + ".jpg"
                 jpegOptions.uniformTypeIdentifier = AVFileType.jpg.rawValue
-                asset.addResource(with: .photo, data: result.reference, options: jpegOptions)
+                let companion=result.rawCompanion ?? result.reference
+                asset.addResource(with: .photo, data: companion, options: jpegOptions)
                 if let id = asset.placeholderForCreatedAsset?.localIdentifier { identifiers.append(id) }
-                if result.jpeg != result.reference { addJPEG(result.jpeg, name: stem + "-edit.jpg") }
+                if result.jpeg != companion { addJPEG(result.jpeg, name: stem + "-edit.jpg") }
             } else {
                 addJPEG(result.jpeg, name: stem + ".jpg")
                 if includeReference && result.jpeg != result.reference {

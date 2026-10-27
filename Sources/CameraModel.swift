@@ -55,6 +55,7 @@ final class CameraModel: NSObject, ObservableObject, AVCapturePhotoCaptureDelega
     @Published private(set) var focusStatus = "Toca el visor para enfocar"
     @Published private(set) var isFocusLocked = false
     @Published private(set) var hasRAWResult = false
+    @Published private(set) var hasFusedRAWResult = false
     @Published private(set) var hasSeparateReference = false
     @Published private(set) var savedResult = false
     @Published private(set) var savedJPEGOnly = false
@@ -225,7 +226,7 @@ final class CameraModel: NSObject, ObservableObject, AVCapturePhotoCaptureDelega
                         self.publish {
                             self.preview = previews.0; self.referencePreview = previews.1
                             self.resultDetails = result.details; self.resultStatistics = result.statistics
-                            self.hasRAWResult = false; self.hasSeparateReference = result.jpeg != result.reference
+                            self.hasRAWResult = false;self.hasFusedRAWResult=false; self.hasSeparateReference = result.jpeg != result.reference
                             self.savedResult = false; self.savedJPEGOnly = false
                             self.processingInProgress = false; self.busy = false
                             self.importedPhotoID = UUID()
@@ -981,6 +982,7 @@ final class CameraModel: NSObject, ObservableObject, AVCapturePhotoCaptureDelega
                             self.resultDetails = result.details
                             self.resultStatistics = result.statistics
                             self.hasRAWResult = result.raw != nil
+                            self.hasFusedRAWResult=result.rawIsFused
                             self.hasSeparateReference = result.jpeg != result.reference
                             self.savedResult = false
                             self.savedJPEGOnly = false
@@ -1030,7 +1032,7 @@ final class CameraModel: NSObject, ObservableObject, AVCapturePhotoCaptureDelega
                     self.previewAnalyzer.setActive(self.active && (self.previewTools.enabled || self.temporalFeed))
                     self.publish {
                         self.preview=primary;self.referencePreview=reference;self.processingInProgress=false
-                        self.resultDetails=value.details;self.resultStatistics=value.statistics;self.hasRAWResult=false
+                        self.resultDetails=value.details;self.resultStatistics=value.statistics;self.hasRAWResult=false;self.hasFusedRAWResult=false
                         self.hasSeparateReference=true;self.savedResult=false;self.savedJPEGOnly=false;self.busy=false
                         self.status="Captura ZSL preparada. Revisa antes de guardar."
                     }

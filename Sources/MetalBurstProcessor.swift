@@ -183,7 +183,7 @@ final class MetalBurstProcessor {
         try encode("uc_night_tone",command,textures:[input,base,wideBase,output],parameters:params)
         try finish(command,cancellation:cancellation)
         guard let result=CIImage(mtlTexture:output,options:[.colorSpace:space]) else { throw CameraFailure.message("La GPU no devolvió la imagen tonal.") }
-        let expanded=normalized.applyingFilter("CIExposureAdjust",parameters:[kCIInputEVKey:log2(Double(params.control.y))])
+        let expanded=try AdaptiveHDR.rollOff(normalized,gain:Double(params.control.y),headroom:4)
         return (result,expanded)
     }
 
@@ -241,8 +241,17 @@ final class MetalBurstProcessor {
         guard let developed=decoder.outputImage else { throw CameraFailure.message("El DNG de trabajo no se pudo revelar.") }
         progress?("Metal RAW · tono y color…")
         let mapped=try tone(developed,maximumGain:options.hdrBracketing ? 64:32,night:!options.hdrBracketing,cancellation:cancellation)
-        let jpeg=try JPEGRenderer.render(mapped.sdr,extent:mapped.sdr.extent,options:options,context:context,hdrSource:options.preserveHDR ? mapped.hdr:nil,metadataReference:referenceJPEG,frames:fused.count)
-        return CaptureResult(jpeg:jpeg.data,reference:referenceJPEG,details:"\(options.hdrBracketing ? "HDR RAW Metal":"Noche RAW Metal") · \(fused.count) tomas · Bayer por teselas · \(jpeg.width) × \(jpeg.height) px.",mergedFrames:fused.count,raw:originalDNG,source:"Bayer-Metal")
+        let prepared=try JPEGRenderer.prepare(mapped.sdr,extent:mapped.sdr.extent,options:options,context:context,
+            hdrSource:options.preserveHDR ? mapped.hdr:nil,hdrHeadroom:4)
+        let jpeg=try JPEGRenderer.encode(prepared,options:options,context:context,metadataReference:referenceJPEG,frames:fused.count)
+        let companion:Data?
+        if options.saveFusedDNG {
+            // A computational RAW needs its own same-geometry JPEG companion;
+            // preserve the camera JPEG separately for comparison with the edit.
+            companion=try JPEGRenderer.render(mapped.sdr,extent:mapped.sdr.extent,options:ProcessingOptions(),context:context).data
+        } else { companion=nil }
+        return CaptureResult(jpeg:jpeg.data,reference:referenceJPEG,details:"\(options.hdrBracketing ? "HDR RAW Metal":"Noche RAW Metal") · \(fused.count) tomas · Bayer por teselas · \(jpeg.width) × \(jpeg.height) px.",mergedFrames:fused.count,
+            raw:options.selectedRAW(original:originalDNG,fused:fused.dng),source:"Bayer-Metal",rawIsFused:options.saveFusedDNG,rawCompanion:companion)
     }
     func processZSL(_ images:[CGImage],options:ProcessingOptions,captureAngle:Double,previewMirrored:Bool,mirrorOutput:Bool,
                     cancellation:ProcessingCancellation?) throws -> CaptureResult {
@@ -277,7 +286,8 @@ final class MetalBurstProcessor {
             if mirrorOutput { image=image.oriented(.upMirrored) };return image
         }
         result=geometry(result);original=geometry(original)
-        let jpeg=try JPEGRenderer.render(result,extent:result.extent,options:options,context:context,frames:images.count)
+        let prepared=try JPEGRenderer.prepare(result,extent:result.extent,options:options,context:context)
+        let jpeg=try JPEGRenderer.encode(prepared,options:options,context:context,frames:images.count)
         let referenceJPEG=try JPEGRenderer.render(original,extent:original.extent,options:ProcessingOptions(),context:context)
         return CaptureResult(jpeg:jpeg.data,reference:referenceJPEG.data,details:"ZSL del visor · \(images.count) fotogramas previos · \(jpeg.width) × \(jpeg.height) px · RGB procesado, sin RAW ni recuperación de luces recortadas.",mergedFrames:images.count,source:"preview-ZSL-Metal")
     }
