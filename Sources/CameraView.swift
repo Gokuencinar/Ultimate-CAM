@@ -460,7 +460,7 @@ struct CameraView: View {
                             options.nightStatic=false;options.hdrBracketing=false;options.portraitAmount=0.5;stack=false
                         }.accessibilityIdentifier("camera.mode.portrait").id("portrait")
                         modeButton("HDR",selected:options.hdrBracketing) { activateHDR() }.accessibilityIdentifier("camera.mode.hdr").id("hdr")
-                        modeButton("Pila",selected:stack && !options.nightStatic && !options.hdrBracketing) { options.nightStatic=false;options.hdrBracketing=false;options.portraitAmount=0;stack=true }.id("stack")
+                        modeButton("Pila",selected:stack && !options.nightStatic && !options.hdrBracketing) { options.nightStatic=false;options.hdrBracketing=false;options.portraitAmount=0;stack=true }.accessibilityIdentifier("camera.mode.stack").id("stack")
                         modeButton("Vídeo",selected:videoMode,photoMode:false) { enterVideo() }.accessibilityIdentifier("camera.mode.video").id("video")
                         modeButton("Panorama",selected:false) { openAuxiliary(.panorama) }.accessibilityIdentifier("camera.mode.panorama")
                         modeButton("Esfera",selected:false) { openAuxiliary(.sphere) }.accessibilityIdentifier("camera.mode.sphere")

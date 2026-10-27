@@ -1,6 +1,40 @@
 import XCTest
 
 final class CameraInteractionTests: XCTestCase {
+    func testQuickExposureAndRAWFormatsWithoutCapturing() {
+        continueAfterFailure=false
+        let app=XCUIApplication();app.launchArguments=["-ui-test-raw-support"];app.launch()
+        app.buttons["camera.quickSettings"].tap()
+        let exposure=app.sliders["camera.exposureBias"],reset=app.buttons["camera.resetExposureBias"]
+        XCTAssertTrue(exposure.waitForExistence(timeout:3))
+        exposure.adjust(toNormalizedSliderPosition:0.75)
+        XCTAssertGreaterThan(Double(reset.value as? String ?? "0") ?? 0,0.5)
+        capture(app,"quick-exposure")
+        reset.tap();XCTAssertEqual(reset.value as? String,"0.0")
+        let format=app.buttons["camera.quickFormat"]
+        XCTAssertTrue(format.isEnabled)
+        XCTAssertEqual(format.value as? String,"JPEG")
+        format.tap();XCTAssertEqual(format.value as? String,"RAW+")
+        format.tap();XCTAssertEqual(format.value as? String,"JPEG")
+        revealMode(app,"camera.mode.night").tap()
+        XCTAssertTrue(format.isEnabled,"Stack flag disabled the night RAW control")
+        if format.value as? String != "JPEG" { format.tap() }
+        format.tap();XCTAssertEqual(format.value as? String,"RAW*")
+        XCTAssertTrue(app.staticTexts["Noche · RAW Metal"].exists)
+        capture(app,"quick-night-raw")
+        format.tap();XCTAssertEqual(format.value as? String,"JPEG")
+        revealMode(app,"camera.mode.hdr").tap()
+        XCTAssertTrue(format.isEnabled)
+        if format.value as? String != "JPEG" { format.tap() }
+        format.tap();XCTAssertEqual(format.value as? String,"RAW*")
+        XCTAssertTrue(app.staticTexts["HDR · RAW Metal"].exists)
+        format.tap();XCTAssertEqual(format.value as? String,"JPEG")
+        revealMode(app,"camera.mode.stack").tap()
+        XCTAssertFalse(format.isEnabled,"Normal JPEG stack incorrectly enabled single-photo RAW")
+        revealMode(app,"camera.mode.photo").tap()
+        XCTAssertTrue(format.isEnabled)
+    }
+
     func testGuidedModesAndPreviewToolsWithoutTakingPhotos() {
         continueAfterFailure=false
         let app=XCUIApplication();app.launch()
