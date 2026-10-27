@@ -42,11 +42,11 @@ enum PhotoLibraryWriter {
                 if let id = asset.placeholderForCreatedAsset?.localIdentifier { identifiers.append(id) }
             }
             if let stagedRAW {
-                // Import the camera JPEG as primary and the staged DNG as its
+                // Import the matching JPEG as primary and the staged DNG as its
                 // alternate resource. DNG-primary/JPEG-alternate is rejected
                 // with PHPhotosErrorDomain 3300 on the tested iOS 18 device.
                 // An adjusted JPEG is a separate asset, not a replacement for
-                // the camera companion whose dimensions/metadata match the DNG.
+                // the camera/computational companion matching the DNG geometry.
                 let asset = PHAssetCreationRequest.forAsset()
                 let rawOptions = PHAssetResourceCreationOptions()
                 rawOptions.originalFilename = stem + ".dng"

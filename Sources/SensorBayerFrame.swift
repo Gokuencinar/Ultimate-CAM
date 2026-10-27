@@ -331,8 +331,8 @@ enum BayerQuadPacking {
     }
 }
 
-/// Minimal uncompressed DNG for CIRAWFilter demosaicing/color conversion of the
-/// fused mosaic. The saved user's RAW remains the original, never this working DNG.
+/// Calibrated uncompressed DNG for CIRAWFilter and optional computational RAW
+/// export. The original camera DNG remains the default export choice.
 enum FusedDNG {
     static func encode(quads:Data,width:Int,height:Int,calibration c:BayerCalibration,noiseProfile:[Double]=[],zoom:Double=1) throws -> Data {
         guard width>0,height>0,width<=2048,height<=2048,quads.count==width*height*8,c.pattern.count==4,
