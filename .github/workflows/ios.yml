@@ -39,6 +39,8 @@ jobs:
           mkdir -p build
           xcrun --sdk macosx swiftc -g -O -import-objc-header Sources/FusionMath.h Sources/CameraFailure.swift Sources/CaptureProgress.swift Sources/PreviewReferenceSelector.swift Sources/TemporalFrameBuffer.swift Sources/BayerScratchStorage.swift Sources/DNGMetadata.swift Sources/SensorBayerFrame.swift Sources/SuperResolution.swift Sources/LensCalibration.swift Sources/HDRCapturePlan.swift Sources/NightCapturePlan.swift Sources/NightTonePlan.swift Sources/ProcessingOptions.swift Sources/PhotoModePolicy.swift Sources/PhotoCapturePolicy.swift Sources/ColorRecipe.swift Sources/CubeLUT.swift Tests/ComputationalChecks.swift -o build/computational-checks
           build/computational-checks
+      - name: Check full RAW GPU pipeline
+        run: bash scripts/check_host.sh gpu
       - name: Build for iPhone without signing
         run: |
           set -euo pipefail
@@ -50,25 +52,7 @@ jobs:
             CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CURRENT_PROJECT_VERSION="$GITHUB_RUN_NUMBER" \
             build
       - name: Check image alignment and noise averaging
-        run: |
-          set -euo pipefail
-          SOURCES=(Sources/SuperResolution.swift Sources/LensCalibration.swift Sources/HybridZSL.swift Sources/PortraitDepth.swift Sources/BayerScratchStorage.swift Sources/DNGMetadata.swift Sources/SensorBayerFrame.swift Sources/NightTonePlan.swift Sources/CameraFailure.swift Sources/ResearchWiener.swift Sources/CaptureRotation.swift Sources/CaptureMetadata.swift Sources/SphereViewerRenderer.swift Sources/SphereGeometry.swift Sources/SphereMetadata.swift Sources/SphereProcessor.swift Sources/PanoramaProcessor.swift Sources/PortraitProcessor.swift Sources/PreviewAnalysis.swift Sources/MovieConfiguration.swift Sources/MovieRecordedAsset.swift Sources/AdaptiveHDR.swift Sources/PNGLUT.swift Sources/PhotoCapturePolicy.swift Sources/WeightedTemporalMerger.swift Sources/ImportedPhotoProcessor.swift Sources/ColorRecipe.swift Sources/HDRCapturePlan.swift Sources/HDRProcessor.swift Sources/JPEGRenderer.swift Sources/NightCapturePlan.swift Sources/ProcessingCancellation.swift Sources/PreviewDecoder.swift Sources/ProcessingOptions.swift Sources/CubeLUT.swift Sources/ProcessingProfiles.swift Sources/AdvancedProcessor.swift Sources/LocalAlignment.swift Sources/NoiseAwareMerger.swift Sources/ImageStatistics.swift Sources/BurstProcessor.swift)
-          xcrun --sdk macosx swiftc -O -import-objc-header Sources/FusionMath.h "${SOURCES[@]}" Sources/MetalBurstProcessor.swift Tests/MetalGPUChecks.swift -o build/metal-gpu-checks
-          build/metal-gpu-checks
-          xcrun --sdk macosx swiftc -O -import-objc-header Sources/FusionMath.h "${SOURCES[@]}" Tests/PortChecks.swift -o build/port-checks
-          build/port-checks
-          xcrun --sdk macosx swiftc -O -import-objc-header Sources/FusionMath.h "${SOURCES[@]}" Tests/ProcessorChecks.swift -o build/processor-checks
-          build/processor-checks
-          xcrun --sdk macosx swiftc -O -import-objc-header Sources/FusionMath.h "${SOURCES[@]}" Sources/MetalBurstProcessor.swift Tests/MetalChecks.swift -o build/metal-checks
-          build/metal-checks
-          xcrun --sdk macosx swiftc -O -import-objc-header Sources/FusionMath.h "${SOURCES[@]}" Tests/MovieChecks.swift -o build/movie-checks
-          build/movie-checks
-          xcrun --sdk macosx swiftc -O -import-objc-header Sources/FusionMath.h "${SOURCES[@]}" Tests/PanoramaChecks.swift -o build/panorama-checks
-          build/panorama-checks
-          xcrun --sdk macosx swiftc -O -import-objc-header Sources/FusionMath.h "${SOURCES[@]}" Tests/SphereChecks.swift -o build/sphere-checks
-          build/sphere-checks
-          xcrun --sdk macosx swiftc -O -import-objc-header Sources/FusionMath.h "${SOURCES[@]}" Tests/SpectralChecks.swift -o build/spectral-checks
-          build/spectral-checks
+        run: bash scripts/check_host.sh rest
       - name: Package rootless DEB
         run: bash scripts/package_deb.sh
       - name: Package RootHide DEB

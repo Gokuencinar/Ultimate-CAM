@@ -149,7 +149,8 @@ import Darwin
             if bin>=0 && bin<bins { esf[bin]+=Double(values[(y*w+x)*4]);counts[bin]+=1 }
         } }
         for i in 0..<bins { esf[i]=counts[i]>0 ? esf[i]/counts[i]:(i>0 ? esf[i-1]:0) }
-        let lsf=(1..<bins-1).map{(esf[$0+1]-esf[$0-1])*0.5}
+        var lsf=[Double]()
+        for i in 1..<(bins-1) { let low:Double=esf[i-1],high:Double=esf[i+1];lsf.append((high-low)*0.5) }
         let dc=lsf.reduce(0,+)
         guard dc>0.1 else { return 0 }
         for index in 1...200 {
