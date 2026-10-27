@@ -95,6 +95,9 @@ final class CameraModel: NSObject, ObservableObject, AVCapturePhotoCaptureDelega
     private var nightRawFrames = [Data]()
     private var sensorFrames=[SensorBayerFrame]()
     private var captureZoom:Double=1
+    private var opticalProgress=OpticalCaptureProgress()
+    @Published private(set) var captureProgress:Double=0
+    @Published private(set) var opticalCaptureInProgress=false
     private var temporalFeed=false
     private var hdrPlan: [FrameExposure] = []
     private var hdrExposures: [FrameExposure] = []
@@ -628,6 +631,7 @@ final class CameraModel: NSObject, ObservableObject, AVCapturePhotoCaptureDelega
             return
         }
         self.requestedFlash = flash
+        self.opticalProgress.reset();self.publishOpticalProgress()
         self.captureZoom=Double(device.videoZoomFactor)
         self.inFlight = true
         self.transaction = UUID()
@@ -765,6 +769,7 @@ final class CameraModel: NSObject, ObservableObject, AVCapturePhotoCaptureDelega
     }
 
     private func captureNext() {
+        if !opticalProgress.started { opticalProgress.begin(total:desiredCount);publishOpticalProgress() }
         guard active, !interrupted, session.isRunning else {
             finishFailure(CameraFailure.message("Captura interrumpida. No se ha guardado nada."))
             return
@@ -907,6 +912,7 @@ final class CameraModel: NSObject, ObservableObject, AVCapturePhotoCaptureDelega
             self.rawData = nil
             self.frames = []
             self.captureStage = "processing"
+            self.opticalProgress.complete();self.publishOpticalProgress()
             let cancellation = ProcessingCancellation()
             self.processingCancellation = cancellation
             self.publish { self.processingInProgress = true }
@@ -1000,6 +1006,7 @@ final class CameraModel: NSObject, ObservableObject, AVCapturePhotoCaptureDelega
     }
 
     private func processZSL(_ images:[CGImage],options:ProcessingOptions,angle:Double,previewMirrored:Bool,mirrorOutput:Bool) {
+        opticalProgress.begin(total:images.count);opticalProgress.complete();publishOpticalProgress()
         let token=transaction,cancellation=ProcessingCancellation()
         processingCancellation=cancellation;captureStage="processing"
         publish { self.processingInProgress=true;self.status="Fusionando fotogramas previos…" }
@@ -1086,6 +1093,7 @@ final class CameraModel: NSObject, ObservableObject, AVCapturePhotoCaptureDelega
         hdrPlan = []; hdrExposures = []; lastHDRTimestamp = nil
         rawData = nil
         inFlight = false
+        opticalProgress.reset();publishOpticalProgress()
         publish { self.busy = false; self.processingInProgress = false; self.status = error.localizedDescription }
     }
 
@@ -1101,7 +1109,15 @@ final class CameraModel: NSObject, ObservableObject, AVCapturePhotoCaptureDelega
 
     func photoOutput(_ output: AVCapturePhotoOutput, didCapturePhotoFor resolvedSettings: AVCaptureResolvedPhotoSettings) {
         CaptureTrace.record("delegate.didCapture", ["id": resolvedSettings.uniqueID])
-        queue.async { if self.captureID == resolvedSettings.uniqueID { self.captureStage = "exposed" } }
+        queue.async { if self.captureID == resolvedSettings.uniqueID {
+            self.captureStage = "exposed"
+            self.opticalProgress.exposed(id:resolvedSettings.uniqueID);self.publishOpticalProgress()
+        } }
+    }
+
+    private func publishOpticalProgress() {
+        let fraction=opticalProgress.fraction,capturing=opticalProgress.capturing
+        publish { self.captureProgress=fraction;self.opticalCaptureInProgress=capturing }
     }
 
     func save(jpegOnly: Bool = false, includeReference: Bool = false) {

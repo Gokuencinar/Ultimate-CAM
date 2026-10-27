@@ -415,9 +415,14 @@ struct CameraView: View {
                 Spacer()
                 Button { countdown > 0 ? cancelCountdown() : takePhoto() } label: {
                     ZStack {
-                        Circle().stroke(camera.busy ? CameraPalette.accent : .white, lineWidth: 3)
+                        Circle().stroke(camera.busy ? .white.opacity(0.25):.white, lineWidth: 3)
+                        if camera.busy {
+                            Circle().trim(from:0,to:camera.captureProgress).stroke(CameraPalette.accent,style:StrokeStyle(lineWidth:4,lineCap:.round))
+                                .rotationEffect(.degrees(-90)).animation(.linear(duration:0.18),value:camera.captureProgress)
+                        }
                         Circle().fill(countdown > 0 ? CameraPalette.accent : .white).padding(7)
-                        if camera.busy { ProgressView().tint(.black).scaleEffect(1.2) }
+                        if camera.busy && camera.opticalCaptureInProgress { Image(systemName:"camera.aperture").font(.title2).foregroundStyle(.black) }
+                        else if camera.busy { ProgressView().tint(.black).scaleEffect(1.2) }
                         else if countdown > 0 { Image(systemName: "xmark").font(.title2.bold()).foregroundStyle(.black) }
                     }.frame(width: 72, height: 72)
                 }.accessibilityLabel(countdown > 0 ? "Cancelar temporizador" : (options.nightStatic ? "Capturar noche estática" : (stack ? "Capturar pila de \(stackCount) fotos" : "Tomar foto")))
@@ -432,10 +437,17 @@ struct CameraView: View {
             }
             modeSelector
             if !videoMode && (camera.busy || !camera.ready) {
-                Text(camera.status).font(.system(size:12,weight:.medium)).foregroundStyle(.white.opacity(0.75))
+                Text(capturePhaseText).font(.system(size:12,weight:.medium)).foregroundStyle(.white.opacity(0.75))
                     .multilineTextAlignment(.center).lineLimit(2).frame(maxWidth:.infinity,minHeight:30).accessibilityIdentifier("camera.status")
             }
         }.padding(.horizontal,20).padding(.top,10).padding(.bottom,5).tint(CameraPalette.accent)
+    }
+
+    private var capturePhaseText:String {
+        guard camera.busy else { return camera.status }
+        if camera.opticalCaptureInProgress { return "Mantén firme el iPhone…" }
+        if camera.captureProgress>=1 || camera.processingInProgress { return "Procesando foto · ya puedes mover el iPhone" }
+        return "Preparando captura…"
     }
 
     private var modeSelector:some View {
