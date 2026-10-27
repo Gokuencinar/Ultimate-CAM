@@ -48,6 +48,8 @@ import Darwin
                 values[i+1]=0.15;values[i+2]=0.35;values[i+3]=0.65
             } };return values
         }
+        let tensor=try texture(w,h)
+        upload([Float](repeating:0,count:w*h*4),tensor)
         let reference=try texture(w,h),sample=try texture(w,h),flow=try texture(3,2,.rgba32Float)
         upload(samples(.zero),reference)
         let means=try [texture(w*2,h*2),texture(w*2,h*2)],weights=try [texture(w*2,h*2),texture(w*2,h*2)]
@@ -60,7 +62,7 @@ import Darwin
             for _ in 0..<6 { vectors += [shift.x,shift.y,0,1] }
             vectors.withUnsafeBytes { flow.replace(region:MTLRegionMake2D(0,0,3,2),mipmapLevel:0,withBytes:$0.baseAddress!,bytesPerRow:3*16) }
             p.search.y=index==0 ? 0:1;let next=1-slot
-            try execute("uc_fuse_super_res",[reference,sample,means[slot],weights[slot],flow,means[next],weights[next],reference,sample],p,means[next])
+            try execute("uc_fuse_super_res",[reference,sample,means[slot],weights[slot],flow,means[next],weights[next],reference,sample,tensor],p,means[next])
             slot=next;if index==0 { single=read(means[slot]) }
         }
         let result=read(means[slot]);var before:Float=0,after:Float=0
@@ -87,6 +89,14 @@ import Darwin
         let fused=read(output)
         try require(fused[(16*n+12)*4]>0.6,"Production temporal protection erased the aligned star")
         try require(fused[(16*n+24)*4]<0.05,"Production temporal protection retained a fixed sensor impulse")
+        let guide=try texture(32,32,.r16Float),ellipse=try texture(32,32)
+        var diagonal=[UInt16](repeating:0,count:32*32)
+        for y in 0..<32 { for x in 0..<32 { diagonal[y*32+x]=Float16(x>y ? 0.8:0.05).bitPattern } }
+        diagonal.withUnsafeBytes { guide.replace(region:MTLRegionMake2D(0,0,32,32),mipmapLevel:0,withBytes:$0.baseAddress!,bytesPerRow:64) }
+        try execute("uc_structure_tensor",[guide,ellipse],params,ellipse)
+        let field=read(ellipse),center=(16*32+16)*4
+        let a=field[center],b=field[center+1],c=field[center+2]
+        try require(a*c-b*b>0 && b < -1 && field[center+3]>0.5,"Structure tensor did not produce a bounded positive ellipse aligned with a diagonal edge")
         print("Production Metal SR frequency recovery / separate phases / star vs sensor impulse passed")
     }
 }

@@ -319,6 +319,37 @@ kernel void uc_night_tone(texture2d<float,access::sample> input [[texture(0)]],
     output.write(float4(result,1),p);
 }
 
+// One reference tensor per burst, shared by every phase and subsequent frame.
+// Subtract the green-guide gradient noise floor before choosing an orientation.
+kernel void uc_structure_tensor(texture2d<float,access::read> luma [[texture(0)]],
+ texture2d<float,access::write> output [[texture(1)]],constant FusionParameters &params [[buffer(0)]],uint2 p [[thread_position_in_grid]]) {
+ if(p.x>=output.get_width() || p.y>=output.get_height()) return;
+ int2 edge=int2(luma.get_width()-1,luma.get_height()-1);
+ float xx=0,xy=0,yy=0,total=0;
+ for(int y=-1;y<=1;++y) for(int x=-1;x<=1;++x) {
+  int2 q=int2(p)+int2(x,y);float weight=float((x==0 ? 2:1)*(y==0 ? 2:1));
+  float gx=0.5f*(luma.read(uint2(clamp(q+int2(1,0),int2(0),edge))).r-luma.read(uint2(clamp(q-int2(1,0),int2(0),edge))).r);
+  float gy=0.5f*(luma.read(uint2(clamp(q+int2(0,1),int2(0),edge))).r-luma.read(uint2(clamp(q-int2(0,1),int2(0),edge))).r);
+  xx+=weight*gx*gx;xy+=weight*gx*gy;yy+=weight*gy*gy;total+=weight;
+ }
+ float variance=max(params.sensorNoise.x*max(luma.read(p).r,0.0f)+params.sensorNoise.y,1e-8f);
+ xx=max(0.0f,xx/total-0.25f*variance);yy=max(0.0f,yy/total-0.25f*variance);
+ xy=clamp(xy/total,-sqrt(xx*yy),sqrt(xx*yy));
+ float difference=sqrt(max((xx-yy)*(xx-yy)+4*xy*xy,0.0f));
+ float largest=0.5f*(xx+yy+difference),smallest=max(0.0f,0.5f*(xx+yy-difference));
+ float coherence=(largest-smallest)/max(largest+smallest,1e-8f);
+ float strength=coherence*smoothstep(0.002f+2*sqrt(variance),0.01f+6*sqrt(variance),sqrt(largest));
+ float2 normal=float2(xy,largest-xx);
+ normal=dot(normal,normal)>1e-12f ? normalize(normal):float2(1,0);
+ float2 tangent=float2(-normal.y,normal.x);
+ float sigmaN=mix(0.42f,0.28f,strength),sigmaT=mix(0.42f,0.62f,strength);
+ float invN=1/(sigmaN*sigmaN),invT=1/(sigmaT*sigmaT);
+ float a=invN*normal.x*normal.x+invT*tangent.x*tangent.x;
+ float b=invN*normal.x*normal.y+invT*tangent.x*tangent.y;
+ float c=invN*normal.y*normal.y+invT*tangent.y*tangent.y;
+ output.write(float4(a,b,c,strength),p);
+}
+
 // Gather measured CFA samples onto the dense grid. Four phase-specific weights
 // retain the physical half-quad offsets; no demosaicked resize is involved.
 kernel void uc_fuse_super_res(texture2d<float,access::sample> reference [[texture(0)]],
@@ -326,6 +357,7 @@ kernel void uc_fuse_super_res(texture2d<float,access::sample> reference [[textur
  texture2d<float,access::read> weights [[texture(3)]],texture2d<float,access::read> flow [[texture(4)]],
  texture2d<float,access::write> nextMean [[texture(5)]],texture2d<float,access::write> nextWeights [[texture(6)]],
  texture2d<float,access::sample> rawReference [[texture(7)]],texture2d<float,access::sample> rawSample [[texture(8)]],
+ texture2d<float,access::sample> tensor [[texture(9)]],
  constant FusionParameters &params [[buffer(0)]],uint2 p [[thread_position_in_grid]]) {
  if (p.x>=nextMean.get_width() || p.y>=nextMean.get_height()) return;
  float2 center=params.sr.xy+(float2(p)+0.5f)/params.sr.zw;
@@ -336,6 +368,7 @@ kernel void uc_fuse_super_res(texture2d<float,access::sample> reference [[textur
   float2 phaseOffset=float2(phase&1,phase>>1)*0.5f+0.25f;
   float2 native=float2(UCSRPosition(float(p.x),phaseOffset.x,params.sr.x,params.sr.z),UCSRPosition(float(p.y),phaseOffset.y,params.sr.y,params.sr.w));
   float2 q=native+motion.xy;int2 base=int2(floor(q));
+  float4 covariance=params.flags.z ? tensor.sample(pixels,native+0.5f):float4(0);
   float4 clean=reference.sample(pixels,native+0.5f);
   uint2 rp=uint2(clamp(round(native),float2(0),float2(reference.get_width()-1,reference.get_height()-1)));
   float4 supported=params.search.y ? uc_point_support(rawReference,rawSample,rp,float2(rp)+0.5f+motion.xy,reference.read(rp),motion.xy,params):float4(0);
@@ -347,6 +380,10 @@ kernel void uc_fuse_super_res(texture2d<float,access::sample> reference [[textur
    int2 source=base+int2(x,y);if (any(source<0) || source.x>=int(sample.get_width()) || source.y>=int(sample.get_height())) continue;
    float sensor=mix(sample.read(uint2(source))[phase],rawSample.read(uint2(source))[phase],supported[phase]),value=sensor*params.control.w;
    float2 d=float2(source)-q;float radial=UCSRWeight(d.x,d.y);
+   if(params.flags.z) {
+    float mahalanobis=covariance.x*d.x*d.x+2*covariance.y*d.x*d.y+covariance.z*d.y*d.y;
+    radial=exp(-0.5f*clamp(mahalanobis,0.0f,60.0f));
+   }
    // Allow genuine alias detail only for a registered, low-cost tile.
    float robust=exp(-(value-anchor)*(value-anchor)/(18*variance));
    if (motion.z<sqrt(variance)) robust=max(robust,0.15f);

@@ -25,6 +25,7 @@ final class MetalBurstProcessor {
         let referencePyramid:[MTLTexture],samplePyramid:[MTLTexture],flow:[MTLTexture],regularizedFlow:[MTLTexture]
         let means:[MTLTexture],weights:[MTLTexture]
         var srMeans=[MTLTexture](),srWeights=[MTLTexture]()
+        var structureTensor:MTLTexture?
         var srSlot=0
         var slot=0
         var mean:MTLTexture { means[slot] }
@@ -36,17 +37,18 @@ final class MetalBurstProcessor {
     private let device:MTLDevice,queue:MTLCommandQueue
     private let context:CIContext
     private let kernels:[String:MTLComputePipelineState]
+    private let directionalSuperResolution:Bool
     private let space=CGColorSpace(name:CGColorSpace.extendedLinearSRGB)!
-    init(device suppliedDevice:MTLDevice?=nil,library suppliedLibrary:MTLLibrary?=nil) throws {
+    init(device suppliedDevice:MTLDevice?=nil,library suppliedLibrary:MTLLibrary?=nil,directionalSuperResolution:Bool=true) throws {
         guard let device=suppliedDevice ?? MTLCreateSystemDefaultDevice(),let queue=device.makeCommandQueue() else { throw CameraFailure.message("Metal no está disponible.") }
         let library=try suppliedLibrary ?? device.makeDefaultLibrary(bundle:Bundle.main)
         guard library.device.registryID==device.registryID else { throw CameraFailure.message("La biblioteca Metal pertenece a otra GPU.") }
         var kernels=[String:MTLComputePipelineState]()
-        for name in ["uc_fuse_super_res","uc_clear","uc_initial_weights","uc_protect_bayer","uc_luma","uc_pyramid","uc_tile_flow","uc_regularize_flow","uc_fuse_tiles","uc_tone_luma","uc_night_tone"] {
+        for name in ["uc_structure_tensor","uc_fuse_super_res","uc_clear","uc_initial_weights","uc_protect_bayer","uc_luma","uc_pyramid","uc_tile_flow","uc_regularize_flow","uc_fuse_tiles","uc_tone_luma","uc_night_tone"] {
             guard let function=library.makeFunction(name:name) else { throw CameraFailure.message("Falta un shader del procesador Metal.") }
             kernels[name]=try device.makeComputePipelineState(function:function)
         }
-        self.device=device;self.queue=queue;self.kernels=kernels
+        self.device=device;self.queue=queue;self.kernels=kernels;self.directionalSuperResolution=directionalSuperResolution
         context=CIContext(mtlDevice:device,options:[.workingColorSpace:CGColorSpace(name:CGColorSpace.extendedLinearSRGB)!, .cacheIntermediates:false])
     }
     private func texture(_ width:Int,_ height:Int,format:MTLPixelFormat = .rgba16Float,storage:MTLStorageMode = .private) throws -> MTLTexture {
@@ -166,9 +168,10 @@ final class MetalBurstProcessor {
     }
     private func superResolve(_ work:FusionWorkspace,parameters:MetalFusionParameters,anchor:Bool,cancellation:ProcessingCancellation?) throws {
         let next=1-work.srSlot,command=try command()
+        guard let tensor=work.structureTensor else { throw CameraFailure.message("Falta el tensor de reconstrucción.") }
         var params=parameters;params.search.y=anchor ? 0:1
         try encode("uc_fuse_super_res",command,textures:[work.reference,anchor ? work.reference:work.sample,
-            work.srMeans[work.srSlot],work.srWeights[work.srSlot],work.regularizedFlow[0],work.srMeans[next],work.srWeights[next],work.original,anchor ? work.original:work.sampleUpload],parameters:params)
+            work.srMeans[work.srSlot],work.srWeights[work.srSlot],work.regularizedFlow[0],work.srMeans[next],work.srWeights[next],work.original,anchor ? work.original:work.sampleUpload,tensor],parameters:params)
         try finish(command,cancellation:cancellation);work.srSlot=next
     }
     private func tone(_ image:CIImage,maximumGain:Double,night:Bool,lens:LensIdentity = .wide,cancellation:ProcessingCancellation?) throws -> (sdr:CIImage,hdr:CIImage) {
@@ -226,10 +229,13 @@ final class MetalBurstProcessor {
             try workspace(reference:upload(first),raw:true,parameters:params,cancellation:cancellation)
         }
         if let sr=reconstruction {
+            params.flags.z=directionalSuperResolution ? 1:0
+            work.structureTensor=try texture(first.width,first.height)
             params.sr=SIMD4(Float(sr.originX),Float(sr.originY),Float(sr.scaleX),Float(sr.scaleY))
             work.srMeans=try [texture(sr.width,sr.height),texture(sr.width,sr.height)]
             work.srWeights=try [texture(sr.width,sr.height),texture(sr.width,sr.height)]
             let clear=try command()
+            try encode("uc_structure_tensor",clear,textures:[work.referencePyramid[0],work.structureTensor!],parameters:params)
             for target in [work.srMeans[0],work.srWeights[0]] { try encode("uc_clear",clear,textures:[target]) }
             try finish(clear,cancellation:cancellation)
             params.noise=SIMD4(referenceNoise.x*2,referenceNoise.y*2,0,0)

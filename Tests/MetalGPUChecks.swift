@@ -45,9 +45,9 @@ import Darwin
         print("Full processRAW GPU:",device.name)
         var options=ProcessingOptions();options.nightStatic=true;options.nightRAW=true;options.nightMetalRAW=true;options.saveFusedDNG=true;options.lensCorrections=false
         let reference=try JPEGRenderer.render(CIImage(color:CIColor(red:0.2,green:0.2,blue:0.2)).cropped(to:CGRect(x:0,y:0,width:w*2,height:h*2)),extent:CGRect(x:0,y:0,width:w*2,height:h*2),options:options,context:context).data
-        func execute(_ frames:[SensorBayerFrame],_ recipe:ProcessingOptions) throws -> Mosaic {
+        func execute(_ frames:[SensorBayerFrame],_ recipe:ProcessingOptions,engine:MetalBurstProcessor?=nil) throws -> Mosaic {
             let original=try FusedDNG.encode(quads:frames[0].quads,width:w,height:h,calibration:calibration)
-            let result=try processor.processRAW(frames,referenceJPEG:reference,originalDNG:original,options:recipe,cancellation:nil,progress:nil)
+            let result=try (engine ?? processor).processRAW(frames,referenceJPEG:reference,originalDNG:original,options:recipe,cancellation:nil,progress:nil)
             try require(result.source=="Bayer-Metal" && result.mergedFrames==frames.count && result.rawIsFused && !result.jpeg.isEmpty,"The full RAW pipeline fell back or bypassed fusion")
             guard let data=result.raw else { throw CameraFailure.message("Missing GPU-produced DNG") }
             return try Mosaic(data)
@@ -67,20 +67,24 @@ import Darwin
         let shifts:[SIMD2<Double>]=[SIMD2(0,0),SIMD2(0.25,0.5),SIMD2(0.5,0.25),SIMD2(0.75,0.75),SIMD2(0.5,0.75),SIMD2(0.75,0.25)]
         let lines:(Double,Double)->Double={ x,y in 0.32+0.13*cos(2*Double.pi*(0.61*x+0.13*y))+0.04*sin(x*0.37)*cos(y*0.41) }
         let burst=makeFrames(count:6,noise:[0.000002,0.0000001],shifts:shifts,zoom:2,scene:lines)
+        let isotropicEngine=try MetalBurstProcessor(device:device,library:library,directionalSuperResolution:false)
+        let isotropic=try execute(burst,options,engine:isotropicEngine)
         let superRes=try execute(burst,options),plan=try SuperResolutionPlan.make(burst[0],count:6)!
         try require(superRes.width==w && superRes.height==h,"2x reconstruction did not exceed the simple crop resolution")
         let baseline=halfValues(burst[0].quads)
-        var srError=0.0,bilinearError=0.0,srContrast=0.0,bilinearContrast=0.0,energy=0.0
+        var srError=0.0,isotropicError=0.0,bilinearError=0.0,srContrast=0.0,isotropicContrast=0.0,bilinearContrast=0.0,energy=0.0
         for y in 8..<h-8 { for x in 8..<w-8 {
             let px=plan.originX+(Double(x)+0.25)/plan.scaleX,py=plan.originY+(Double(y)+0.25)/plan.scaleY
             let truth=lines(px,py),i=(y*w+x)*4
             let resized=bilinear(baseline,x:px-0.25,y:py-0.25)
             let value=Double(superRes.values[i]),carrier=cos(2*Double.pi*(0.61*px+0.13*py))
-            srError+=pow(value-truth,2);bilinearError+=pow(resized-truth,2)
-            srContrast+=(value-0.32)*carrier;bilinearContrast+=(resized-0.32)*carrier;energy+=carrier*carrier
+            srError+=pow(value-truth,2);isotropicError+=pow(Double(isotropic.values[i])-truth,2);bilinearError+=pow(resized-truth,2)
+            srContrast+=(value-0.32)*carrier;isotropicContrast+=(Double(isotropic.values[i])-0.32)*carrier;bilinearContrast+=(resized-0.32)*carrier;energy+=carrier*carrier
         } }
         print(String(format:"Full SR MSE ratio %.4f; recovered HF contrast %.4f vs bilinear %.4f",srError/bilinearError,srContrast/energy,bilinearContrast/energy))
         try require(srError<bilinearError && srContrast>bilinearContrast,"Full RAW alignment + SR did not beat a single-frame bilinear crop")
+        print(String(format:"Directional SR MSE / isotropic %.4f; HF contrast %.4f / %.4f",srError/isotropicError,srContrast/energy,isotropicContrast/energy))
+        try require(srError<=isotropicError*1.05 && srContrast>=isotropicContrast*0.98,"Directional reconstruction regressed against the isotropic production path")
         var hdr=options;hdr.nightStatic=false;hdr.nightRAW=false;hdr.nightMetalRAW=false;hdr.hdrBracketing=true;hdr.hdrMetalRAW=true
         let hdrScene:(Double,Double)->Double={ x,y in x<Double(w)*0.45 ? 0.003:0.65+0.08*sin(y*0.3) }
         let bracket=makeFrames(count:3,noise:noise,exposures:[1,4,16],scene:hdrScene)
