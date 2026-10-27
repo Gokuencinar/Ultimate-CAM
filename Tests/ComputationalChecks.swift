@@ -402,7 +402,7 @@ import Darwin
         let astro=try NightCapturePlan.make(iso:1600,seconds:1.0/30,isoRange:25...3200,durationRange:0.0001...0.8,budget:16,tripodStable:true)
         try require(astro.astro && astro.count==16 && astro.seconds==0.8,"Astro did not use the physical exposure limit")
         let bounded=try NightCapturePlan.make(iso:1600,seconds:1.0/30,isoRange:25...3200,durationRange:0.0001...1,budget:8,tripodStable:true)
-        try require(bounded.astro && bounded.seconds*Double(bounded.count)<=8,"Astro exceeded the user's integration budget")
+        try require(bounded.astro && bounded.seconds==1 && bounded.count==8 && bounded.seconds*Double(bounded.count)<=8,"Astro shortened integrations unnecessarily / exceeded the integration budget")
         let blocked=try NightCapturePlan.make(iso:1600,seconds:1.0/30,isoRange:25...3200,durationRange:0.0001...1,budget:16,tripodStable:true,astroEnabled:false)
         try require(!blocked.astro,"Disabled Astro still altered exposure scheduling")
         let daylight=try NightCapturePlan.make(iso:25,seconds:0.001,isoRange:25...3200,durationRange:0.0001...1,budget:16,tripodStable:true)

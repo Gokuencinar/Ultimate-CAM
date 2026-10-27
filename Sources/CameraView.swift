@@ -692,7 +692,6 @@ struct CameraView: View {
                 .pickerStyle(.segmented)
             Toggle("Adaptar al movimiento",isOn:$options.nightMotionMetering)
             Toggle("Astro automático en trípode",isOn:$options.astroEnabled).accessibilityIdentifier("night.astro")
-            if camera.astroActive { Label("Astro · 16 tomas",systemImage:"sparkles").foregroundStyle(CameraPalette.accent) }
             Toggle("RAW de alta calidad · beta",isOn:Binding(get:{options.nightMetalRAW},set:{ value in
                 options.nightMetalRAW=value;options.nightRAW=value;if value { options.nightSpectralFusion=false }
             })).disabled(!rawAvailable && !options.nightMetalRAW)
@@ -702,7 +701,7 @@ struct CameraView: View {
             Text(camera.nativeNightIssue == nil ? "Noche de iOS disponible en esta cámara.":"Noche de iOS: " + (camera.nativeNightIssue ?? "No compatible")).font(.caption).foregroundStyle(.secondary)
             Button("Usar Noche de iOS aquí") { pendingNativeNight=true;showControls=false }
                 .accessibilityIdentifier("processing.nativeNight")
-        } footer: { Text("Apoya el iPhone para escenas oscuras inmóviles.") }
+        } footer: { Text("Apoya el iPhone. Astro prioriza exposiciones largas, hasta 16 tomas.") }
     }
     private var advancedSettings:some View {
             VStack(spacing: 0) {

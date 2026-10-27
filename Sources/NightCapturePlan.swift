@@ -29,13 +29,15 @@ struct NightCapturePlan {
             throw CameraFailure.message("La medición supera el presupuesto de captura nocturna.")
         }
         if astroEnabled && tripodStable && budget>=8 && meteredProduct/isoRange.lowerBound>=1.0/15 {
-            // Sixteen real integrations, bounded by both physical exposure and
-            // the user's total integration budget. Never silently turn 8 s into
-            // minutes; the physical limit is reached when the budget allows it.
-            let duration=min(durationRange.upperBound,shutterLimit,budget/16,meteredProduct/isoRange.lowerBound)
+            // Maximize photons per integration before choosing the frame count.
+            // Forcing sixteen half-length shots at the same total integration
+            // adds read noise with no extra photons. Retain at least four views
+            // for subpixel reconstruction and at most sixteen for bounded RAM.
+            let duration=min(durationRange.upperBound,shutterLimit,budget/4,meteredProduct/isoRange.lowerBound)
             guard duration>=durationRange.lowerBound else { throw CameraFailure.message("El formato no admite la serie Astro.") }
             let sensitivity=min(isoRange.upperBound,max(isoRange.lowerBound,meteredProduct/duration))
-            return NightCapturePlan(seconds:duration,iso:sensitivity,count:16,compensationEV:compensation,astro:true)
+            let frames=min(16,max(4,Int(floor(budget/duration))))
+            return NightCapturePlan(seconds:duration,iso:sensitivity,count:frames,compensationEV:compensation,astro:true)
         }
         let limit = min(shutterLimit,motionLimit ?? 1, durationRange.upperBound, budget/3)
         guard limit >= durationRange.lowerBound else { throw CameraFailure.message("El formato no permite el límite nocturno elegido.") }
