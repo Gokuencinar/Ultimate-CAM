@@ -38,7 +38,7 @@ final class PanoramaProcessor {
             return scaled.transformed(by:CGAffineTransform(translationX:-scaled.extent.minX,y:-scaled.extent.minY))
         }
         var previous=try decode(frames[0]),mean=previous,extent=previous.extent
-        var weight=try feather(previous.extent),previousTransform=matrix_identity_float3x3
+        var weight=try feather(previous.extent),previousTransform=matrix_identity_float3x3,accepted=1
         for index in 1..<frames.count {
             try cancellation?.check();progress?("Uniendo panorama \(index+1) de \(frames.count)…")
             let next=try decode(frames[index])
@@ -49,7 +49,9 @@ final class PanoramaProcessor {
             let warpedWeight=try Self.warp(feather(next.extent),matrix:transform)
             let union=extent.union(warped.extent).integral
             guard union.width*union.height-extent.width*extent.height>next.extent.width*next.extent.height*0.03 else {
-                throw CameraFailure.message("El nuevo fotograma apenas añade escena. Desplázate antes de hacer la siguiente foto.")
+                // A short sweep may include a nearly duplicate anchor while AE
+                // settles. Skip it and retain later views that add real scene.
+                continue
             }
             guard union.width<=8192,union.height<=8192,union.width*union.height<=16_000_000 else { throw CameraFailure.message("El panorama supera el límite de 16 MP. Termina antes o usa menos fotos.") }
             let overlap=extent.intersection(warped.extent)
@@ -57,9 +59,10 @@ final class PanoramaProcessor {
             let joined=try MultiBandStitcher.blend(mean,coverage:weight,warped,coverage:warpedWeight,
                 extent:union,context:context,cancellation:cancellation)
             mean=joined.image;weight=joined.coverage
-            extent=union;previous=next;previousTransform=transform
+            extent=union;previous=next;previousTransform=transform;accepted+=1
         }
         try cancellation?.check()
+        guard accepted>=2 else { throw CameraFailure.message("Hace falta algo más de desplazamiento entre las fotos. Pulsa Reiniciar para otro barrido.") }
         let scale=min(1,256/max(extent.width,extent.height))
         let normalized=weight.transformed(by:CGAffineTransform(translationX:-extent.minX,y:-extent.minY))
             .applyingFilter("CIColorThreshold",parameters:["inputThreshold":0.01])
@@ -74,7 +77,7 @@ final class PanoramaProcessor {
         var outputOptions=options;outputOptions.preserveHDR=false;outputOptions.portraitAmount=0
         let rendered=try JPEGRenderer.render(mean,extent:crop,options:outputOptions,context:context)
         try cancellation?.check()
-        return CaptureResult(jpeg:rendered.data,reference:frames[0],details:"Panorama guiado · \(frames.count) fotos · \(rendered.width) × \(rendered.height). JPEG SDR; sin profundidad ni corrección de paralaje.",mergedFrames:frames.count,source:"guided-projective-panorama")
+        return CaptureResult(jpeg:rendered.data,reference:frames[0],details:"Panorama guiado · \(accepted) fotos · \(rendered.width) × \(rendered.height). JPEG SDR; sin profundidad ni corrección de paralaje.",mergedFrames:accepted,source:"guided-projective-panorama")
     }
     func registration(reference:CIImage,floating:CIImage) throws -> simd_float3x3 {
         let scale=min(1,1024/max(reference.extent.width,reference.extent.height))
@@ -170,6 +173,13 @@ struct PanoramaSweepPlan {
         let pitch=asin(min(1,max(-1,f.y)))*180/Float.pi
         warning=sample.rotationSpeed>0.55 ? "Gira más despacio":(abs(pitch-initialPitch)>10 || abs(sample.gravity.x)>0.22 ? "Mantén la flecha en la línea central":nil)
     }
-    func needsFrame(fieldOfView:Double)->Bool { warning==nil && distance-lastCaptured>=Float(min(20,max(10,fieldOfView*0.32))) }
+    func needsFrame(fieldOfView:Double)->Bool { warning==nil && distance-lastCaptured>=Float(min(15,max(10,fieldOfView*0.19))) }
     mutating func captured() { lastCaptured=distance }
+}
+
+struct PanoramaSweepState:Equatable {
+    var sweeping=false,pending=false,finishRequested=false
+    mutating func reset() { sweeping=false;pending=false;finishRequested=false }
+    func canStitch(validFrames:Int,processing:Bool)->Bool { validFrames>=2 && !processing }
+    static func needsTimedSample(now:Double,lastRequest:Double)->Bool { now-lastRequest>=0.4 }
 }

@@ -33,6 +33,7 @@ final class GuidedPhotoCamera:NSObject,ObservableObject,AVCapturePhotoCaptureDel
     private var hasFrame=false
     private var permissionToken=UUID()
     var motionProvider:(()->SphereMotionSnapshot?)?
+    private var captureResetRequested=false
     private var capturedMotion:SphereMotionSnapshot?
     override init() {
         super.init()
@@ -119,24 +120,23 @@ final class GuidedPhotoCamera:NSObject,ObservableObject,AVCapturePhotoCaptureDel
             self.ui { self.frame=nil;self.ready=false;self.busy=false }
         }
     }
-    func capture(accepted:((Bool)->Void)?=nil) {
+    func capture(motion snapshot:SphereMotionSnapshot?=nil,accepted:((Bool)->Void)?=nil) {
         queue.async {
             guard self.active,self.session.isRunning,self.expected==nil,!self.recoveryRequired else { self.ui { accepted?(false) };return }
-            if !self.locked,let device=self.device,device.isAdjustingFocus || device.isAdjustingExposure || device.isAdjustingWhiteBalance {
-                self.ui { self.status="Espera a que terminen el enfoque y la medición antes de añadir la primera foto.";accepted?(false) };return
-            }
             do { try self.lockControls() }
             catch { self.ui { self.status=error.localizedDescription;accepted?(false) };return }
             let settings=AVCapturePhotoSettings(format:[AVVideoCodecKey:AVVideoCodecType.jpeg])
             settings.flashMode = .off;settings.photoQualityPrioritization = .balanced
             settings.maxPhotoDimensions=self.output.maxPhotoDimensions
             self.expected=settings.uniqueID;self.received=nil;self.captureError=nil
-            self.capturedMotion=nil
+            self.capturedMotion=snapshot ?? self.motionProvider?()
             let id=settings.uniqueID;self.ui { self.busy=true;self.status="Capturando fotograma…";accepted?(true) }
             self.output.capturePhoto(with:settings,delegate:self)
             self.queue.asyncAfter(deadline:.now()+30) {
                 guard self.expected==id else { return }
-                self.expected=nil;self.recoveryRequired=true
+                self.expected=nil
+                if self.captureResetRequested { self.rearmOnQueue();return }
+                self.recoveryRequired=true
                 if self.session.isRunning { self.session.stopRunning() }
                 self.ui { self.ready=false;self.busy=false;self.status="La cámara no respondió. Cierra este modo para recuperarla; no se repetirá la captura." }
             }
@@ -153,6 +153,7 @@ final class GuidedPhotoCamera:NSObject,ObservableObject,AVCapturePhotoCaptureDel
     func photoOutput(_ output:AVCapturePhotoOutput,didFinishCaptureFor resolvedSettings:AVCaptureResolvedPhotoSettings,error:Error?) {
         queue.async {
             guard self.expected==resolvedSettings.uniqueID else { return }
+            if self.captureResetRequested { self.expected=nil;self.rearmOnQueue();return }
             let data=self.received,failure=error ?? self.captureError
             let motion=self.capturedMotion,fieldOfView=Double(self.device?.activeFormat.videoFieldOfView ?? 70)
             let exposureSeconds=self.device?.exposureDuration.seconds ?? 1.0/60
@@ -170,6 +171,7 @@ final class GuidedPhotoCamera:NSObject,ObservableObject,AVCapturePhotoCaptureDel
                 } }
                 self.queue.async {
                     guard self.active,self.expected==resolvedSettings.uniqueID else { return };self.expected=nil
+                    if self.captureResetRequested { self.rearmOnQueue();return }
                     switch result {
                     case .success(let jpeg):self.hasFrame=true;self.ui { self.frame=GuidedPhotoFrame(data:jpeg,motion:motion,fieldOfView:fieldOfView,exposureSeconds:exposureSeconds);self.busy=false;self.status="Fotograma listo. Desplaza la cámara dejando la mitad de la escena en común." }
                     case .failure(let error):if !self.hasFrame { self.unlockControls() };self.ui { self.busy=false;self.status=error.localizedDescription }
@@ -191,6 +193,17 @@ final class GuidedPhotoCamera:NSObject,ObservableObject,AVCapturePhotoCaptureDel
                 self.ui { self.status="Enfocando y midiendo la primera vista…" }
             } catch { self.ui { self.status=error.localizedDescription } }
         }
+    }
+    /// Reset UI state immediately; retire an already requested photo by ID
+    /// before rearming, rather than starting a second overlapping capture.
+    func rearm() { queue.async { self.rearmOnQueue() } }
+    private func rearmOnQueue() {
+        guard expected==nil else { captureResetRequested=true;return }
+        captureResetRequested=false;received=nil;capturedMotion=nil;captureError=nil;recoveryRequired=false
+        unlockControls()
+        if active && configured && !session.isRunning { session.startRunning() }
+        let running=active && configured && session.isRunning
+        ui { self.frame=nil;self.busy=false;self.ready=running;self.status=running ? "Lista para otro barrido.":"Cámara no disponible." }
     }
     func unlock() {
         queue.async {
