@@ -35,7 +35,7 @@ struct PortraitDepth {
         guard samples.count>=32 else { return nil };samples.sort()
         let low=samples[samples.count/100],high=samples[min(samples.count-1,samples.count*99/100)]
         guard high-low>1e-5,let kernel=normalize else { return nil }
-        let image=CIImage(cvPixelBuffer:pixel)
+        let image=CIImage(cvPixelBuffer:pixel,options:[.colorSpace:NSNull()])
         guard let packed=kernel.apply(extent:image.extent,arguments:[image,low,high]) else { return nil }
         // Normalization packs validity in G, then exposes both as gray images.
         let validity=packed.applyingFilter("CIColorMatrix",parameters:["inputRVector":CIVector(x:0,y:1,z:0,w:0),"inputGVector":CIVector(x:0,y:1,z:0,w:0),"inputBVector":CIVector(x:0,y:1,z:0,w:0)])

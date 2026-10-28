@@ -19,6 +19,7 @@ struct GuidedSphereView:View {
     @State private var reference:SphereReference?
     @State private var captured=[Int:SphereImageFrame]()
     @State private var pendingTarget:Int?
+    @State private var pendingFrameID:UUID?
     @State private var pendingReference:SphereReference?
     @State private var processing=false
     @State private var cancellation:ProcessingCancellation?
@@ -49,7 +50,7 @@ struct GuidedSphereView:View {
         guard let sample=motion.read() else { message="Esperando orientación. Mantén el teléfono quieto o pulsa Reintentar orientación.";motion.start();return }
         do {
             let aim=try SphereAim.make(sample,reference:reference,captured:Set(captured.keys),now:ProcessInfo.processInfo.systemUptime)
-            pendingReference=aim.reference;pendingTarget=aim.target.id;message="";autoGate.reset()
+            pendingReference=aim.reference;pendingTarget=aim.target.id;pendingFrameID=camera.frame?.id;message="";autoGate.reset()
             camera.capture { accepted in if !accepted { pendingTarget=nil;pendingReference=nil;message=camera.status } }
         } catch { message=error.localizedDescription }
     }
@@ -108,6 +109,11 @@ struct GuidedSphereView:View {
             .onChange(of:autoCapture) { _,_ in autoGate.reset() }
             .onDisappear { motion.stop();camera.motionProvider=nil;cancellation?.cancel() }
             .onChange(of:camera.frame?.id) { _,id in if id != nil,let frame=camera.frame { accept(frame) } }
+            .onChange(of:camera.busy) { _,busy in
+                if !busy,pendingTarget != nil,camera.frame?.id==pendingFrameID {
+                    pendingTarget=nil;pendingReference=nil;autoGate.reset();message=camera.status;autoCapture=false
+                }
+            }
             .onChange(of:scene) { _,phase in
                 if phase == .background {
                     interrupted = !captured.isEmpty;pendingTarget=nil;pendingReference=nil;motion.stop();cancellation?.cancel()
@@ -144,7 +150,7 @@ struct GuidedSphereView:View {
     }
     private func accept(_ frame:GuidedPhotoFrame) {
         guard scene == .active else { pendingTarget=nil;pendingReference=nil;return }
-        guard let target=pendingTarget,let sample=frame.motion else { message="No se recibió orientación para esa foto; no se añade a la esfera.";pendingTarget=nil;if captured.isEmpty { camera.unlock() };return }
+        guard let target=pendingTarget,let sample=frame.motion else { message="No se recibió orientación para esa foto; no se añade a la esfera.";pendingTarget=nil;pendingReference=nil;if captured.isEmpty { camera.unlock() };return }
         pendingTarget=nil;let initialReference=pendingReference;pendingReference=nil
         do {
             guard sample.rotationSpeed<0.8,Double(sample.rotationSpeed)*frame.exposureSeconds*180/Double.pi<8 else { throw CameraFailure.message("El teléfono se movió durante la foto. Mantén el objetivo quieto y vuelve a pulsar.") }
@@ -163,12 +169,14 @@ struct GuidedSphereView:View {
     }
     private var targetOverlay:some View {
         GeometryReader { g in
+            let viewport=UIScreen.main.bounds.size
+            let origin=g.frame(in:.global).origin
             ZStack {
                 Image(systemName:"plus").font(.system(size:22,weight:.light)).foregroundStyle(.white)
-                    .position(x:g.size.width/2,y:g.size.height/2)
+                    .position(x:viewport.width/2-origin.x,y:viewport.height/2-origin.y)
                 if let sample=motion.snapshot,let ref=reference ?? (try? SphereReference(sample)),let pose=try? ref.pose(sample),let next,
-                   let point=SphereNodeSelection.projected(next,pose:pose,size:g.size,fieldOfView:lastFieldOfView) {
-                    Circle().stroke(aimReady ? CameraPalette.accent:.white,lineWidth:3).frame(width:40,height:40).position(point)
+                   let point=SphereNodeSelection.projected(next,pose:pose,size:viewport,fieldOfView:lastFieldOfView) {
+                    Circle().stroke(aimReady ? CameraPalette.accent:.white,lineWidth:3).frame(width:40,height:40).position(x:point.x-origin.x,y:point.y-origin.y)
                 }
             }
         }

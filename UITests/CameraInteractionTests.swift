@@ -110,6 +110,7 @@ final class CameraInteractionTests: XCTestCase {
                 app.buttons["sphere.retryMotion"].tap();XCTAssertEqual(app.state,.runningForeground)
             }
             XCTAssertEqual(app.buttons[mode+".capture"].frame.midX,app.frame.midX,accuracy:2)
+            capture(app,mode)
         }
         revealMode(app,"camera.mode.video").tap()
         XCTAssertTrue(app.buttons["video.record"].waitForExistence(timeout:8))

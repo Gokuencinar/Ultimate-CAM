@@ -64,7 +64,9 @@ struct GuidedPanoramaView:View {
             .onReceive(clock) { _ in tick() }
             .onChange(of:camera.frame?.id) { _,id in if id != nil,let frame=camera.frame { accept(frame) } }
             .onChange(of:camera.busy) { _,busy in
-                if !busy && pending && camera.frame?.id==pendingFrameID { pending=false }
+                if !busy && pending && camera.frame?.id==pendingFrameID {
+                    pending=false;sweeping=false;finishRequested=false;message=camera.status
+                }
                 if !busy && finishRequested && !pending { finish() }
             }
             .onChange(of:scene) { _,phase in

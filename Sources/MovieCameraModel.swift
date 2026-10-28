@@ -162,7 +162,11 @@ final class MovieCameraModel: NSObject, ObservableObject, AVCaptureFileOutputRec
                 request.exposureBias=Double(max(camera.minExposureTargetBias,min(camera.maxExposureTargetBias,Float(request.exposureBias))))
                 camera.setExposureTargetBias(Float(request.exposureBias),completionHandler:nil)
                 if camera.hasTorch { camera.torchMode = .off }
+                if camera.activePrimaryConstituentDeviceSwitchingBehavior != .unsupported {
+                    camera.setPrimaryConstituentDeviceSwitchingBehavior(.auto,restrictedSwitchingBehaviorConditions:[])
+                }
                 camera.unlockForConfiguration()
+                configureRecordingSwitching(camera)
                 guard let connection=output.connection(with:.video) else { throw CameraFailure.message("La conexión de vídeo no está disponible.") }
                 if connection.isVideoRotationAngleSupported(90) { connection.videoRotationAngle=90 }
                 if connection.isVideoMirroringSupported { connection.automaticallyAdjustsVideoMirroring=false;connection.isVideoMirrored=lens == .front }
@@ -220,6 +224,13 @@ final class MovieCameraModel: NSObject, ObservableObject, AVCaptureFileOutputRec
             recoverDraftIfNeeded()
         } catch { ui { self.ready=self.session.isRunning && self.configured;self.status=error.localizedDescription } }
     }
+    private func configureRecordingSwitching(_ camera:AVCaptureDevice) {
+        guard camera.activePrimaryConstituentDeviceSwitchingBehavior != .unsupported else {
+            output.isPrimaryConstituentDeviceSwitchingBehaviorForRecordingEnabled=false;return
+        }
+        output.setPrimaryConstituentDeviceSwitchingBehaviorForRecording(.auto,restrictedSwitchingBehaviorConditions:[])
+        output.isPrimaryConstituentDeviceSwitchingBehaviorForRecordingEnabled=true
+    }
     func record(mirrorSelfie:Bool=false) {
         queue.async {
             guard self.active,self.configured,self.session.isRunning,self.machine.phase == .idle else { return }
@@ -232,6 +243,7 @@ final class MovieCameraModel: NSObject, ObservableObject, AVCaptureFileOutputRec
                 if connection.isVideoMirroringSupported { connection.automaticallyAdjustsVideoMirroring=false;connection.isVideoMirrored=mirror }
                 else if mirror { throw CameraFailure.message("Esta cámara no admite guardar el vídeo frontal reflejado.") }
                 try FileManager.default.createDirectory(at:self.directory,withIntermediateDirectories:true)
+                if let device=self.device { self.configureRecordingSwitching(device) }
                 try self.lockRecordingWhiteBalance()
                 guard let token=self.machine.begin() else { self.restoreRecordingWhiteBalance();return }
                 let url=self.directory.appendingPathComponent("UltimateCAM-\(token.uuidString).mov")

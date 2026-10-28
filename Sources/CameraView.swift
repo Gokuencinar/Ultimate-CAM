@@ -246,6 +246,9 @@ struct CameraView: View {
         .onChange(of: options) { _, value in
             profiles.remember(options,lens:lens.rawValue)
         }
+        .onChange(of:camera.nativeNightIssue) { _,issue in
+            if issue != nil && options.nativeNight && !camera.busy { activateUnifiedNight() }
+        }
         .onChange(of: options) { _, value in camera.setPreviewTools(effectivePreviewTools,processing:value) }
         .onChange(of: previewTools) { _, value in camera.setPreviewTools(effectivePreviewTools,processing:options) }
         .onChange(of: camera.busy) { _, value in if !value { camera.setPreviewTools(effectivePreviewTools,processing:options) } }

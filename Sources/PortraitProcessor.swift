@@ -14,9 +14,10 @@ enum PortraitProcessor {
         let request=VNGeneratePersonSegmentationRequest()
         request.qualityLevel = .accurate
         request.outputPixelFormat=kCVPixelFormatType_OneComponent8
+        request.regionOfInterest=CGRect(x:0,y:0,width:1,height:1)
         try VNImageRequestHandler(cgImage:cg,orientation:.up).perform([request])
         guard let pixel=request.results?.first?.pixelBuffer else { throw CameraFailure.message("No se recibió una máscara de persona.") }
-        let mask=CIImage(cvPixelBuffer:pixel)
+        let mask=CIImage(cvPixelBuffer:pixel,options:[.colorSpace:NSNull()])
         let average=mask.applyingFilter("CIAreaAverage",parameters:[kCIInputExtentKey:CIVector(cgRect:mask.extent)])
         var value=[Float](repeating:0,count:4)
         value.withUnsafeMutableBytes { context.render(average,toBitmap:$0.baseAddress!,rowBytes:16,bounds:CGRect(x:0,y:0,width:1,height:1),format:.RGBAf,colorSpace:nil) }

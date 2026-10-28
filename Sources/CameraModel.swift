@@ -67,8 +67,8 @@ final class CameraModel: NSObject, ObservableObject, AVCapturePhotoCaptureDelega
     @Published private(set) var shutterRange: ClosedRange<Double> = (1.0 / 8000)...0.33
     let lenses = CameraLens.allCases.filter { $0.device != nil }
 
-    private let queue = DispatchQueue(label: "local.ultimatecam.session", qos: .userInitiated)
-    private let processing = DispatchQueue(label: "local.ultimatecam.processing", qos: .userInitiated)
+    private let queue = DispatchQueue(label: "local.ultimatecam.session", qos: .userInitiated, autoreleaseFrequency:.workItem)
+    private let processing = DispatchQueue(label: "local.ultimatecam.processing", qos: .userInitiated, autoreleaseFrequency:.workItem)
     private let output = AVCapturePhotoOutput()
     private var input: AVCaptureDeviceInput?
     private var rotationCoordinator:AVCaptureDevice.RotationCoordinator?
@@ -219,7 +219,11 @@ final class CameraModel: NSObject, ObservableObject, AVCapturePhotoCaptureDelega
             let recovery=DispatchWorkItem { [weak self] in self?.refreshResources() }
             self.resourceRecovery=recovery;self.queue.asyncAfter(deadline:.now()+61,execute:recovery)
             self.previewAnalyzer.releaseCaches()
-            self.publish { self.previewAnalysisFrame=nil;self.preview=nil;self.referencePreview=nil }
+            let retirePreviousPreview=self.inFlight
+            self.publish {
+                self.previewAnalysisFrame=nil
+                if retirePreviousPreview { self.preview=nil;self.referencePreview=nil }
+            }
             // UIKit warnings are advisory; trim first, then sample the live
             // process headroom after the main-thread images have been retired.
             self.queue.asyncAfter(deadline:.now()+0.15) {
