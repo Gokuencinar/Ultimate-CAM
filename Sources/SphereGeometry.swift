@@ -106,10 +106,16 @@ enum SphereNodeSelection {
         let point=CGPoint(x:size.width/2+CGFloat(ray.x/z)*f,y:size.height/2-CGFloat(ray.y/z)*f)
         return CGRect(origin:.zero,size:size).insetBy(dx:20,dy:20).contains(point) ? point:nil
     }
+    /// Degree input. Centre each of the 12 longitude cells rather than putting
+    /// one node on the seam and leaving an empty cell at the opposite edge.
     static func point(yaw:Double,pitch:Double,size:CGSize)->CGPoint {
+        guard yaw.isFinite,pitch.isFinite else { return CGPoint(x:size.width/2,y:size.height/2) }
         let inset:CGFloat=12
-        let u=(yaw/360+0.5).truncatingRemainder(dividingBy:1)
-        return CGPoint(x:inset+CGFloat(u<0 ? u+1:u)*max(1,size.width-2*inset),y:inset+CGFloat(0.5-pitch/180)*max(1,size.height-2*inset))
+        let raw=yaw/360+0.5+1.0/24
+        let u=raw-floor(raw)
+        let x=abs(pitch)>89 ? size.width/2:inset+CGFloat(u)*max(1,size.width-2*inset)
+        let y=inset+CGFloat(min(1,max(0,0.5-pitch/180)))*max(1,size.height-2*inset)
+        return CGPoint(x:x,y:y)
     }
 }
 struct SphereAutoCaptureGate {
@@ -120,5 +126,26 @@ struct SphereAutoCaptureGate {
         guard stable,let next,time.isFinite else { reset();return false }
         if target != next || since==nil || time<(since ?? time) { target=next;since=time;return false }
         if time-(since ?? time)+1e-6>=0.4 { reset();return true };return false
+    }
+}
+
+/// Orientation belongs to the photo request, not to a later callback's clock.
+/// If no sensor pose survived, the explicitly reserved angular node is a
+/// bounded relative-pose fallback; it is never treated as an absolute heading.
+enum SphereCaptureOrientation {
+    static func valid(_ pose:SpherePose)->Bool {
+        let m=pose.sphereToDevice
+        let vectors=[m.columns.0,m.columns.1,m.columns.2,pose.forward]
+        guard vectors.allSatisfy({$0.x.isFinite && $0.y.isFinite && $0.z.isFinite}),abs(abs(simd_determinant(m))-1)<0.05 else { return false }
+        let identity=m.transpose*m
+        return simd_length(identity.columns.0-SIMD3(1,0,0))<0.05 && simd_length(identity.columns.1-SIMD3(0,1,0))<0.05 && simd_length(identity.columns.2-SIMD3(0,0,1))<0.05 && abs(simd_length(pose.forward)-1)<0.05
+    }
+    static func resolve(captured:SpherePose?,atShutter:SpherePose?,target:SphereTarget)->SpherePose {
+        if let captured,valid(captured) { return captured }
+        if let atShutter,valid(atShutter) { return atShutter }
+        let f=simd_normalize(target.direction),seed:SIMD3<Float>=abs(f.y)>0.9 ? SIMD3(0,0,1):SIMD3(0,1,0)
+        let r=simd_normalize(simd_cross(seed,f)),u=simd_normalize(simd_cross(f,r))
+        let matrix=simd_float3x3(columns:(SIMD3(r.x,u.x,-f.x),SIMD3(r.y,u.y,-f.y),SIMD3(r.z,u.z,-f.z)))
+        return SpherePose(sphereToDevice:matrix,forward:f)
     }
 }

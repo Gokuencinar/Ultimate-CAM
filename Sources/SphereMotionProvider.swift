@@ -24,15 +24,17 @@ final class SphereMotionProvider:ObservableObject {
             guard let motion else {
                 if let error { DispatchQueue.main.async {
                     self.lock.lock();let valid=self.active && self.token==epoch
-                    if valid { self.latest=nil };self.lock.unlock()
-                    if valid { self.message=error.localizedDescription;self.snapshot=nil }
+                    self.lock.unlock()
+                    if valid { self.message=error.localizedDescription }
                 } };return
             }
             let m=motion.attitude.rotationMatrix,g=motion.gravity,r=motion.rotationRate
             let value=SphereMotionSnapshot(rotation:simd_float3x3(columns:(SIMD3(Float(m.m11),Float(m.m21),Float(m.m31)),SIMD3(Float(m.m12),Float(m.m22),Float(m.m32)),SIMD3(Float(m.m13),Float(m.m23),Float(m.m33)))),
                 gravity:SIMD3(Float(g.x),Float(g.y),Float(g.z)),rotationSpeed:Float(sqrt(r.x*r.x+r.y*r.y+r.z*r.z)),timestamp:motion.timestamp)
+            guard (try? value.validated()) != nil else { return }
             self.lock.lock();let valid=self.active && self.token==epoch;if valid { self.latest=value };self.lock.unlock()
-            guard valid,motion.timestamp-lastUI>=0.1 else { return };lastUI=motion.timestamp
+            let arrived=ProcessInfo.processInfo.systemUptime
+            guard valid,arrived-lastUI>=0.1 else { return };lastUI=arrived
             DispatchQueue.main.async {
                 self.lock.lock();let valid=self.active && self.token==epoch;self.lock.unlock()
                 if valid { self.snapshot=value;self.message="Orientación relativa disponible." }
@@ -41,7 +43,7 @@ final class SphereMotionProvider:ObservableObject {
     }
     func read() -> SphereMotionSnapshot? {
         lock.lock();defer { lock.unlock() }
-        guard active,let latest,abs(ProcessInfo.processInfo.systemUptime-latest.timestamp)<0.5 else { return nil };return latest
+        guard active else { return nil };return latest
     }
     func stop() {
         lock.lock();active=false;token=UUID();latest=nil;lock.unlock()

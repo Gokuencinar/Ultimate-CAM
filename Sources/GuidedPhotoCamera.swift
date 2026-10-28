@@ -148,7 +148,7 @@ final class GuidedPhotoCamera:NSObject,ObservableObject,AVCapturePhotoCaptureDel
     }
     func photoOutput(_ output:AVCapturePhotoOutput,willCapturePhotoFor resolvedSettings:AVCaptureResolvedPhotoSettings) {
         let snapshot=motionProvider?()
-        queue.async { if self.expected==resolvedSettings.uniqueID { self.capturedMotion=snapshot } }
+        queue.async { if self.expected==resolvedSettings.uniqueID,let snapshot { self.capturedMotion=snapshot } }
     }
     func photoOutput(_ output:AVCapturePhotoOutput,didFinishCaptureFor resolvedSettings:AVCaptureResolvedPhotoSettings,error:Error?) {
         queue.async {

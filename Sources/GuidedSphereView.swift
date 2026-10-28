@@ -21,6 +21,7 @@ struct GuidedSphereView:View {
     @State private var pendingTarget:Int?
     @State private var pendingFrameID:UUID?
     @State private var pendingReference:SphereReference?
+    @State private var pendingPose:SpherePose?
     @State private var processing=false
     @State private var cancellation:ProcessingCancellation?
     @State private var result:CaptureResult?
@@ -43,15 +44,15 @@ struct GuidedSphereView:View {
     private var angle:Float { if let next,let direction { return next.angle(to:direction) };return reference==nil ? 0:180 }
     private var aimReady:Bool {
         guard !interrupted,let snapshot=motion.read() else { return false }
-        return (try? SphereAim.make(snapshot,reference:reference,captured:Set(captured.keys),now:ProcessInfo.processInfo.systemUptime)) != nil
+        return (try? SphereAim.make(snapshot,reference:reference,captured:Set(captured.keys))) != nil
     }
     private func requestCapture() {
         guard !interrupted,camera.ready,!camera.busy,!processing,pendingTarget==nil else { return }
         guard let sample=motion.read() else { message="Esperando orientación. Mantén el teléfono quieto o pulsa Reintentar orientación.";motion.start();return }
         do {
-            let aim=try SphereAim.make(sample,reference:reference,captured:Set(captured.keys),now:ProcessInfo.processInfo.systemUptime)
-            pendingReference=aim.reference;pendingTarget=aim.target.id;pendingFrameID=camera.frame?.id;message="";autoGate.reset()
-            camera.capture { accepted in if !accepted { pendingTarget=nil;pendingReference=nil;message=camera.status } }
+            let aim=try SphereAim.make(sample,reference:reference,captured:Set(captured.keys))
+            pendingReference=aim.reference;pendingPose=try aim.reference.pose(sample);pendingTarget=aim.target.id;pendingFrameID=camera.frame?.id;message="";autoGate.reset()
+            camera.capture(motion:sample) { accepted in if !accepted { pendingTarget=nil;pendingReference=nil;pendingPose=nil;message=camera.status } }
         } catch { message=error.localizedDescription }
     }
     var body:some View {
@@ -61,7 +62,7 @@ struct GuidedSphereView:View {
                 HStack {
                     Spacer();Text("ESFERA").font(.headline);Spacer();Text("\(captured.count)/62").monospacedDigit()
                 }
-                if result==nil { coverageMap.frame(height:110).background(.black.opacity(0.65),in:RoundedRectangle(cornerRadius:10)) }
+                if result==nil { coverageMap.frame(maxWidth:.infinity).frame(height:110).background(.black.opacity(0.65),in:RoundedRectangle(cornerRadius:10)) }
                 if let preview {
                     ScrollView {
                         Picker("Revisión",selection:$interactivePreview) { Text("360°").tag(true);Text("Plana").tag(false) }.pickerStyle(.segmented)
@@ -111,12 +112,12 @@ struct GuidedSphereView:View {
             .onChange(of:camera.frame?.id) { _,id in if id != nil,let frame=camera.frame { accept(frame) } }
             .onChange(of:camera.busy) { _,busy in
                 if !busy,pendingTarget != nil,camera.frame?.id==pendingFrameID {
-                    pendingTarget=nil;pendingReference=nil;autoGate.reset();message=camera.status;autoCapture=false
+                    pendingTarget=nil;pendingReference=nil;pendingPose=nil;autoGate.reset();message=camera.status;autoCapture=false
                 }
             }
             .onChange(of:scene) { _,phase in
                 if phase == .background {
-                    interrupted = !captured.isEmpty;pendingTarget=nil;pendingReference=nil;motion.stop();cancellation?.cancel()
+                    interrupted = !captured.isEmpty;pendingTarget=nil;pendingReference=nil;pendingPose=nil;motion.stop();cancellation?.cancel()
                     if interrupted { message="La referencia de orientación se interrumpió. Empieza otra esfera para no mezclar ejes de sesiones distintas." }
                 } else if phase == .active {
                     if !interrupted { motion.start() }
@@ -124,7 +125,7 @@ struct GuidedSphereView:View {
             }
             .confirmationDialog("¿Descartar las vistas de esta esfera?",isPresented:$confirmDiscard,titleVisibility:.visible) {
                 Button("Descartar vistas",role:.destructive) {
-                    captured=[:];reference=nil;pendingReference=nil;pendingTarget=nil;result=nil;preview=nil;saved=false;interrupted=false;message="";camera.unlock();motion.stop();motion.start()
+                    captured=[:];reference=nil;pendingReference=nil;pendingPose=nil;pendingTarget=nil;result=nil;preview=nil;saved=false;interrupted=false;message="";camera.unlock();motion.stop();motion.start()
                 };Button("Continuar",role:.cancel) { }
             }
             .onChange(of:captured.count) { _,_ in publishState() }
@@ -149,13 +150,14 @@ struct GuidedSphereView:View {
         }.accessibilityLabel("Vistas esféricas completadas: \(captured.count) de 62")
     }
     private func accept(_ frame:GuidedPhotoFrame) {
-        guard scene == .active else { pendingTarget=nil;pendingReference=nil;return }
-        guard let target=pendingTarget,let sample=frame.motion else { message="No se recibió orientación para esa foto; no se añade a la esfera.";pendingTarget=nil;pendingReference=nil;if captured.isEmpty { camera.unlock() };return }
-        pendingTarget=nil;let initialReference=pendingReference;pendingReference=nil
+        guard scene == .active else { pendingTarget=nil;pendingReference=nil;pendingPose=nil;return }
+        guard let target=pendingTarget,SphereTarget.all.indices.contains(target) else { return }
+        let initialReference=pendingReference,atShutter=pendingPose
+        pendingTarget=nil;pendingReference=nil;pendingPose=nil
         do {
-            guard sample.rotationSpeed<0.8,Double(sample.rotationSpeed)*frame.exposureSeconds*180/Double.pi<8 else { throw CameraFailure.message("El teléfono se movió durante la foto. Mantén el objetivo quieto y vuelve a pulsar.") }
-            let candidate=try reference ?? initialReference ?? SphereReference(sample)
-            let pose=try candidate.pose(sample)
+            let candidate=reference ?? initialReference
+            let capturedPose=frame.motion.flatMap { sample in candidate.flatMap { try? $0.pose(sample) } }
+            let pose=SphereCaptureOrientation.resolve(captured:capturedPose,atShutter:atShutter,target:SphereTarget.all[target])
             guard SphereNodeSelection.completedTarget(planned:target,pose:pose,first:reference==nil) != nil else { throw CameraFailure.message("La foto se hizo fuera del objetivo. No se añade; vuelve a alinear y pulsa.") }
             reference=candidate;captured[target]=SphereImageFrame(data:frame.data,pose:pose,fieldOfView:frame.fieldOfView)
             lastFieldOfView=frame.fieldOfView;autoGate.reset();UINotificationFeedbackGenerator().notificationOccurred(.success)
@@ -164,8 +166,8 @@ struct GuidedSphereView:View {
     }
     private func autoTick() {
         guard autoCapture,interactionEnabled,scene == .active,!confirmDiscard,!interrupted,result==nil,!processing,!saving,camera.ready,!camera.busy,pendingTarget==nil,
-              let sample=motion.read(),let aim=try? SphereAim.make(sample,reference:reference,captured:Set(captured.keys),now:ProcessInfo.processInfo.systemUptime) else { autoGate.reset();return }
-        if autoGate.update(target:aim.target.id,stable:sample.rotationSpeed<0.12,time:sample.timestamp) { requestCapture() }
+              let sample=motion.read(),let aim=try? SphereAim.make(sample,reference:reference,captured:Set(captured.keys)) else { autoGate.reset();return }
+        if autoGate.update(target:aim.target.id,stable:sample.rotationSpeed<0.12,time:ProcessInfo.processInfo.systemUptime) { requestCapture() }
     }
     private var targetOverlay:some View {
         GeometryReader { g in

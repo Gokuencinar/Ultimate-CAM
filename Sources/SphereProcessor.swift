@@ -21,7 +21,7 @@ final class SphereProcessor {
         for (index,frame) in frames.enumerated() {
             try cancellation?.check();progress?("Proyectando esfera \(index+1) de \(frames.count)…")
             let joined=try autoreleasepool { () throws -> MultiBandStitcher.Result in
-            guard [frame.pose.sphereToDevice.columns.0,frame.pose.sphereToDevice.columns.1,frame.pose.sphereToDevice.columns.2].allSatisfy({$0.x.isFinite && $0.y.isFinite && $0.z.isFinite}),frame.fieldOfView.isFinite,(30...130).contains(frame.fieldOfView),let decoded=CIImage(data:frame.data,options:[.applyOrientationProperty:true]) else { throw CameraFailure.message("Fotograma esférico no válido.") }
+            guard SphereCaptureOrientation.valid(frame.pose),frame.fieldOfView.isFinite,(30...130).contains(frame.fieldOfView),let decoded=CIImage(data:frame.data,options:[.applyOrientationProperty:true]) else { throw CameraFailure.message("Fotograma esférico no válido.") }
             let target=max(128,min(1400,Double(width)*frame.fieldOfView/360*1.15))
             let scale=min(1,target/max(decoded.extent.width,decoded.extent.height))
             var image=decoded.transformed(by:CGAffineTransform(scaleX:scale,y:scale))
