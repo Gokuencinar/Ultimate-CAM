@@ -103,8 +103,8 @@ struct ProcessorChecks {
             "Night long-shutter quantization changed metered exposure or integration budget")
         let shortfall = try NightCapturePlan.make(iso: 3200, seconds: 0.06, isoRange: 25...3200,
             durationRange: 0.00001...1, targetOffset: -5)
-        try require(shortfall.compensationEV == 2 && abs(shortfall.iso * shortfall.seconds - 768) < 0.001,
-            "Night AE shortfall was not capped at 2 EV")
+        try require(shortfall.compensationEV == 0 && abs(shortfall.iso * shortfall.seconds - 192) < 0.001,
+            "Preview target offset overexposed the RAW sensor")
         let brightOffset = try NightCapturePlan.make(iso: 25, seconds: 0.001, isoRange: 25...3200,
             durationRange: 0.00001...1, targetOffset: -5)
         try require(brightOffset.compensationEV == 0 && abs(brightOffset.iso * brightOffset.seconds - 0.025) < 0.000001,

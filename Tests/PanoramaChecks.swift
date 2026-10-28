@@ -10,6 +10,11 @@ import simd
         catch { fputs("PANORAMA CHECK FAILED: \(error)\n",stderr);exit(1) }
     }
     static func run() throws {
+        var sweep=PanoramaSweepState();sweep.sweeping=true;sweep.pending=true;sweep.finishRequested=true
+        try check(sweep.canStitch(validFrames:2,processing:false),"Short sweep blocked two valid frames")
+        try check(!sweep.canStitch(validFrames:1,processing:false) && !sweep.canStitch(validFrames:2,processing:true),"Invalid stitch transaction accepted")
+        sweep.reset();try check(!sweep.sweeping && !sweep.pending && !sweep.finishRequested,"Short/failed sweep did not rearm immediately")
+        try check(PanoramaSweepState.needsTimedSample(now:1,lastRequest:0.5) && !PanoramaSweepState.needsTimedSample(now:1,lastRequest:0.9),"Delayed IMU has no bounded visual sampling fallback")
         try checkMultiBand()
         try checkOddRegistrationAndSweep()
         try check(CoveredRectangle.largest([UInt8](repeating:255,count:32),width:8,height:4)==CGRect(x:0,y:0,width:8,height:4),"Full coverage cropped incorrectly")
@@ -34,6 +39,8 @@ import simd
         print("Panorama fixture dimensions: \(rendered.width) × \(rendered.height)")
         try check(rendered.width>600 && rendered.width<650 && rendered.height>235 && rendered.height<=258,
                   "Homography sign, registration or coverage crop is incorrect")
+        let repeatedAnchor=try PanoramaProcessor().process([a,a,b],options:ProcessingOptions())
+        try check(repeatedAnchor.mergedFrames==2,"An immediate repeated anchor prevented partial panorama stitching")
         let translation=simd_float3x3(columns:(SIMD3(1,0,0),SIMD3(0,1,0),SIMD3(20,7,1)))
         let warped=try PanoramaProcessor.warp(first,matrix:translation)
         try check(abs(warped.extent.minX-20)<2 && abs(warped.extent.minY-7)<2,"Perspective warp matrix convention differs from source coordinates")

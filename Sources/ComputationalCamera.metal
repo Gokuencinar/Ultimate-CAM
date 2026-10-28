@@ -499,10 +499,6 @@ kernel void uc_lca(texture2d<float,access::sample> input [[texture(0)]],texture2
  output.write(pixel,p);
 }
 
-// Reconstruct a partially clipped linear RGB highlight from nearby un-clipped
-// chromaticity and the still-linear channels at the centre. All-channel clipping
-// or ambiguous/unsupported ratios retain the measured value. Extended values
-// survive in rgba16Float until the tone / HDR shoulder.
 // Compatibility kernel: clipping must not invent red/blue energy. The shipping
 // RAW path uses calibrated CFA saturation handling before demosaic instead.
 kernel void uc_reconstruct_highlights(texture2d<float,access::read> input [[texture(0)]],

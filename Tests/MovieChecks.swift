@@ -15,8 +15,8 @@ import Darwin
         let physical=MovieLensZoomPlan(physical:.wide)
         try check(physical.sensorZoom(for:.wide)==1 && physical.sensorZoom(for:.telephoto)==2,"Live physical-wide fallback cannot reach a 2x crop")
         let old=try JSONDecoder().decode(MovieConfiguration.self,from:Data(#"{"stabilized":false}"#.utf8))
-        try check(old.stabilization == .off && !old.hdrVideo && old.lockWhiteBalance,"Legacy movie JSON lost compatibility")
-        var pro=MovieConfiguration();pro.stabilization = .locked;pro.hdrVideo=true;pro.lockWhiteBalance=false;pro.exposureBias=1.2
+        try check(old.stabilization == .off && !old.hdrVideo && old.lockWhiteBalance && !old.mirrorSelfie,"Legacy movie JSON lost compatibility")
+        var pro=MovieConfiguration();pro.stabilization = .locked;pro.hdrVideo=true;pro.lockWhiteBalance=false;pro.exposureBias=1.2;pro.mirrorSelfie=true
         try check(try JSONDecoder().decode(MovieConfiguration.self,from:JSONEncoder().encode(pro))==pro,"Pro movie fields did not survive JSON round trip")
         try check(MovieStabilizationMode.locked.resolved(supported:[.off,.standard]) == .standard,"Extended stabilization ignored device fallback")
         try check(MovieStabilizationMode.locked.resolved(supported:[.off,.standard,.cinematic]) == .cinematic,"Cinematic fallback was skipped")
@@ -41,6 +41,9 @@ import Darwin
         try check(!state.stop() && state.beginSave()==nil,"Idle operation accepted")
         let first=state.begin()!
         try check(state.busy && state.begin()==nil && !state.discard(),"Concurrent recording or discard accepted")
+        try check(state.phase == .starting && !state.started(UUID()),"Start must await the matching file-output delegate")
+        try check(state.started(first) && state.phase == .recording && state.busy,"Start acknowledgement stopped or invalidated recording")
+        try check(!state.started(first) && state.phase == .recording,"Repeated start delegate stopped recording")
         try check(!state.finished(UUID(),valid:true),"Stale recording delegate accepted")
         try check(state.stop() && !state.stop(),"Stop is not idempotent")
         try check(state.finished(first,valid:true) && state.phase == .review,"Recording did not reach review")

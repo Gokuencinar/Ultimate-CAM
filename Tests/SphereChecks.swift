@@ -78,6 +78,16 @@ import simd
             let p=SphereNodeSelection.point(yaw:Double(target.yaw),pitch:Double(target.pitch),size:CGSize(width:375,height:110))
             try check(p.x>=12 && p.x<=363 && p.y>=12 && p.y<=98,"A sphere map node touches a clipped border")
         }
+        let positions=SphereTarget.all.map { SphereNodeSelection.point(yaw:Double($0.yaw),pitch:Double($0.pitch),size:CGSize(width:375,height:110)).x/375 }
+        try check(positions.filter{$0<0.499}.count==30 && positions.filter{$0>0.501}.count==30,"62-node banner does not span both halves symmetrically")
+        try check(abs(positions.reduce(0,+)/62-0.5)<0.00001 && abs(positions.min()!+positions.max()!-1)<0.00001,"Sphere banner is offset from its container centre")
+        let frozen=SphereCaptureOrientation.resolve(captured:nil,atShutter:aimed,target:SphereTarget.all[0])
+        try check(SphereCaptureOrientation.valid(frozen) && simd_length(frozen.forward-aimed.forward)<0.0001,"A missing callback attitude lost the shutter orientation")
+        for target in SphereTarget.all {
+            let fallback=SphereCaptureOrientation.resolve(captured:nil,atShutter:nil,target:target)
+            try check(SphereCaptureOrientation.valid(fallback) && simd_length(fallback.forward-target.direction)<0.0001,"Reserved node did not supply a valid relative orientation")
+            try check(SphereNodeSelection.completedTarget(planned:target.id,pose:fallback,first:false)==target.id,"Fallback orientation did not complete its reserved node")
+        }
         let screen=SphereNodeSelection.projected(SphereTarget.all[0],pose:aimed,size:CGSize(width:375,height:812))
         try check(screen != nil && abs(screen!.x-187.5)<0.01 && abs(screen!.y-406)<0.01,"Sphere target projection disagrees with the portrait reticle")
         var gate=SphereAutoCaptureGate()

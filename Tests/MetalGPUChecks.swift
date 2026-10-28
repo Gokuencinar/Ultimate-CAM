@@ -148,7 +148,41 @@ import Darwin
         shadowDelta/=Double(a.count/4);detailDelta/=Double(a.count/4)
         print("GPU patcher motion / shadows / detail deltas",motionDifference,shadowDelta,detailDelta)
         try require(shadowDelta>0.015 && detailDelta>0.0005,"RAW GPU shadow/detail controls were not reflected in the developed export")
+        try clippedNight(processor,context:context,options:options,reference:reference)
         print("FULL RAW GPU QUANTITATIVE CHECKS PASSED (synthetic sensor; no physical camera opened)")
+    }
+    static func clippedNight(_ processor:MetalBurstProcessor,context:CIContext,options:ProcessingOptions,reference:Data) throws {
+        // A physically consistent D65 sensor with non-unit camera WB: the
+        // color-matrix rows and AsShotNeutral describe the same CFA response.
+        let n:[Double]=[0.5,1,0.65]
+        var c=calibration
+        c=BayerCalibration(pattern:c.pattern,matrix:c.matrix.enumerated().map{$0.element*n[$0.offset/3]},neutral:n,illuminant:21,orientation:1)
+        let phase:[Float]=[0.5,1,1,0.65]
+        let burst=(0..<4).map { i -> SensorBayerFrame in
+            var values=[Float](repeating:0,count:w*h*4)
+            for y in 0..<h { for x in 0..<w { for channel in 0..<4 {
+                let j=(y*w+x)*4+channel
+                values[j]=(x>90 && x<145 && y>30 && y<95) ? 1:phase[channel]*0.025
+            } } }
+            return SensorBayerFrame(width:w,height:h,quads:pack(values),calibration:c,exposure:FrameExposure(seconds:0.1,iso:400),timestamp:Double(i+1),noiseProfile:[1e-7,1e-8],sharpness:i==0 ? 100:1)
+        }
+        let original=try FusedDNG.encode(quads:burst[0].quads,width:w,height:h,calibration:c)
+        let result=try processor.processRAW(burst,referenceJPEG:reference,originalDNG:original,options:options,cancellation:nil,progress:nil)
+        try require(result.source=="Bayer-Metal" && result.rawIsFused,"Clipped-night test bypassed the production RAW pipeline")
+        let pixels=try jpegPixels(result.jpeg,context),width=w*2
+        func mean(_ xs:Range<Int>,_ ys:Range<Int>)->SIMD3<Float> {
+            var sum=SIMD3<Float>.zero
+            for y in ys { for x in xs { let j=(y*width+x)*4;sum+=SIMD3(pixels[j],pixels[j+1],pixels[j+2]) } }
+            return sum/Float(xs.count*ys.count)
+        }
+        let white=mean(205..<265,85..<165),dark=mean(30..<110,50..<200)
+        print("Non-unit camera WB night white / midtone",white,dark)
+        try require(abs(white.x-white.y)<0.05 && abs(white.z-white.y)<0.05,"Saturated night whites developed pink/magenta")
+        try require(white.y>0.4 && dark.y<0.35 && dark.y>0.005,"Night tone washed dark midtones to white or crushed them")
+        try require(abs(dark.x-dark.y)<0.025 && abs(dark.z-dark.y)<0.025,"Night tone introduced a magenta shadow cast")
+        guard let raw=result.raw else { throw CameraFailure.message("Missing bounded night DNG") }
+        let mosaic=try Mosaic(raw)
+        try require(mosaic.values.allSatisfy{$0>=0 && $0<=1},"Fused DNG exceeded declared sensor white")
     }
     static func jpegPixels(_ data:Data,_ context:CIContext) throws -> [Float] {
         guard let image=CIImage(data:data,options:[.applyOrientationProperty:true]) else { throw CameraFailure.message("Cannot read GPU tone fixture") }
@@ -188,9 +222,9 @@ import Darwin
         for j in stride(from:0,to:rgb.count,by:4) { rgb[j]=0.5;rgb[j+1]=0.4;rgb[j+2]=0.25 }
         let center=(24*width+32)*4;rgb[center]=1;rgb[center+1]=0.9;rgb[center+2]=0.5625
         let recovered=try execute("uc_reconstruct_highlights",rgb,p)
-        try require(abs(recovered[center]/recovered[center+1]-1.25)<0.006 && recovered[center]>1.1,"Clipped highlight did not recover neighbouring chromaticity / HDR energy")
+        try require(recovered[center]<=1 && abs(recovered[center]-1)<0.001 && recovered.allSatisfy{$0>=0 && $0<=1},"Highlight protection invented unsupported red/blue energy")
         try require(abs(recovered[center+1]-0.9)<0.001 && recovered[flat]==Float(Float16(0.5)),"Highlight reconstruction changed supported channels / shadows")
-        print("GPU green phases / edge preservation / extended highlight chromaticity passed")
+        print("GPU green phases / edge preservation / bounded highlights passed")
     }
     static func makeFrames(count:Int,noise:[Double],shifts:[SIMD2<Double>]=[],exposures:[Double]=[],zoom:Double=1,scene:(Double,Double)->Double)->[SensorBayerFrame] {
         (0..<count).map { index in

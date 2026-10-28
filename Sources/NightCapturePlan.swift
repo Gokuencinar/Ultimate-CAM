@@ -1,6 +1,6 @@
 import Foundation
 
-/// Static scene only. Trade ISO for photons and account for bounded AE shortfall.
+/// Static scene only. Trade ISO for photons while preserving metered exposure.
 /// Accepts a separate, confidence-gated preview motion cap; no Night Sight model.
 struct NightCapturePlan {
     let seconds: Double

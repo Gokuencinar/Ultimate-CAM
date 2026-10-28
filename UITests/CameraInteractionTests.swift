@@ -100,6 +100,10 @@ final class CameraInteractionTests: XCTestCase {
                 XCTAssertTrue(app.descendants(matching:.any).matching(identifier:"panorama.sweepGuide").firstMatch.exists)
                 XCTAssertEqual(app.buttons["panorama.capture"].label,"Iniciar barrido panorámico")
                 XCTAssertFalse(app.buttons["panorama.merge"].isEnabled)
+                let reset=app.buttons["panorama.reset"]
+                XCTAssertTrue(reset.isHittable && reset.isEnabled);reset.tap()
+                XCTAssertEqual(app.buttons["panorama.capture"].label,"Iniciar barrido panorámico")
+                XCTAssertTrue(reset.isEnabled)
             }
             if mode=="sphere" {
                 let automatic=app.switches["sphere.autoCapture"]

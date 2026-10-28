@@ -7,6 +7,25 @@ import Darwin
     static func require(_ condition:Bool,_ message:String) throws {
         if !condition { throw CameraFailure.message(message) }
     }
+    static func checkBayerSaturation() throws {
+        let samples:[UInt16]=[0,16383,0,16383,16000,4000,16000,4000,0,16383,0,16383,16000,4000,16000,4000]
+        let packed=try samples.withUnsafeBufferPointer { try BayerQuadPacking.pack($0,rowElements:4,originX:0,originY:0,cropWidth:4,cropHeight:4,step:1,black:[4096,4096,4096,4096],white:16000) }
+        let phases=packed.withUnsafeBytes { $0.bindMemory(to:UInt16.self).map{Float(Float16(bitPattern:$0))} }
+        try require(Array(phases.prefix(4))==[0,1,1,0] && phases.allSatisfy{$0>=0 && $0<=1},"Sensor black/white saturation escaped the normalized range")
+        let c=BayerCalibration(pattern:[0,1,1,2],matrix:[1,0,0,0,1,0,0,0,1],neutral:[0.5,1,0.65],illuminant:21,orientation:1)
+        let neutral=BayerSaturationPolicy.neutralPhases(c)
+        let clipped=BayerSaturationPolicy.limited(SIMD4(1,1,1,1),neutral:neutral)
+        try require(clipped==neutral,"All-phase clipping became magenta after camera white balance")
+        let mid=SIMD4<Float>(0.1,0.2,0.2,0.13)
+        try require(BayerSaturationPolicy.limited(mid,neutral:neutral)==mid,"Saturation protection altered linear midtones")
+        let values=[Float16](repeating:Float16(1.5),count:64*48*4).map{ $0.bitPattern.littleEndian }
+        let dng=try FusedDNG.encode(quads:values.withUnsafeBufferPointer{Data(buffer:$0)},width:64,height:48,calibration:c)
+        let metadata=try DNGMetadata.read(dng)
+        try require(metadata[50714]==[4096] && metadata[50717]==[61439] && BayerSaturationPolicy.span==57343,"Working DNG levels do not match the 16-bit encoder")
+        let tone=try NightTonePlan.make(luminances:[Double](repeating:0.03,count:70)+[Double](repeating:0.25,count:29)+[1],maximumGain:64)
+        try require(tone.gain<=1.01,"A lit night scene received a highlight-destroying exposure boost")
+        print("BOUNDED BAYER / CAMERA NEUTRAL / NIGHT HIGHLIGHT CHECKS PASSED")
+    }
     static func resourceChecks() throws {
         try require(!CaptureMemoryPolicy.isCritical(availableBytes:80*1024*1024),"Preventive memory warning canceled a healthy processing budget")
         try require(CaptureMemoryPolicy.isCritical(availableBytes:34*1024*1024) && !CaptureMemoryPolicy.isCritical(availableBytes:35*1024*1024),"Critical process headroom boundary changed")
@@ -29,6 +48,7 @@ import Darwin
         setbuf(stdout,nil)
         do {
             try resourceChecks()
+            try checkBayerSaturation()
             print("Core format: bounded ring")
             let ring=TemporalFrameBuffer<Int>(capacity:4,maximumBytes:10)
             ring.append(1,time:1,bytes:4);ring.append(2,time:1.1,bytes:4);ring.append(3,time:1.2,bytes:4)
@@ -204,7 +224,7 @@ import Darwin
         let sky=try NightTonePlan.make(luminances:[Double](repeating:0.00001,count:600)+subject,maximumGain:32)
         try require(sky.gain<2 && abs(sky.gain-exposed.gain)<0.1,"Black sky drove exposure gain despite exposed subjects")
         let dark=try NightTonePlan.make(luminances:[Double](repeating:0.004,count:1000),maximumGain:32)
-        try require(dark.gain>8 && dark.gain<=32,"Dim scene no longer receives bounded exposure lift")
+        try require(dark.gain>4 && dark.gain<=8,"Dim scene no longer receives bounded exposure lift")
         let black=try NightTonePlan.make(luminances:[Double](repeating:0,count:1000),maximumGain:32)
         try require(black.gain==1,"Empty black scene was amplified")
         var invalid=false
