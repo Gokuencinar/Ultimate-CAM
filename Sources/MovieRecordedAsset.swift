@@ -6,6 +6,7 @@ struct MovieRecordedAsset {
     let width: Int
     let height: Int
     let bytes: Int64
+    var hdr10Bit=false
     static func inspect(_ url: URL) async throws -> Self {
         let info=try url.resourceValues(forKeys:[.fileSizeKey,.isRegularFileKey,.isSymbolicLinkKey])
         guard info.isRegularFile==true,info.isSymbolicLink != true,let size=info.fileSize,size>0 else {
@@ -24,6 +25,17 @@ struct MovieRecordedAsset {
               dimensions.width>0,dimensions.height>0,max(dimensions.width,dimensions.height)<=8192 else {
             throw CameraFailure.message("Dimensiones de vídeo no válidas.")
         }
-        return Self(duration:duration,width:Int(dimensions.width),height:Int(dimensions.height),bytes:Int64(size))
+        var hdr=false
+        for description in try await track.load(.formatDescriptions) {
+            let extensions=CMFormatDescriptionGetExtensions(description) as NSDictionary
+            let atoms=extensions[kCMFormatDescriptionExtension_SampleDescriptionExtensionAtoms] as? [String:Any]
+            let configuration=atoms?["hvcC"] as? Data
+            let transfer=extensions[kCMFormatDescriptionExtension_TransferFunction] as? String ?? ""
+            if let configuration,configuration.count>=23 {
+                let bitDepth=8+Int(configuration[17]&7),profile=configuration[1]&31
+                hdr = hdr || (profile==2 && bitDepth>=10 && (transfer.contains("HLG") || transfer.contains("2084")))
+            }
+        }
+        return Self(duration:duration,width:Int(dimensions.width),height:Int(dimensions.height),bytes:Int64(size),hdr10Bit:hdr)
     }
 }

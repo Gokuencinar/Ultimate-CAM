@@ -17,11 +17,17 @@ struct MovieSettingsFields:View {
             Picker(selection:Binding(get:{camera.configuration.fps},set:{ value in update { $0.fps=value } })) {
                 ForEach([24,30,60],id:\.self) { Text("\($0) FPS").tag($0) }
             } label: { Label("Fotogramas",systemImage:"speedometer") }.accessibilityIdentifier("video.fps")
-            Picker(selection:Binding(get:{camera.configuration.codec},set:{ value in update { $0.codec=value } })) {
+            Picker(selection:Binding(get:{camera.configuration.codec},set:{ value in update { $0.codec=value;if value != .hevc { $0.hdrVideo=false } } })) {
                 ForEach(MovieCodec.allCases) { Text($0.label).tag($0) }
             } label: { Label("Formato",systemImage:"film") }
             Toggle(isOn:Binding(get:{camera.configuration.audio},set:{ value in update { $0.audio=value } })) { Label("Audio",systemImage:"mic") }
-            Toggle(isOn:Binding(get:{camera.configuration.stabilized},set:{ value in update { $0.stabilized=value } })) { Label("Estabilización",systemImage:"hand.raised") }
+            Picker(selection:Binding(get:{camera.configuration.stabilization},set:{value in update{$0.stabilization=value}})) {
+                ForEach(MovieStabilizationMode.allCases) { Text($0.label).tag($0) }
+            } label: { Label("Estabilización",systemImage:"hand.raised") }.accessibilityIdentifier("video.stabilization")
+            Toggle(isOn:Binding(get:{camera.configuration.hdrVideo},set:{value in update{$0.hdrVideo=value;if value {$0.codec = .hevc}}})) { Label("HDR de 10 bits",systemImage:"sun.max") }
+                .disabled(!camera.supportsHDR10 && !camera.configuration.hdrVideo).accessibilityIdentifier("video.hdr")
+            Toggle(isOn:Binding(get:{camera.configuration.lockWhiteBalance},set:{value in update{$0.lockWhiteBalance=value}})) { Label("Bloquear balance de blancos al grabar",systemImage:"lock") }
+                .accessibilityIdentifier("video.lockWB")
         }.disabled(configuring || [.recording,.finishing,.saving].contains(camera.phase))
     }
 }

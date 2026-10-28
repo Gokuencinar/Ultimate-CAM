@@ -1,4 +1,6 @@
 import AVFoundation
+import CoreVideo
+import VideoToolbox
 import Combine
 import Photos
 import UIKit
@@ -19,6 +21,10 @@ final class MovieCameraModel: NSObject, ObservableObject, AVCaptureFileOutputRec
     @Published private(set) var saved=false
     @Published private(set) var saveUncertain=false
     @Published private(set) var elapsed:Double=0
+    @Published private(set) var supportsHDR10=false
+    @Published private(set) var whiteBalanceLocked=false
+    @Published private(set) var activeStabilization=MovieStabilizationMode.off
+    private var recordingWhiteBalance:AVCaptureDevice.WhiteBalanceMode?
     let lenses=CameraLens.allCases.filter { $0.device != nil }
     private let queue=DispatchQueue(label:"com.gokuencinar.ultimatecam.movie",qos:.userInitiated)
     private let output=AVCaptureMovieFileOutput()
@@ -82,6 +88,12 @@ final class MovieCameraModel: NSObject, ObservableObject, AVCaptureFileOutputRec
             }
         }
     }
+    private func isHDR10(_ format:AVCaptureDevice.Format)->Bool {
+        CMFormatDescriptionGetMediaSubType(format.formatDescription)==kCVPixelFormatType_420YpCbCr10BiPlanarVideoRange && format.supportedColorSpaces.contains(.HLG_BT2020) && format.isVideoHDRSupported
+    }
+    private func avStabilization(_ mode:MovieStabilizationMode)->AVCaptureVideoStabilizationMode {
+        switch mode { case .off:return .off;case .standard:return .standard;case .cinematic:return .cinematic;case .locked:return .cinematicExtended }
+    }
     private func activate(_ options:MovieConfiguration,lens:CameraLens,audioAllowed:Bool) {
         guard active,!machine.busy else { return }
         ui { self.ready=false }
@@ -89,19 +101,22 @@ final class MovieCameraModel: NSObject, ObservableObject, AVCaptureFileOutputRec
             var request=try options.validated();request.audio = request.audio && audioAllowed
             guard let camera=lens.device,let format=camera.formats.first(where:{ format in
                 let d=CMVideoFormatDescriptionGetDimensions(format.formatDescription)
-                return request.matches(width:Int(d.width),height:Int(d.height),ranges:format.videoSupportedFrameRateRanges.map { $0.minFrameRate...$0.maxFrameRate })
-            }) else { throw CameraFailure.message("Esa combinación de lente, resolución y FPS no está disponible.") }
+                return request.matches(width:Int(d.width),height:Int(d.height),ranges:format.videoSupportedFrameRateRanges.map { $0.minFrameRate...$0.maxFrameRate },hdr10Bit:isHDR10(format)) && (request.hdrVideo || format.supportedColorSpaces.contains(.sRGB))
+            }) else { throw CameraFailure.message("Esa combinación de lente, resolución, FPS y rango de color no está disponible.") }
             let newInput=try AVCaptureDeviceInput(device:camera)
             let audioInput:AVCaptureDeviceInput?
             if request.audio,let microphone=AVCaptureDevice.default(for:.audio) { audioInput=try AVCaptureDeviceInput(device:microphone) }
             else { audioInput=nil;request.audio=false }
             if session.isRunning { session.stopRunning() }
             let oldInputs=session.inputs,oldPreset=session.sessionPreset
+            let oldWide=session.automaticallyConfiguresCaptureDeviceForWideColor
+            let oldColor=camera.activeColorSpace,oldHDR=camera.isVideoHDREnabled,oldAutoHDR=camera.automaticallyAdjustsVideoHDREnabled
             let oldFormat=camera.activeFormat,oldMin=camera.activeVideoMinFrameDuration,oldMax=camera.activeVideoMaxFrameDuration
             session.beginConfiguration()
             do {
                 guard session.canSetSessionPreset(.inputPriority) else { throw CameraFailure.message("No se puede configurar vídeo en esta cámara.") }
                 session.sessionPreset = .inputPriority
+                session.automaticallyConfiguresCaptureDeviceForWideColor=false
                 for input in oldInputs { session.removeInput(input) }
                 guard session.canAddInput(newInput) else { throw CameraFailure.message("No se pudo conectar la cámara de vídeo.") }
                 session.addInput(newInput)
@@ -117,22 +132,34 @@ final class MovieCameraModel: NSObject, ObservableObject, AVCaptureFileOutputRec
                 camera.activeFormat=format
                 camera.activeVideoMinFrameDuration=CMTime(value:1,timescale:Int32(request.fps))
                 camera.activeVideoMaxFrameDuration=CMTime(value:1,timescale:Int32(request.fps))
+                camera.activeColorSpace=request.hdrVideo ? .HLG_BT2020:.sRGB
                 camera.automaticallyAdjustsVideoHDREnabled=false
-                if camera.isVideoHDREnabled { camera.isVideoHDREnabled=false }
+                if format.isVideoHDRSupported { camera.isVideoHDREnabled=request.hdrVideo }
                 if camera.isFocusModeSupported(.continuousAutoFocus) { camera.focusMode = .continuousAutoFocus }
                 if camera.isExposureModeSupported(.continuousAutoExposure) { camera.exposureMode = .continuousAutoExposure }
                 if camera.isWhiteBalanceModeSupported(.continuousAutoWhiteBalance) { camera.whiteBalanceMode = .continuousAutoWhiteBalance }
                 camera.videoZoomFactor=max(1,camera.minAvailableVideoZoomFactor)
-                camera.setExposureTargetBias(0,completionHandler:nil)
+                request.exposureBias=Double(max(camera.minExposureTargetBias,min(camera.maxExposureTargetBias,Float(request.exposureBias))))
+                camera.setExposureTargetBias(Float(request.exposureBias),completionHandler:nil)
                 if camera.hasTorch { camera.torchMode = .off }
                 camera.unlockForConfiguration()
                 guard let connection=output.connection(with:.video) else { throw CameraFailure.message("La conexión de vídeo no está disponible.") }
                 if connection.isVideoRotationAngleSupported(90) { connection.videoRotationAngle=90 }
                 if connection.isVideoMirroringSupported { connection.automaticallyAdjustsVideoMirroring=false;connection.isVideoMirrored=lens == .front }
-                connection.preferredVideoStabilizationMode=request.stabilized && connection.isVideoStabilizationSupported ? .auto : .off
+                let supported=Set(MovieStabilizationMode.allCases.filter { $0 == .off || (connection.isVideoStabilizationSupported && format.isVideoStabilizationModeSupported(avStabilization($0))) })
+                let stabilization=request.stabilization.resolved(supported:supported)
+                connection.preferredVideoStabilizationMode=avStabilization(stabilization)
                 let wanted:AVVideoCodecType=request.codec == .hevc ? .hevc : .h264
                 guard output.availableVideoCodecTypes.contains(wanted) else { throw CameraFailure.message("El códec seleccionado no está disponible en esta configuración.") }
-                output.setOutputSettings([AVVideoCodecKey:wanted],for:connection)
+                let keys=Set(output.supportedOutputSettingsKeys(for:connection))
+                guard keys.contains(AVVideoCodecKey) else { throw CameraFailure.message("El codificador no admite seleccionar este formato.") }
+                var settings:[String:Any]=[AVVideoCodecKey:wanted]
+                if request.hdrVideo {
+                    guard keys.contains(AVVideoCompressionPropertiesKey) else { throw CameraFailure.message("El codificador no permite confirmar HEVC de 10 bits.") }
+                    settings[AVVideoCompressionPropertiesKey]=[AVVideoProfileLevelKey:kVTProfileLevel_HEVC_Main10_AutoLevel]
+                }
+                output.setOutputSettings(settings,for:connection)
+                ui { self.activeStabilization=stabilization }
                 output.maxRecordedDuration=CMTime(seconds:600,preferredTimescale:600)
                 output.maxRecordedFileSize=2_000_000_000
                 output.minFreeDiskSpaceLimit=200_000_000
@@ -140,9 +167,14 @@ final class MovieCameraModel: NSObject, ObservableObject, AVCaptureFileOutputRec
             } catch {
                 for input in session.inputs { session.removeInput(input) }
                 for input in oldInputs where session.canAddInput(input) { session.addInput(input) }
-                session.sessionPreset=oldPreset
+                session.sessionPreset=oldPreset;session.automaticallyConfiguresCaptureDeviceForWideColor=oldWide
                 if (try? camera.lockForConfiguration()) != nil {
-                    camera.activeFormat=oldFormat;camera.activeVideoMinFrameDuration=oldMin;camera.activeVideoMaxFrameDuration=oldMax;camera.unlockForConfiguration()
+                    camera.activeFormat=oldFormat
+                    if oldFormat.supportedColorSpaces.contains(oldColor) { camera.activeColorSpace=oldColor }
+                    camera.automaticallyAdjustsVideoHDREnabled=false
+                    if oldFormat.isVideoHDRSupported { camera.isVideoHDREnabled=oldHDR }
+                    camera.automaticallyAdjustsVideoHDREnabled=oldAutoHDR
+                    camera.activeVideoMinFrameDuration=oldMin;camera.activeVideoMaxFrameDuration=oldMax;camera.unlockForConfiguration()
                 }
                 session.commitConfiguration()
                 if configured && active { session.startRunning() }
@@ -152,10 +184,14 @@ final class MovieCameraModel: NSObject, ObservableObject, AVCaptureFileOutputRec
             rotationCoordinator=AVCaptureDevice.RotationCoordinator(device:camera,previewLayer:nil)
             session.startRunning()
             let running=session.isRunning
-            ui { self.ready=running;self.configuration=request;self.lens=lens;self.zoom=1
+            let hdrAvailable=camera.formats.contains { candidate in
+                let d=CMVideoFormatDescriptionGetDimensions(candidate.formatDescription)
+                return Int(d.width)==request.resolution.width && Int(d.height)==request.resolution.height && self.isHDR10(candidate) && candidate.videoSupportedFrameRateRanges.contains { $0.minFrameRate<=Double(request.fps) && $0.maxFrameRate>=Double(request.fps) }
+            }
+            ui { self.supportsHDR10=hdrAvailable; self.ready=running;self.configuration=request;self.lens=lens;self.zoom=1
                 self.maximumZoom=Double(min(camera.activeFormat.videoMaxZoomFactor,8));self.torch=false
                 self.torchAvailable=camera.hasTorch && camera.isTorchAvailable
-                self.status=running ? "\(request.resolution.label) · \(request.fps) FPS · \(request.audio ? "con audio" : "sin audio") · SDR" : "No se pudo iniciar la sesión de vídeo." }
+                self.status=running ? "\(request.resolution.label) · \(request.fps) FPS · \(request.audio ? "con audio" : "sin audio") · \(request.hdrVideo ? "HDR 10 bits":"SDR")" : "No se pudo iniciar la sesión de vídeo." }
             recoverDraftIfNeeded()
         } catch { ui { self.ready=self.session.isRunning && self.configured;self.status=error.localizedDescription } }
     }
@@ -171,7 +207,8 @@ final class MovieCameraModel: NSObject, ObservableObject, AVCaptureFileOutputRec
                 if connection.isVideoMirroringSupported { connection.automaticallyAdjustsVideoMirroring=false;connection.isVideoMirrored=mirror }
                 else if mirror { throw CameraFailure.message("Esta cámara no admite guardar el vídeo frontal reflejado.") }
                 try FileManager.default.createDirectory(at:self.directory,withIntermediateDirectories:true)
-                guard let token=self.machine.begin() else { return }
+                try self.lockRecordingWhiteBalance()
+                guard let token=self.machine.begin() else { self.restoreRecordingWhiteBalance();return }
                 let url=self.directory.appendingPathComponent("UltimateCAM-\(token.uuidString).mov")
                 self.recordingURL=url;self.recordingToken=token;self.savedOnQueue=false;self.uncertainOnQueue=false;self.startTime=0
                 self.ui { self.saved=false;self.saveUncertain=false;self.previewURL=nil;self.elapsed=0 }
@@ -181,7 +218,39 @@ final class MovieCameraModel: NSObject, ObservableObject, AVCaptureFileOutputRec
                     guard self.recordingToken==token,self.startTime==0,self.machine.phase == .recording else { return }
                     self.stopOnQueue();self.syncUI("La cámara no confirmó el inicio del vídeo. Si no termina, cierra Ultimate CAM. No se repetirá la grabación.")
                 }
-            } catch { self.ui { self.status=error.localizedDescription } }
+            } catch { self.restoreRecordingWhiteBalance();self.ui { self.status=error.localizedDescription } }
+        }
+    }
+    private func lockRecordingWhiteBalance() throws {
+        guard current.lockWhiteBalance else { return }
+        guard let d=device,d.isWhiteBalanceModeSupported(.locked),!d.isAdjustingWhiteBalance else { throw CameraFailure.message("Espera a que se estabilice el balance de blancos o desactiva su bloqueo.") }
+        try d.lockForConfiguration();defer { d.unlockForConfiguration() }
+        recordingWhiteBalance=d.whiteBalanceMode
+        var gains=d.deviceWhiteBalanceGains
+        func gain(_ value:Float)->Float { min(d.maxWhiteBalanceGain,max(1,value.isFinite ? value:1)) }
+        gains.redGain=gain(gains.redGain);gains.greenGain=gain(gains.greenGain);gains.blueGain=gain(gains.blueGain)
+        d.setWhiteBalanceModeLocked(with:gains,completionHandler:nil)
+        ui { self.whiteBalanceLocked=true }
+    }
+    private func restoreRecordingWhiteBalance() {
+        guard let mode=recordingWhiteBalance else { return };recordingWhiteBalance=nil
+        if let d=device,(try? d.lockForConfiguration()) != nil {
+            if d.isWhiteBalanceModeSupported(mode) { d.whiteBalanceMode=mode };d.unlockForConfiguration()
+        };ui { self.whiteBalanceLocked=false }
+    }
+    func setExposureBias(_ value:Double) {
+        guard value.isFinite,(-2...2).contains(value) else { return }
+        queue.async {
+            var actual=Float(value)
+            if self.active,let d=self.device {
+                do {
+                    try d.lockForConfiguration();defer { d.unlockForConfiguration() }
+                    if d.isExposureModeSupported(.continuousAutoExposure) { d.exposureMode = .continuousAutoExposure }
+                    actual=max(d.minExposureTargetBias,min(d.maxExposureTargetBias,actual));d.setExposureTargetBias(actual,completionHandler:nil)
+                } catch { self.ui { self.status=error.localizedDescription };return }
+            }
+            self.current.exposureBias=Double(actual);let published=Double(actual)
+            self.ui { self.configuration.exposureBias=published }
         }
     }
     func stopRecording() { queue.async { self.stopOnQueue() } }
@@ -201,11 +270,16 @@ final class MovieCameraModel: NSObject, ObservableObject, AVCaptureFileOutputRec
     func fileOutput(_ output:AVCaptureFileOutput,didFinishRecordingTo fileURL:URL,from connections:[AVCaptureConnection],error:Error?) {
         queue.async {
             guard self.recordingURL==fileURL,let token=self.recordingToken else { return }
-            self.timer?.cancel();self.timer=nil
+            self.timer?.cancel();self.timer=nil;self.restoreRecordingWhiteBalance()
+            let requireHDR=self.current.hdrVideo
             let finished=error == nil || ((error as NSError?)?.userInfo[AVErrorRecordingSuccessfullyFinishedKey] as? Bool == true)
             Task {
                 let inspected:Result<MovieRecordedAsset,Error>
-                do { inspected = .success(try await MovieRecordedAsset.inspect(fileURL)) }
+                do {
+                    let info=try await MovieRecordedAsset.inspect(fileURL)
+                    guard !requireHDR || info.hdr10Bit else { throw CameraFailure.message("El archivo no confirmó HDR de 10 bits; se conserva para revisión.") }
+                    inspected = .success(info)
+                }
                 catch { inspected = .failure(error) }
                 self.queue.async {
                     let valid=finished && (try? inspected.get()) != nil
@@ -293,7 +367,7 @@ final class MovieCameraModel: NSObject, ObservableObject, AVCaptureFileOutputRec
                 self.shutdownCompletion=completion
                 self.ui { self.ready=false;self.torch=false }
             } else {
-                self.session.stopRunning()
+                self.restoreRecordingWhiteBalance();self.session.stopRunning()
                 self.ui { self.ready=false;self.torch=false;completion() }
             }
         }

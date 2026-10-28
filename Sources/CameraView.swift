@@ -247,7 +247,8 @@ struct CameraView: View {
         .onChange(of: options) { _, value in camera.setPreviewTools(previewTools,processing:value) }
         .onChange(of: previewTools) { _, value in camera.setPreviewTools(value,processing:options) }
         .onChange(of: camera.busy) { _, value in if !value { camera.setPreviewTools(previewTools,processing:options) } }
-        .onChange(of: bias) { _, value in camera.setBias(Float(value)) }
+        .onChange(of:bias) { _,value in if videoMode { movie.setExposureBias(value) } else { camera.setBias(Float(value)) } }
+        .onChange(of:movie.configuration.exposureBias) { _,value in if videoMode && abs(value-bias)>0.001 { bias=value } }
         .onChange(of: stack) { _, value in if value { rawEnabled = false; flash = .off } }
         .onChange(of: rawEnabled) { _, value in if value { flash = .off } }
         .sheet(isPresented: $showControls, onDismiss: {
@@ -409,7 +410,7 @@ struct CameraView: View {
             }.accessibilityLabel("Restablecer exposición").accessibilityIdentifier("camera.resetExposureBias")
                 .accessibilityValue(String(format:"%.1f",bias))
         }.padding(.horizontal,12).background(.black.opacity(0.65),in:RoundedRectangle(cornerRadius:16))
-            .tint(CameraPalette.accent).disabled(!controlsEnabled)
+            .tint(CameraPalette.accent).disabled(videoMode ? (openingVideo || [.finishing,.saving].contains(movie.phase)):!controlsEnabled)
     }
 
     private var shadowCompensation:some View {
@@ -609,7 +610,7 @@ struct CameraView: View {
                 guidedBusy=false;guidedUnsaved=false;allowPreviewAttachment=true
                 switch destination {
                 case .photo:resetUIControls();camera.resumeAfterAuxiliary()
-                case .video:movie.start(movie.configuration,lens:lens)
+                case .video:var request=movie.configuration;request.exposureBias=bias;movie.start(request,lens:lens)
                 case .panorama,.sphere:guided.resetSequence();guided.start()
                 }
                 action();finishModeTransition(token)
@@ -631,7 +632,7 @@ struct CameraView: View {
         guard videoMode else { movie.configure(options,lens:lens);return }
         guard controlsEnabled else { return }
         beginModeTransition { token in
-            allowPreviewAttachment=true;movie.configure(options,lens:lens);finishModeTransition(token)
+            allowPreviewAttachment=true;var request=options;request.exposureBias=bias;movie.configure(request,lens:lens);finishModeTransition(token)
         }
     }
     private func beginModeTransition(_ operation:@escaping (UUID)->Void) {
@@ -673,6 +674,7 @@ struct CameraView: View {
             Button { movie.toggleTorch() } label: { Image(systemName:movie.torch ? "bolt.fill":"bolt.slash").frame(width:44,height:44) }
                 .accessibilityLabel("Antorcha").disabled(!movie.torchAvailable || movie.phase == .finishing)
             Spacer(minLength:0)
+            if movie.whiteBalanceLocked { Image(systemName:"lock.fill").font(.caption).accessibilityLabel("Balance de blancos bloqueado") }
             if movie.phase == .recording {
                 Text(String(format:"%02d:%02d",Int(movie.elapsed)/60,Int(movie.elapsed)%60))
                     .font(.headline.monospacedDigit()).padding(.horizontal,14).padding(.vertical,8)
@@ -690,6 +692,7 @@ struct CameraView: View {
     }
     private var videoCaptureControls:some View {
         VStack(spacing:14) {
+            exposureCompensation
             HStack(spacing:8) {
                 ForEach(movie.lenses.filter { $0 != .front }) { item in
                     Button(item.label) { configureMovie(movie.configuration,lens:item) }
