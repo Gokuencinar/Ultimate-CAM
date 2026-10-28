@@ -1,5 +1,6 @@
 import Foundation
 import simd
+import CoreGraphics
 
 struct SphereMotionSnapshot {
     let rotation:simd_float3x3
@@ -82,7 +83,7 @@ struct SphereAim {
         guard sample.rotationSpeed<0.5 else { throw CameraFailure.message("Mantén el teléfono quieto un instante y vuelve a pulsar.") }
         let candidate=try reference ?? SphereReference(sample),direction=try candidate.pose(sample).forward
         guard let target=SphereTarget.all.filter({!captured.contains($0.id)}).min(by:{$0.angle(to:direction)<$1.angle(to:direction)}) else { throw CameraFailure.message("Ya están completas las vistas de la esfera.") }
-        let tolerance:Float=reference == nil ? 15.5:12
+        let tolerance:Float=reference == nil ? 15.5:10
         guard target.angle(to:direction)<=tolerance else { throw CameraFailure.message("Gira hacia el siguiente objetivo antes de añadir otra vista.") }
         return Self(reference:candidate,target:target)
     }
@@ -90,5 +91,34 @@ struct SphereAim {
         guard seconds.isFinite,seconds>0,fieldOfView.isFinite,(30...130).contains(fieldOfView) else { return false }
         let blur=Double(sample.rotationSpeed)*180/Double.pi*seconds*1600/fieldOfView
         return sample.rotationSpeed<0.6 && blur<=3
+    }
+}
+
+enum SphereNodeSelection {
+    static func completedTarget(planned:Int,pose:SpherePose,first:Bool)->Int? {
+        guard SphereTarget.all.indices.contains(planned),SphereTarget.all[planned].angle(to:pose.forward)<(first ? 16:12) else { return nil }
+        return planned
+    }
+    static func projected(_ target:SphereTarget,pose:SpherePose,size:CGSize,fieldOfView:Double=67)->CGPoint? {
+        let ray=pose.sphereToDevice*target.direction,z = -ray.z
+        guard z>0.01,fieldOfView.isFinite,(30...130).contains(fieldOfView) else { return nil }
+        let f=max(size.width,size.height)*0.5/tan(fieldOfView*Double.pi/360)
+        let point=CGPoint(x:size.width/2+CGFloat(ray.x/z)*f,y:size.height/2-CGFloat(ray.y/z)*f)
+        return CGRect(origin:.zero,size:size).insetBy(dx:20,dy:20).contains(point) ? point:nil
+    }
+    static func point(yaw:Double,pitch:Double,size:CGSize)->CGPoint {
+        let inset:CGFloat=12
+        let u=(yaw/360+0.5).truncatingRemainder(dividingBy:1)
+        return CGPoint(x:inset+CGFloat(u<0 ? u+1:u)*max(1,size.width-2*inset),y:inset+CGFloat(0.5-pitch/180)*max(1,size.height-2*inset))
+    }
+}
+struct SphereAutoCaptureGate {
+    private var target:Int?
+    private var since:Double?
+    mutating func reset() { target=nil;since=nil }
+    mutating func update(target next:Int?,stable:Bool,time:Double)->Bool {
+        guard stable,let next,time.isFinite else { reset();return false }
+        if target != next || since==nil || time<(since ?? time) { target=next;since=time;return false }
+        if time-(since ?? time)>=0.4 { reset();return true };return false
     }
 }

@@ -10,6 +10,10 @@ struct GuidedSphereView:View {
     @Binding var unsavedSequence:Bool
     var interactionEnabled=true
     @StateObject private var motion=SphereMotionProvider()
+    @AppStorage("sphereAutoCapture") private var autoCapture=false
+    @State private var autoGate=SphereAutoCaptureGate()
+    @State private var lastFieldOfView:Double=67
+    private let clock=Timer.publish(every:0.1,on:.main,in:.common).autoconnect()
     @Environment(\.scenePhase) private var scene
     @State private var reference:SphereReference?
     @State private var captured=[Int:SphereImageFrame]()
@@ -30,7 +34,7 @@ struct GuidedSphereView:View {
         guard let candidate=reference ?? (try? SphereReference(snapshot)) else { return nil };return try? candidate.pose(snapshot).forward
     }
     private var next:SphereTarget? {
-        guard captured.count<62 else { return nil }
+        guard captured.count<22 else { return nil }
         guard let direction else { return SphereTarget.all[0] }
         return SphereTarget.all.filter { captured[$0.id]==nil }.min { $0.angle(to:direction)<$1.angle(to:direction) }
     }
@@ -40,11 +44,12 @@ struct GuidedSphereView:View {
         return (try? SphereAim.make(snapshot,reference:reference,captured:Set(captured.keys),now:ProcessInfo.processInfo.systemUptime)) != nil
     }
     private func requestCapture() {
-        guard !interrupted,camera.ready,!camera.busy,!processing else { return }
+        guard !interrupted,camera.ready,!camera.busy,!processing,pendingTarget==nil else { return }
         guard let sample=motion.read() else { message="Esperando orientación. Mantén el teléfono quieto o pulsa Reintentar orientación.";motion.start();return }
         do {
             let aim=try SphereAim.make(sample,reference:reference,captured:Set(captured.keys),now:ProcessInfo.processInfo.systemUptime)
-            pendingReference=aim.reference;pendingTarget=aim.target.id;message="";camera.capture()
+            pendingReference=aim.reference;pendingTarget=aim.target.id;message="";autoGate.reset()
+            camera.capture { accepted in if !accepted { pendingTarget=nil;pendingReference=nil;message=camera.status } }
         } catch { message=error.localizedDescription }
     }
     var body:some View {
@@ -68,7 +73,7 @@ struct GuidedSphereView:View {
                     Text(reference==nil ? "Sujeta el móvil vertical y apunta a la escena. Pulsa para empezar." : "Mantén el teléfono en el mismo punto y gira hacia el siguiente objetivo.")
                         .font(.subheadline).multilineTextAlignment(.center)
                     if let next { Text("Objetivo: giro \(Int(next.yaw))° · altura \(Int(next.pitch))° · distancia \(Int(angle))°").font(.caption.monospacedDigit()) }
-                    Image(systemName:aimReady ? "scope":"viewfinder").font(.system(size:40)).foregroundStyle(aimReady ? CameraPalette.accent:.white)
+                    Toggle("Captura automática",isOn:$autoCapture).font(.subheadline).accessibilityIdentifier("sphere.autoCapture")
                     HStack {
                         Button("Reiniciar") { confirmDiscard=true }.font(.subheadline)
                             .accessibilityLabel("Empezar la esfera de nuevo").frame(maxWidth:.infinity)
@@ -76,7 +81,7 @@ struct GuidedSphereView:View {
                         Button { requestCapture() } label: { Circle().fill(camera.ready ? (aimReady ? CameraPalette.accent:.white):.gray).frame(width:64,height:64) }
                             .accessibilityLabel("Añadir vista a la esfera").accessibilityIdentifier("sphere.capture")
                             .disabled(!camera.ready || camera.busy || interrupted || next==nil || processing)
-                        Button("Unir") { merge() }.frame(maxWidth:.infinity).disabled(captured.count<6 || camera.busy || processing).opacity(captured.count<6 ? 0.35:1)
+                        Button("Unir") { merge() }.accessibilityIdentifier("sphere.merge").frame(maxWidth:.infinity).disabled(captured.count<2 || camera.busy || processing).opacity(captured.count<2 ? 0.35:1)
                     }
                     if processing { ProgressView();Button("Cancelar unión") { cancellation?.cancel() } }
                 } else {
@@ -90,12 +95,16 @@ struct GuidedSphereView:View {
                         .accessibilityIdentifier("sphere.retryMotion").disabled(camera.busy || processing)
                 }
             }.padding().background { LinearGradient(colors:[.black.opacity(0.8),.clear,.black.opacity(0.85)],startPoint:.top,endPoint:.bottom).allowsHitTesting(false) }
+        }.overlay {
+            if result==nil { targetOverlay.allowsHitTesting(false) }
         }.disabled(!interactionEnabled).foregroundStyle(.white).preferredColorScheme(.dark).tint(CameraPalette.accent)
             .onCameraCaptureEvent(isEnabled:interactionEnabled && hardwareButtons && scene == .active && camera.ready && !camera.busy && !processing && !saving &&
                                   !confirmDiscard && result==nil && !interrupted && next != nil) { event in
                 if event.phase == .ended { requestCapture() }
             }
             .onAppear { publishState();camera.motionProvider={ motion.read() };motion.start() }
+            .onReceive(clock) { _ in autoTick() }
+            .onChange(of:autoCapture) { _,_ in autoGate.reset() }
             .onDisappear { motion.stop();camera.motionProvider=nil;cancellation?.cancel() }
             .onChange(of:camera.frame?.id) { _,id in if id != nil,let frame=camera.frame { accept(frame) } }
             .onChange(of:scene) { _,phase in
@@ -120,32 +129,51 @@ struct GuidedSphereView:View {
     private var coverageMap:some View {
         Canvas { context,size in
             for target in SphereTarget.all {
-                let x=(Double(target.yaw)/360+0.5).truncatingRemainder(dividingBy:1)*size.width
-                let y=(0.5-Double(target.pitch)/180)*max(1,size.height-12)+6
+                let point=SphereNodeSelection.point(yaw:Double(target.yaw),pitch:Double(target.pitch),size:size)
+                let x=point.x,y=point.y
                 let rect=CGRect(x:x-3,y:y-3,width:6,height:6)
-                context.fill(Path(ellipseIn:rect),with:.color(captured[target.id] != nil ? CameraPalette.accent:.white.opacity(0.4)))
+                context.fill(Path(ellipseIn:rect),with:.color(captured[target.id] != nil ? CameraPalette.accent:(pendingTarget==target.id ? .orange:.white.opacity(0.4))))
             }
             if let direction {
                 let yaw=atan2(Double(direction.x),Double(direction.z)),pitch=asin(min(1,max(-1,Double(direction.y))))
-                let p=CGPoint(x:(yaw/(2*Double.pi)+0.5)*size.width,y:(0.5-pitch/Double.pi)*max(1,size.height-12)+6)
+                let p=SphereNodeSelection.point(yaw:yaw*180/Double.pi,pitch:pitch*180/Double.pi,size:size)
                 context.stroke(Path(ellipseIn:CGRect(x:p.x-6,y:p.y-6,width:12,height:12)),with:.color(.white),lineWidth:2)
             }
         }.accessibilityLabel("Vistas esféricas completadas: \(captured.count) de 62")
     }
     private func accept(_ frame:GuidedPhotoFrame) {
-        guard scene == .active else { pendingTarget=nil;return }
+        guard scene == .active else { pendingTarget=nil;pendingReference=nil;return }
         guard let target=pendingTarget,let sample=frame.motion else { message="No se recibió orientación para esa foto; no se añade a la esfera.";pendingTarget=nil;if captured.isEmpty { camera.unlock() };return }
         pendingTarget=nil;let initialReference=pendingReference;pendingReference=nil
         do {
-            guard SphereAim.acceptsMotion(sample,seconds:frame.exposureSeconds,fieldOfView:frame.fieldOfView) else { throw CameraFailure.message("El teléfono se movió durante la foto. Mantén el objetivo quieto y vuelve a pulsar.") }
+            guard sample.rotationSpeed<0.8,Double(sample.rotationSpeed)*frame.exposureSeconds*180/Double.pi<8 else { throw CameraFailure.message("El teléfono se movió durante la foto. Mantén el objetivo quieto y vuelve a pulsar.") }
             let candidate=try reference ?? initialReference ?? SphereReference(sample)
             let pose=try candidate.pose(sample)
-            guard SphereTarget.all[target].angle(to:pose.forward)<(reference == nil ? 16:14) else { throw CameraFailure.message("La foto se hizo fuera del objetivo. No se añade; vuelve a alinear y pulsa.") }
+            guard SphereNodeSelection.completedTarget(planned:target,pose:pose,first:reference==nil) != nil else { throw CameraFailure.message("La foto se hizo fuera del objetivo. No se añade; vuelve a alinear y pulsa.") }
             reference=candidate;captured[target]=SphereImageFrame(data:frame.data,pose:pose,fieldOfView:frame.fieldOfView)
+            lastFieldOfView=frame.fieldOfView;autoGate.reset();UINotificationFeedbackGenerator().notificationOccurred(.success)
             message="Vista añadida. Gira sin desplazar la cámara."
         } catch { message=error.localizedDescription;if captured.isEmpty { camera.unlock() } }
     }
+    private func autoTick() {
+        guard autoCapture,interactionEnabled,scene == .active,!confirmDiscard,!interrupted,result==nil,!processing,!saving,camera.ready,!camera.busy,pendingTarget==nil,
+              let sample=motion.read(),let aim=try? SphereAim.make(sample,reference:reference,captured:Set(captured.keys),now:ProcessInfo.processInfo.systemUptime) else { autoGate.reset();return }
+        if autoGate.update(target:aim.target.id,stable:sample.rotationSpeed<0.12,time:sample.timestamp) { requestCapture() }
+    }
+    private var targetOverlay:some View {
+        GeometryReader { g in
+            ZStack {
+                Image(systemName:"plus").font(.system(size:22,weight:.light)).foregroundStyle(.white)
+                    .position(x:g.size.width/2,y:g.size.height/2)
+                if let sample=motion.snapshot,let ref=reference ?? (try? SphereReference(sample)),let pose=try? ref.pose(sample),let next,
+                   let point=SphereNodeSelection.projected(next,pose:pose,size:g.size,fieldOfView:lastFieldOfView) {
+                    Circle().stroke(aimReady ? CameraPalette.accent:.white,lineWidth:3).frame(width:40,height:40).position(point)
+                }
+            }
+        }
+    }
     private func merge() {
+        guard captured.count>=2,!processing,pendingTarget==nil else { return }
         processing=true;let token=ProcessingCancellation();cancellation=token
         let frames=captured.keys.sorted().compactMap { captured[$0] };message="Proyectando las vistas…"
         Task { @MainActor in

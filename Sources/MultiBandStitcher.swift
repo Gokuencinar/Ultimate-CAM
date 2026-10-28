@@ -83,10 +83,15 @@ enum MultiBandStitcher {
         try cancellation?.check()
         // Retire the lazy graph after each frame; no growing full-sequence CI
         // pyramid is retained. Intermediates remain bounded by one join.
-        guard let color=context.createCGImage(combined,from:local,format:.RGBAh,colorSpace:linear),
-              let cover=context.createCGImage(union,from:local,format:.RGBAh,colorSpace:linear) else { throw CameraFailure.message("No se pudo terminar la unión.") }
+        guard let color=context.createCGImage(combined,from:local,format:.RGBAh,colorSpace:linear) else { throw CameraFailure.message("No se pudo terminar la unión.") }
+        // Coverage is a scalar mask, not four HDR colour channels (8 MB rather
+        // than 67 MB for a 4096×2048 sphere). This also retires its lazy graph.
+        let pointer=UnsafeMutableRawPointer.allocate(byteCount:w*h,alignment:16)
+        context.render(union,toBitmap:pointer,rowBytes:w,bounds:local,format:.L8,colorSpace:nil)
+        let bytes=Data(bytesNoCopy:pointer,count:w*h,deallocator:.custom{p,_ in p.deallocate()})
+        let cover=CIImage(bitmapData:bytes,bytesPerRow:w,size:local.size,format:.L8,colorSpace:nil)
         let restore=CGAffineTransform(translationX:e.minX,y:e.minY)
-        return Result(image:CIImage(cgImage:color).transformed(by:restore),coverage:CIImage(cgImage:cover).transformed(by:restore),gain:gain,seam:seam)
+        return Result(image:CIImage(cgImage:color).transformed(by:restore),coverage:cover.transformed(by:restore),gain:gain,seam:seam)
     }
     static func photometricGain(_ a:[Float],_ b:[Float],coverageA:[Float],coverageB:[Float])->SIMD3<Float> {
         guard a.count==b.count,a.count==coverageA.count,a.count==coverageB.count else { return SIMD3(repeating:1) }
