@@ -29,9 +29,9 @@ struct MovieSettingsFields:View {
             }
             Toggle(isOn:Binding(get:{camera.configuration.hdrVideo},set:{value in update{$0.hdrVideo=value;if value {$0.codec = .hevc}}})) { Label("HDR de 10 bits",systemImage:"sun.max") }
                 .disabled(!camera.supportsHDR10 && !camera.configuration.hdrVideo).accessibilityIdentifier("video.hdr")
-            Toggle(isOn:Binding(get:{camera.configuration.lockWhiteBalance},set:{value in update{$0.lockWhiteBalance=value}})) { Label("Bloquear balance de blancos al grabar",systemImage:"lock") }
+            Toggle(isOn:Binding(get:{camera.configuration.lockWhiteBalance},set:{value in update{$0.lockWhiteBalance=value}})) { Label("Balance de blancos fijo",systemImage:"lock") }
                 .accessibilityIdentifier("video.lockWB")
-        }.disabled(configuring || [.recording,.finishing,.saving].contains(camera.phase))
+        }.disabled(configuring || [.starting,.recording,.finishing,.saving].contains(camera.phase))
     }
 }
 
@@ -39,7 +39,7 @@ struct MovieReview:View {
     @ObservedObject var camera:MovieCameraModel
     @Environment(\.dismiss) private var dismiss
     @State private var confirmDiscard=false
-    private var busy:Bool { [.recording,.finishing,.saving].contains(camera.phase) }
+    private var busy:Bool { [.starting,.recording,.finishing,.saving].contains(camera.phase) }
     var body:some View {
         NavigationStack {
             VStack(spacing:20) {

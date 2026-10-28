@@ -61,6 +61,7 @@ struct CameraView: View {
     @StateObject private var movie = MovieCameraModel()
     @StateObject private var guided = GuidedPhotoCamera()
     @StateObject private var previewAttachment = PreviewAttachmentController()
+    @State private var lastVideoAction = -Double.infinity
     @State private var guidedBusy=false
     @State private var guidedUnsaved=false
     @State private var confirmModeChange=false
@@ -140,7 +141,7 @@ struct CameraView: View {
         if options.usesPreviewZSL && !rawEnabled { return "Cámara · HDR+ ZSL" }
         return rawEnabled ? "RAW + JPEG":"Cámara"
     }
-    private var movieBusy:Bool { [.recording,.finishing,.saving].contains(movie.phase) }
+    private var movieBusy:Bool { [.starting,.recording,.finishing,.saving].contains(movie.phase) }
     private var controlsEnabled: Bool { !camera.busy && !movieBusy && !guidedBusy && !guided.busy && !loadingPhoto && !openingVideo && countdown == 0 }
     private var intrinsicMetalFusion:Bool { (options.nightStatic && options.nightMetalRAW) || (options.hdrBracketing && options.hdrMetalRAW) }
     private var intrinsicAdaptiveFusion:Bool { intrinsicMetalFusion || (options.nightStatic && (options.nightWeightedFusion || options.nightSpectralFusion)) }
@@ -419,7 +420,7 @@ struct CameraView: View {
             }.accessibilityLabel("Restablecer exposición").accessibilityIdentifier("camera.resetExposureBias")
                 .accessibilityValue(String(format:"%.1f",bias))
         }.padding(.horizontal,12).background(.black.opacity(0.65),in:RoundedRectangle(cornerRadius:16))
-            .tint(CameraPalette.accent).disabled(videoMode ? (openingVideo || [.finishing,.saving].contains(movie.phase)):!controlsEnabled)
+            .tint(CameraPalette.accent).disabled(videoMode ? (openingVideo || [.starting,.finishing,.saving].contains(movie.phase)):!controlsEnabled)
     }
 
     private var shadowCompensation:some View {
@@ -618,7 +619,7 @@ struct CameraView: View {
                 guidedBusy=false;guidedUnsaved=false;allowPreviewAttachment=true
                 switch destination {
                 case .photo:resetUIControls();camera.resumeAfterAuxiliary()
-                case .video:var request=movie.configuration;request.exposureBias=bias;movie.start(request,lens:lens)
+                case .video:var request=movie.configuration;request.exposureBias=bias;request.mirrorSelfie=mirrorSelfies;movie.start(request,lens:lens)
                 case .panorama,.sphere:guided.resetSequence();guided.start()
                 }
                 action();finishModeTransition(token)
@@ -638,12 +639,12 @@ struct CameraView: View {
     }
     private func configureMovie(_ options:MovieConfiguration,lens:CameraLens) {
         guard videoMode else { movie.configure(options,lens:lens);return }
-        if options==movie.configuration,lens != .front,movie.inPlaceLenses.contains(lens) {
+        if movie.phase == .recording,options==movie.configuration,lens != .front,movie.inPlaceLenses.contains(lens) {
             movie.switchLensInPlace(lens);return
         }
         guard controlsEnabled else { return }
         beginModeTransition { token in
-            allowPreviewAttachment=true;var request=options;request.exposureBias=bias;movie.configure(request,lens:lens);finishModeTransition(token)
+            allowPreviewAttachment=true;var request=options;request.exposureBias=bias;request.mirrorSelfie=mirrorSelfies;movie.configure(request,lens:lens);finishModeTransition(token)
         }
     }
     private func beginModeTransition(_ operation:@escaping (UUID)->Void) {
@@ -673,9 +674,11 @@ struct CameraView: View {
         modeTransitionTask?.cancel();modeTransitionTask=nil;modeTransitionID=UUID();openingVideo=false
     }
     private func recordVideo() {
+        let now=ProcessInfo.processInfo.systemUptime
+        guard now-lastVideoAction>=0.35,movie.phase != .starting else { return };lastVideoAction=now
         if movie.phase == .recording { movie.stopRecording() }
         else if movie.phase == .review { showMovieReview=true }
-        else { movie.record(mirrorSelfie:mirrorSelfies) }
+        else { movie.record() }
     }
     private func updateMovie(_ change:(inout MovieConfiguration)->Void) {
         var request=movie.configuration;change(&request);configureMovie(request,lens:movie.lens)
@@ -713,7 +716,7 @@ struct CameraView: View {
                         .background(movie.lens==item ? CameraPalette.accent:Color(white:0.14),in:Capsule())
                         .foregroundStyle(movie.lens==item ? .black:.white)
                 }
-            }.disabled([.finishing,.saving].contains(movie.phase) || openingVideo)
+            }.disabled([.starting,.finishing,.saving].contains(movie.phase) || openingVideo)
             HStack {
                 Button { showMovieReview=true } label: { Image(systemName:"play.rectangle").font(.title2).frame(width:50,height:50) }
                     .accessibilityLabel("Revisar vídeo").accessibilityIdentifier("video.gallery").disabled(movie.previewURL==nil || movieBusy)
@@ -723,10 +726,10 @@ struct CameraView: View {
                         Circle().stroke(.white,lineWidth:3).frame(width:76,height:76)
                         RoundedRectangle(cornerRadius:movie.phase == .recording ? 6:32).fill(.red)
                             .frame(width:movie.phase == .recording ? 30:60,height:movie.phase == .recording ? 30:60)
-                        if movie.phase == .finishing || movie.phase == .saving { ProgressView().tint(.white) }
+                        if [.starting,.finishing,.saving].contains(movie.phase) { ProgressView().tint(.white) }
                     }
                 }.accessibilityIdentifier("video.record").accessibilityLabel(movie.phase == .recording ? "Detener vídeo":(movie.phase == .review ? "Revisar vídeo":"Grabar vídeo"))
-                    .disabled(openingVideo || [.finishing,.saving].contains(movie.phase) || (!movie.ready && movie.phase != .review))
+                    .disabled(openingVideo || [.starting,.finishing,.saving].contains(movie.phase) || (!movie.ready && movie.phase != .review))
                 Spacer()
                 Button { configureMovie(movie.configuration,lens:movie.lens == .front ? lastBackLens:.front) } label: {
                     Image(systemName:"arrow.triangle.2.circlepath.camera").font(.title2).frame(width:50,height:50)

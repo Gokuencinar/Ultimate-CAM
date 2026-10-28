@@ -27,6 +27,7 @@ struct MovieConfiguration:Codable,Equatable {
     var stabilization=MovieStabilizationMode.standard
     var hdrVideo=false
     var lockWhiteBalance=true
+    var mirrorSelfie=false
     var exposureBias:Double=0
     var stabilized:Bool {
         get { stabilization != .off }
@@ -40,7 +41,7 @@ struct MovieConfiguration:Codable,Equatable {
     func matches(width:Int,height:Int,ranges:[ClosedRange<Double>],hdr10Bit:Bool=false)->Bool {
         width==resolution.width && height==resolution.height && ranges.contains{$0.contains(Double(fps))} && (!hdrVideo || hdr10Bit)
     }
-    enum CodingKeys:String,CodingKey { case resolution,fps,codec,audio,stabilized,stabilization,hdrVideo,lockWhiteBalance,exposureBias }
+    enum CodingKeys:String,CodingKey { case resolution,fps,codec,audio,stabilized,stabilization,hdrVideo,lockWhiteBalance,mirrorSelfie,exposureBias }
     init() {}
     init(from decoder:Decoder) throws {
         self.init();let c=try decoder.container(keyedBy:CodingKeys.self)
@@ -52,6 +53,7 @@ struct MovieConfiguration:Codable,Equatable {
         stabilization=try c.decodeIfPresent(MovieStabilizationMode.self,forKey:.stabilization) ?? (legacy ? .standard:.off)
         hdrVideo=try c.decodeIfPresent(Bool.self,forKey:.hdrVideo) ?? hdrVideo
         lockWhiteBalance=try c.decodeIfPresent(Bool.self,forKey:.lockWhiteBalance) ?? lockWhiteBalance
+        mirrorSelfie=try c.decodeIfPresent(Bool.self,forKey:.mirrorSelfie) ?? mirrorSelfie
         exposureBias=try c.decodeIfPresent(Double.self,forKey:.exposureBias) ?? exposureBias
         _=try validated()
     }
@@ -59,24 +61,27 @@ struct MovieConfiguration:Codable,Equatable {
         var c=encoder.container(keyedBy:CodingKeys.self)
         try c.encode(resolution,forKey:.resolution);try c.encode(fps,forKey:.fps);try c.encode(codec,forKey:.codec);try c.encode(audio,forKey:.audio)
         try c.encode(stabilization,forKey:.stabilization);try c.encode(stabilized,forKey:.stabilized)
-        try c.encode(hdrVideo,forKey:.hdrVideo);try c.encode(lockWhiteBalance,forKey:.lockWhiteBalance);try c.encode(exposureBias,forKey:.exposureBias)
+        try c.encode(hdrVideo,forKey:.hdrVideo);try c.encode(lockWhiteBalance,forKey:.lockWhiteBalance);try c.encode(mirrorSelfie,forKey:.mirrorSelfie);try c.encode(exposureBias,forKey:.exposureBias)
     }
 }
 
 /// Queue-owned lifecycle. A late delegate/PhotoKit completion cannot change a
 /// newer recording, and no second recording/save starts while one is pending.
 struct MovieRecordingState {
-    enum Phase: String { case idle, recording, finishing, review, saving }
+    enum Phase: String { case idle, starting, recording, finishing, review, saving }
     private(set) var phase = Phase.idle
     private(set) var token: UUID?
-    var busy: Bool { [.recording,.finishing,.saving].contains(phase) }
+    var busy: Bool { [.starting,.recording,.finishing,.saving].contains(phase) }
     mutating func begin() -> UUID? {
         guard phase == .idle else { return nil }
-        token=UUID();phase = .recording;return token
+        token=UUID();phase = .starting;return token
     }
-    mutating func stop() -> Bool { guard phase == .recording else { return false };phase = .finishing;return true }
+    mutating func started(_ id:UUID)->Bool {
+        guard token==id,phase == .starting else { return false };phase = .recording;return true
+    }
+    mutating func stop() -> Bool { guard phase == .starting || phase == .recording else { return false };phase = .finishing;return true }
     mutating func finished(_ id: UUID, valid: Bool) -> Bool {
-        guard token==id, phase == .recording || phase == .finishing else { return false }
+        guard token==id, phase == .starting || phase == .recording || phase == .finishing else { return false }
         phase = valid ? .review : .idle
         if !valid { token=nil }
         return true
