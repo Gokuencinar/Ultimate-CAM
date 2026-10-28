@@ -43,10 +43,9 @@ final class MetalBurstProcessor {
     private let device:MTLDevice,queue:MTLCommandQueue
     private let context:CIContext
     private let kernels:[String:MTLComputePipelineState]
-    private let toneProbe:((String,MetalFusionParameters,[Float])->Void)?
     private let directionalSuperResolution:Bool
     private let space=CGColorSpace(name:CGColorSpace.extendedLinearSRGB)!
-    init(device suppliedDevice:MTLDevice?=nil,library suppliedLibrary:MTLLibrary?=nil,directionalSuperResolution:Bool=true,toneProbe:((String,MetalFusionParameters,[Float])->Void)?=nil) throws {
+    init(device suppliedDevice:MTLDevice?=nil,library suppliedLibrary:MTLLibrary?=nil,directionalSuperResolution:Bool=true) throws {
         guard let device=suppliedDevice ?? MTLCreateSystemDefaultDevice(),let queue=device.makeCommandQueue() else { throw CameraFailure.message("Metal no está disponible.") }
         let library=try suppliedLibrary ?? device.makeDefaultLibrary(bundle:Bundle.main)
         guard library.device.registryID==device.registryID else { throw CameraFailure.message("La biblioteca Metal pertenece a otra GPU.") }
@@ -55,7 +54,7 @@ final class MetalBurstProcessor {
             guard let function=library.makeFunction(name:name) else { throw CameraFailure.message("Falta un shader del procesador Metal.") }
             kernels[name]=try device.makeComputePipelineState(function:function)
         }
-        self.device=device;self.queue=queue;self.kernels=kernels;self.directionalSuperResolution=directionalSuperResolution;self.toneProbe=toneProbe
+        self.device=device;self.queue=queue;self.kernels=kernels;self.directionalSuperResolution=directionalSuperResolution
         context=CIContext(mtlDevice:device,options:[.workingColorSpace:CGColorSpace(name:CGColorSpace.extendedLinearSRGB)!, .cacheIntermediates:false])
     }
     private func texture(_ width:Int,_ height:Int,format:MTLPixelFormat = .rgba16Float,storage:MTLStorageMode = .private) throws -> MTLTexture {
@@ -234,13 +233,6 @@ final class MetalBurstProcessor {
             try encode("uc_night_tone",command,textures:[input,base,wideBase,hdrOutput],parameters:params)
         }
         try finish(command,cancellation:cancellation)
-        if let toneProbe {
-            for (name,t) in [("linear",input),("mapped",output)] {
-                let data=try readback(t,region:MTLRegionMake2D(t.width/2,t.height/2,1,1),cancellation:cancellation)
-                let values=data.withUnsafeBytes{$0.bindMemory(to:UInt16.self).map{Float(Float16(bitPattern:UInt16(littleEndian:$0)))}}
-                toneProbe(name,params,values)
-            }
-        }
         guard let result=CIImage(mtlTexture:output,options:[.colorSpace:space]) else { throw CameraFailure.message("La GPU no devolvió la imagen tonal.") }
         guard let expanded=CIImage(mtlTexture:hdrOutput,options:[.colorSpace:space]) else { throw CameraFailure.message("No se pudo conservar el rango HDR.") }
         return (result,expanded)

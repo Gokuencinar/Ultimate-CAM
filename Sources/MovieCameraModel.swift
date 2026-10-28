@@ -223,7 +223,7 @@ final class MovieCameraModel: NSObject, ObservableObject, AVCaptureFileOutputRec
     }
     private func lockRecordingWhiteBalance() throws {
         guard current.lockWhiteBalance else { return }
-        guard let d=device,d.isWhiteBalanceModeSupported(.locked),!d.isAdjustingWhiteBalance else { throw CameraFailure.message("Espera a que se estabilice el balance de blancos o desactiva su bloqueo.") }
+        guard let d=device,d.isWhiteBalanceModeSupported(.locked),d.isLockingWhiteBalanceWithCustomDeviceGainsSupported,!d.isAdjustingWhiteBalance else { throw CameraFailure.message("Espera a que se estabilice el balance de blancos o desactiva su bloqueo.") }
         try d.lockForConfiguration();defer { d.unlockForConfiguration() }
         recordingWhiteBalance=d.whiteBalanceMode
         var gains=d.deviceWhiteBalanceGains

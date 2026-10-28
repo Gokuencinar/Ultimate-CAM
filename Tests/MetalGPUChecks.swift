@@ -135,14 +135,11 @@ import Darwin
         let motionDifference=(highMean-lowMean)/Double(16*14)
         try require(motionDifference>0.0015,"motionSigma did not control real temporal Bayer rejection")
         let toneBurst=makeFrames(count:4,noise:[1e-7,1e-8],scene:{ x,y in 0.025+0.008*sin(x*0.8)*cos(y*0.3) })
-        let toneEngine=try MetalBurstProcessor(device:device,library:library,toneProbe:{ stage,params,values in
-            print("Tone GPU probe",stage,"gain",params.control.y,"patch",params.patch,"pixel",values)
-        })
-        let neutral=try result(toneBurst,options,engine:toneEngine)
+        let neutral=try result(toneBurst,options)
         var shadows=options;shadows.liftShadows=0.8
-        let lifted=try result(toneBurst,shadows,engine:toneEngine)
+        let lifted=try result(toneBurst,shadows)
         var detail=options;detail.fineDetail=1
-        let detailed=try result(toneBurst,detail,engine:toneEngine)
+        let detailed=try result(toneBurst,detail)
         let a=try jpegPixels(neutral.jpeg,context),b=try jpegPixels(lifted.jpeg,context),c=try jpegPixels(detailed.jpeg,context)
         var shadowDelta=0.0,detailDelta=0.0
         for j in stride(from:0,to:a.count,by:4) {
@@ -150,20 +147,6 @@ import Darwin
         }
         shadowDelta/=Double(a.count/4);detailDelta/=Double(a.count/4)
         print("GPU patcher motion / shadows / detail deltas",motionDifference,shadowDelta,detailDelta)
-        let greenValues=stride(from:1,to:a.count,by:4).map{a[$0]}
-        print("Tone exported G minimum / maximum / mean",greenValues.min()!,greenValues.max()!,greenValues.reduce(0,+)/Float(greenValues.count))
-        if let raw=neutral.raw,let decoder=CIRAWFilter(imageData:raw,identifierHint:"com.adobe.raw-image") {
-            decoder.isGamutMappingEnabled=false;decoder.boostAmount=0;decoder.boostShadowAmount=0;decoder.exposure=0;decoder.shadowBias=0
-            if decoder.isLocalToneMapSupported { decoder.localToneMapAmount=0 }
-            if decoder.isLuminanceNoiseReductionSupported { decoder.luminanceNoiseReductionAmount=0 }
-            if decoder.isColorNoiseReductionSupported { decoder.colorNoiseReductionAmount=0.5 }
-            if let image=decoder.outputImage {
-                let scaled=image.transformed(by:CGAffineTransform(scaleX:0.1,y:0.1));let bounds=scaled.extent.integral
-                let rw=Int(bounds.width),rh=Int(bounds.height);var probe=[Float](repeating:0,count:rw*rh*4)
-                probe.withUnsafeMutableBytes { context.render(scaled,toBitmap:$0.baseAddress!,rowBytes:rw*16,bounds:bounds,format:.RGBAf,colorSpace:CGColorSpace(name:CGColorSpace.extendedLinearSRGB)!) }
-                print("Tone decoded probe RGBA",Array(probe.prefix(12)))
-            }
-        }
         try require(shadowDelta>0.015 && detailDelta>0.0005,"RAW GPU shadow/detail controls were not reflected in the developed export")
         print("FULL RAW GPU QUANTITATIVE CHECKS PASSED (synthetic sensor; no physical camera opened)")
     }
