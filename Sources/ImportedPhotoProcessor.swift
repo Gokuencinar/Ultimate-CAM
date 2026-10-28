@@ -95,7 +95,12 @@ enum ImportedPhotoProcessor {
         let w=max(1,Int(small.extent.width)),h=max(1,Int(small.extent.height))
         var pixels=[Float](repeating:0,count:w*h*4)
         pixels.withUnsafeMutableBytes { context.render(small,toBitmap:$0.baseAddress!,rowBytes:w*16,bounds:CGRect(x:0,y:0,width:w,height:h),format:.RGBAf,colorSpace:CGColorSpace(name:CGColorSpace.extendedLinearSRGB)!) }
-        let luma=(0..<w*h).map { i in max(0,Double(pixels[i*4])*0.2126+Double(pixels[i*4+1])*0.7152+Double(pixels[i*4+2])*0.0722) }
+        var luma=[Double]();luma.reserveCapacity(w*h)
+        for i in 0..<w*h {
+            let r=Double(pixels[i*4]),g=Double(pixels[i*4+1]),b=Double(pixels[i*4+2])
+            let weighted:Double=r*0.2126+g*0.7152+b*0.0722
+            luma.append(max(0,weighted))
+        }
         let plan=try NightTonePlan.make(luminances:luma,maximumGain:32)
         guard let kernel=nightKernel,let sdr=kernel.apply(extent:extent,arguments:[image,plan.gain,plan.whitePoint]) else { throw CameraFailure.message("No se pudo preparar el tono nocturno del RAW.") }
         return (sdr,try AdaptiveHDR.rollOff(image,gain:plan.gain,headroom:4))
