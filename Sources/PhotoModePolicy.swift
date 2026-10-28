@@ -6,7 +6,7 @@ enum PhotoProcessingPreset:Equatable { case natural,detail,night }
 /// preferences. A non-RAW lens uses JPEG without requesting an invalid format.
 enum PhotoModePolicy {
     static func formatLabel(_ options:ProcessingOptions,photoRAW:Bool)->String {
-        if options.nativeNight { return "JPEG · iOS" }
+        if options.nativeNight { return "JPEG" }
         if options.nightStatic { return options.nightMetalRAW ? "RAW*":"JPEG" }
         if options.hdrBracketing { return options.hdrMetalRAW ? "RAW*":"JPEG" }
         return photoRAW ? "RAW+":"JPEG"
@@ -39,6 +39,16 @@ enum PhotoModePolicy {
         next.nativeNight=false
         next.nightStatic=false;next.hdrBracketing=true;next.portraitAmount=0
         return rawCompatible(next,supportsRAW:supportsRAW)
+    }
+    static func unifiedNight(from current:ProcessingOptions,supportsRAW:Bool,nativeAvailable:Bool)->ProcessingOptions {
+        if nativeAvailable && (current.nightSystemPreferred || !supportsRAW) {
+            var next=nativeNight(from:current);next.nightMetalRAW=false;next.nightRAW=false;return next
+        }
+        var next=preset(.night,from:current,supportsRAW:supportsRAW)
+        next.zeroShutterLagFusion=false;next.nightMetalRAW=supportsRAW && !current.nightSystemPreferred
+        next.nightRAW=next.nightMetalRAW
+        if next.nightMetalRAW { next.nightSpectralFusion=false }
+        return next
     }
     static func nativeNight(from current:ProcessingOptions)->ProcessingOptions {
         var next=current

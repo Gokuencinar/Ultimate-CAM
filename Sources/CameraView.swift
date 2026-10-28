@@ -95,7 +95,6 @@ struct CameraView: View {
     @State private var showResult = false
     @State private var showPhotoPicker = false
     @State private var pendingPhotoImport = false
-    @State private var pendingNativeNight = false
     @State private var auxiliaryMode:AuxiliaryCameraMode?
     @State private var openingVideo = false
     @State private var modeTransitionID=UUID()
@@ -132,7 +131,7 @@ struct CameraView: View {
         return camera.supportsRAW
     }
     private var captureTitle:String {
-        if options.nativeNight { return "Noche · iOS" }
+        if options.nativeNight { return "Noche" }
         if options.hdrBracketing { return options.hdrMetalRAW ? "HDR · RAW Metal":"HDR · 3 exposiciones" }
         if options.nightStatic && camera.astroActive && camera.busy { return "Astro · Trípode" }
         if options.nightStatic { return options.nightMetalRAW ? "Noche · RAW Metal":(options.nightRAW ? "Noche · RAW":"Noche · JPEG") }
@@ -257,7 +256,6 @@ struct CameraView: View {
         .sheet(isPresented: $showControls, onDismiss: {
             settingsPath=[]
             if pendingPhotoImport { pendingPhotoImport = false; showPhotoPicker = true }
-            else if pendingNativeNight { pendingNativeNight = false; activateNativeNight() }
         }) { settings }
         .sheet(isPresented: $showResult) { review }
         .sheet(isPresented: $showMovieReview) { MovieReview(camera:movie) }
@@ -377,9 +375,14 @@ struct CameraView: View {
         HStack(spacing: 8) {
             quickButton(PhotoModePolicy.formatLabel(options,photoRAW:rawEnabled),symbol:"square.stack.3d.up",
                         selected:options.nightStatic ? options.nightMetalRAW:(options.hdrBracketing ? options.hdrMetalRAW:rawEnabled)) {
-                let next=PhotoModePolicy.toggledRAW(options,photoRAW:rawEnabled,supportsRAW:rawAvailable)
-                options=next.options;rawEnabled=next.photoRAW
-            }.disabled(options.nativeNight || !rawAvailable || (stack && !options.nightStatic && !options.hdrBracketing))
+                if options.isNightMode {
+                    options.nightSystemPreferred=options.nightMetalRAW
+                    activateUnifiedNight()
+                } else {
+                    let next=PhotoModePolicy.toggledRAW(options,photoRAW:rawEnabled,supportsRAW:rawAvailable)
+                    options=next.options;rawEnabled=next.photoRAW
+                }
+            }.disabled(!rawAvailable || (stack && !options.nightStatic && !options.hdrBracketing))
                 .accessibilityIdentifier("camera.quickFormat").accessibilityValue(PhotoModePolicy.formatLabel(options,photoRAW:rawEnabled))
             Spacer()
             Menu {
@@ -549,7 +552,7 @@ struct CameraView: View {
             HStack(spacing:4) {
                 ScrollViewReader { proxy in ScrollView(.horizontal,showsIndicators:false) {
                     HStack(spacing:4) {
-                        modeButton("Noche",selected:options.nightStatic) { applyPreset("Noche estática") }.accessibilityIdentifier("camera.mode.night").id("night")
+                        modeButton("Noche",selected:options.isNightMode) { activateUnifiedNight() }.accessibilityIdentifier("camera.mode.night").id("night")
                         modeButton("Cámara",selected:!options.nativeNight && !stack && !options.nightStatic && !options.hdrBracketing && options.portraitAmount==0) { options.nativeNight=false;options.nightStatic=false;options.hdrBracketing=false;options.portraitAmount=0;stack=false }.accessibilityIdentifier("camera.mode.photo").id("photo")
                         modeButton("Retrato",selected:!stack && !options.hdrBracketing && options.portraitAmount>0) {
                             options.nativeNight=false;options.nightStatic=false;options.hdrBracketing=false;options.portraitAmount=0.5;stack=false
@@ -559,7 +562,6 @@ struct CameraView: View {
                         modeButton("Vídeo",selected:videoMode,destination:.video) { }.accessibilityIdentifier("camera.mode.video").id("video")
                         modeButton("Panorama",selected:auxiliaryMode == .panorama,destination:.panorama) { }.accessibilityIdentifier("camera.mode.panorama").id("panorama")
                         modeButton("Esfera",selected:auxiliaryMode == .sphere,destination:.sphere) { }.accessibilityIdentifier("camera.mode.sphere").id("sphere")
-                        modeButton("iOS",selected:options.nativeNight) { activateNativeNight() }.accessibilityIdentifier("camera.mode.nativeNight").id("native")
                     }
                 }.accessibilityIdentifier("camera.modes")
                     .onAppear { proxy.scrollTo(selectedPhotoMode,anchor:.center) }
@@ -573,7 +575,7 @@ struct CameraView: View {
 
     private var selectedPhotoMode:String {
         if let auxiliaryMode { return auxiliaryMode.id };if videoMode { return "video" }
-        if options.nativeNight { return "native" };if options.nightStatic { return "night" };if options.hdrBracketing { return "hdr" }
+        if options.isNightMode { return "night" };if options.hdrBracketing { return "hdr" }
         if stack { return "stack" };return options.portraitAmount>0 ? "portrait":"photo"
     }
 
@@ -794,15 +796,16 @@ struct CameraView: View {
                 .pickerStyle(.segmented)
             Toggle("Adaptar al movimiento",isOn:$options.nightMotionMetering)
             Toggle("Astro automático en trípode",isOn:$options.astroEnabled).accessibilityIdentifier("night.astro")
-            Toggle("RAW de alta calidad · beta",isOn:Binding(get:{options.nightMetalRAW},set:{ value in
-                options.nightMetalRAW=value;options.nightRAW=value;if value { options.nightSpectralFusion=false }
-            })).disabled(!rawAvailable && !options.nightMetalRAW)
-            Toggle("Guardar DNG fusionado",isOn:$options.saveFusedDNG).disabled(!options.nightMetalRAW)
+            Toggle("RAW computacional",isOn:Binding(get:{!options.nightSystemPreferred},set:{ value in
+                options.nightSystemPreferred = !value
+                if options.isNightMode { activateUnifiedNight() }
+            })).disabled(!rawAvailable).accessibilityIdentifier("night.computationalRAW")
+            Toggle("Guardar DNG fusionado",isOn:$options.saveFusedDNG).disabled(options.nightSystemPreferred || !rawAvailable)
                 .accessibilityIdentifier("night.saveFusedDNG")
-            Picker("Noche de iOS",selection:$options.nativeNightMaximum) { Text("Auto").tag(false);Text("Máximo").tag(true) }
-            Text(camera.nativeNightIssue == nil ? "Noche de iOS disponible en esta cámara.":"Noche de iOS: " + (camera.nativeNightIssue ?? "No compatible")).font(.caption).foregroundStyle(.secondary)
-            Button("Usar Noche de iOS aquí") { pendingNativeNight=true;showControls=false }
-                .accessibilityIdentifier("processing.nativeNight")
+            Picker("Exposición del sistema",selection:$options.nativeNightMaximum) { Text("Auto").tag(false);Text("Máxima").tag(true) }
+                .disabled(!options.nightSystemPreferred && rawAvailable)
+            Text(options.nightSystemPreferred && camera.nativeNightIssue==nil ? "Procesado del sistema listo":"Captura múltiple con medición y calibración de iOS")
+                .font(.caption).foregroundStyle(.secondary)
         } footer: { Text("Apoya el iPhone. Astro prioriza exposiciones largas, hasta 16 tomas.") }
     }
     private var advancedSettings:some View {
@@ -936,7 +939,7 @@ struct CameraView: View {
                     iso = min(camera.isoRange.upperBound, max(camera.isoRange.lowerBound, iso))
                     shutterStops = min(log2(camera.shutterRange.upperBound), max(log2(camera.shutterRange.lowerBound), shutterStops))
                     applyExposure()
-                })).disabled(!camera.supportsManualExposure || options.nightStatic || options.hdrBracketing)
+                })).disabled(!camera.supportsManualExposure || options.isNightMode || options.hdrBracketing)
                 if manualExposure {
                     valueLabel("ISO", "\(Int(iso))")
                     Slider(value: $iso, in: camera.isoRange, step: 1).onChange(of: iso) { _, _ in applyExposure() }
@@ -1100,9 +1103,9 @@ struct CameraView: View {
         bias = 0; manualWB = false; manualExposure = false; manualFocus = false
         rawEnabled = false; tint = 0; flash = .off
     }
-    private func activateNativeNight() {
-        options=PhotoModePolicy.nativeNight(from:options)
-        stack=false;rawEnabled=false;flash = .off;manualExposure=false
+    private func activateUnifiedNight() {
+        options=PhotoModePolicy.unifiedNight(from:options,supportsRAW:rawAvailable,nativeAvailable:camera.nativeNightIssue==nil)
+        stack=options.nightStatic;stackCount=9;rawEnabled=false;flash = .off;manualExposure=false
         camera.setManualExposure(iso:nil)
     }
     private func activateHDR() {
@@ -1112,6 +1115,7 @@ struct CameraView: View {
     }
     private func applyPreset(_ name: String) {
         let selected:PhotoProcessingPreset=name == "Noche estática" ? .night:(name == "Detalle" ? .detail:.natural)
+        if selected == .night { activateUnifiedNight();return }
         options=PhotoModePolicy.preset(selected,from:options,supportsRAW:rawAvailable)
         if options.nightStatic {
             stack = true; rawEnabled = false; flash = .off; stackCount = 9

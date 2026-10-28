@@ -15,6 +15,7 @@ struct ProcessingOptions: Codable, Equatable {
     var lens:LensIdentity = .wide
     var lensCorrections:Bool = true
     var nativeNight:Bool = false
+    var nightSystemPreferred:Bool = false
     var nativeNightMaximum:Bool = true
     var zeroShutterLagFusion:Bool = false
     var nightMetalRAW:Bool = false
@@ -61,6 +62,7 @@ struct ProcessingOptions: Codable, Equatable {
     var aspect: PhotoAspect = PhotoAspect.original
     var lutID: String? = nil
     var lutIntensity: Double = 1
+    var isNightMode:Bool { nightStatic || nativeNight }
     var usesPreviewZSL:Bool { !nativeNight && !nightStatic && !hdrBracketing && portraitAmount==0 && zeroShutterLagFusion }
     func selectedRAW(original:Data,fused:Data)->Data { saveFusedDNG ? fused:original }
 
@@ -109,7 +111,7 @@ struct ProcessingOptions: Codable, Equatable {
 // not silently clamped into a different recipe.
 extension ProcessingOptions {
     enum CodingKeys: String, CodingKey {
-        case lens,lensCorrections,nativeNight, nativeNightMaximum, zeroShutterLagFusion, nightMetalRAW, hdrMetalRAW, saveFusedDNG, astroEnabled, nightMotionMetering, singlePhotoQuality, nightBudget, nightShutterLimit, nightWeightedFusion, nightSpectralFusion, nightSpectralStrength, hdrBracketing, hdrSpan, color, nightStatic, nightRAW, chooseSharpestReference, rejectMotion, maximumDimension, noiseReduction, sharpening, liftShadows, localAlignment, adaptiveMotionRejection, motionSigma, chromaDenoise, localContrast, fineDetail, contrast, saturation, vibrance, gamma, postExposure, highlightCompression, sharpenRadius, vignette, jpegQuality, outputColor, preserveHDR, portraitAmount, aspect, lutID, lutIntensity
+        case lens,lensCorrections,nativeNight,nightSystemPreferred, nativeNightMaximum, zeroShutterLagFusion, nightMetalRAW, hdrMetalRAW, saveFusedDNG, astroEnabled, nightMotionMetering, singlePhotoQuality, nightBudget, nightShutterLimit, nightWeightedFusion, nightSpectralFusion, nightSpectralStrength, hdrBracketing, hdrSpan, color, nightStatic, nightRAW, chooseSharpestReference, rejectMotion, maximumDimension, noiseReduction, sharpening, liftShadows, localAlignment, adaptiveMotionRejection, motionSigma, chromaDenoise, localContrast, fineDetail, contrast, saturation, vibrance, gamma, postExposure, highlightCompression, sharpenRadius, vignette, jpegQuality, outputColor, preserveHDR, portraitAmount, aspect, lutID, lutIntensity
     }
     init(from decoder: Decoder) throws {
         self.init()
@@ -117,6 +119,7 @@ extension ProcessingOptions {
         lens = try c.decodeIfPresent(LensIdentity.self,forKey:.lens) ?? lens
         lensCorrections = try c.decodeIfPresent(Bool.self,forKey:.lensCorrections) ?? lensCorrections
         nativeNight = try c.decodeIfPresent(Bool.self,forKey:.nativeNight) ?? nativeNight
+        nightSystemPreferred = try c.decodeIfPresent(Bool.self,forKey:.nightSystemPreferred) ?? nightSystemPreferred
         nativeNightMaximum = try c.decodeIfPresent(Bool.self,forKey:.nativeNightMaximum) ?? nativeNightMaximum
         zeroShutterLagFusion = try c.decodeIfPresent(Bool.self,forKey:.zeroShutterLagFusion) ?? zeroShutterLagFusion
         hdrMetalRAW = try c.decodeIfPresent(Bool.self,forKey:.hdrMetalRAW) ?? hdrMetalRAW
