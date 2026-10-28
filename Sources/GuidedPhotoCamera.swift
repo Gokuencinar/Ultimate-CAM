@@ -8,6 +8,7 @@ struct GuidedPhotoFrame:Identifiable {
     let data:Data
     var motion:SphereMotionSnapshot?=nil
     var fieldOfView:Double=70
+    var exposureSeconds:Double=1.0/60
 }
 
 /// One explicitly requested JPEG at a time for guided captures. No automatic
@@ -154,6 +155,7 @@ final class GuidedPhotoCamera:NSObject,ObservableObject,AVCapturePhotoCaptureDel
             guard self.expected==resolvedSettings.uniqueID else { return }
             let data=self.received,failure=error ?? self.captureError
             let motion=self.capturedMotion,fieldOfView=Double(self.device?.activeFormat.videoFieldOfView ?? 70)
+            let exposureSeconds=self.device?.exposureDuration.seconds ?? 1.0/60
             self.received=nil
             guard failure==nil,let data else {
                 self.expected=nil;if !self.hasFrame { self.unlockControls() }
@@ -169,7 +171,7 @@ final class GuidedPhotoCamera:NSObject,ObservableObject,AVCapturePhotoCaptureDel
                 self.queue.async {
                     guard self.active,self.expected==resolvedSettings.uniqueID else { return };self.expected=nil
                     switch result {
-                    case .success(let jpeg):self.hasFrame=true;self.ui { self.frame=GuidedPhotoFrame(data:jpeg,motion:motion,fieldOfView:fieldOfView);self.busy=false;self.status="Fotograma listo. Desplaza la cámara dejando la mitad de la escena en común." }
+                    case .success(let jpeg):self.hasFrame=true;self.ui { self.frame=GuidedPhotoFrame(data:jpeg,motion:motion,fieldOfView:fieldOfView,exposureSeconds:exposureSeconds);self.busy=false;self.status="Fotograma listo. Desplaza la cámara dejando la mitad de la escena en común." }
                     case .failure(let error):if !self.hasFrame { self.unlockControls() };self.ui { self.busy=false;self.status=error.localizedDescription }
                     }
                 }
