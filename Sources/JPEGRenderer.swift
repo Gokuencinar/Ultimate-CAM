@@ -23,8 +23,9 @@ enum JPEGRenderer {
     /// Exactly one shared portrait/detail/color preparation before encoding.
     /// Metal RAW and ZSL call this explicitly; the other processors use render.
     static func prepare(_ input:CIImage,extent inputExtent:CGRect,options supplied:ProcessingOptions,context:CIContext,
-                        hdrSource:CIImage?=nil,hdrHeadroom:Double=8,depth:PortraitDepth?=nil,opticsApplied:Bool=false) throws -> PreparedJPEG {
-        let options=LensCalibration.profile(supplied.lens).recipe(supplied)
+                        hdrSource:CIImage?=nil,hdrHeadroom:Double=8,depth:PortraitDepth?=nil,opticsApplied:Bool=false,metalToneApplied:Bool=false) throws -> PreparedJPEG {
+        var options=LensCalibration.profile(supplied.lens).recipe(supplied)
+        if metalToneApplied { options=options.afterMetalTone }
         var baseInput=input.cropped(to:inputExtent),hdrInput=hdrSource
         if options.lensCorrections && !opticsApplied {
             let plan=LensChromaticPlan.estimate(baseInput,lens:options.lens,context:context)

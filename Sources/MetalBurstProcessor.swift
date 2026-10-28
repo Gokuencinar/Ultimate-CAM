@@ -12,6 +12,12 @@ struct MetalFusionParameters {
     var flags=SIMD4<UInt32>(repeating:0)
     var sr=SIMD4<Float>(0,0,1,1)
     var roi=SIMD4<UInt32>(0,0,0,0)
+    var patch=SIMD4<Float>(3,0,0,0)
+    var finishing=SIMD4<Float>(0,0,0,1)
+    mutating func configure(_ o:ProcessingOptions) {
+        patch=SIMD4(Float(o.motionSigma),Float(o.fineDetail),Float(o.localContrast),Float(o.liftShadows))
+        finishing=SIMD4(Float(o.highlightCompression),Float(o.chromaDenoise),0,o.rejectMotion ? 1:0)
+    }
 }
 
 /// Own compute kernels, not the private Apple ISP or Google's proprietary HDR+.
@@ -186,7 +192,7 @@ final class MetalBurstProcessor {
         guard let result=CIImage(mtlTexture:output,options:[.colorSpace:space]) else { throw CameraFailure.message("No se pudo corregir la óptica.") }
         return result.transformed(by:CGAffineTransform(translationX:e.minX,y:e.minY))
     }
-    private func tone(_ image:CIImage,maximumGain:Double,night:Bool,lens:LensIdentity = .wide,cancellation:ProcessingCancellation?) throws -> (sdr:CIImage,hdr:CIImage) {
+    private func tone(_ image:CIImage,maximumGain:Double,night:Bool,options:ProcessingOptions,cancellation:ProcessingCancellation?) throws -> (sdr:CIImage,hdr:CIImage) {
         let extent=image.extent.integral,w=Int(extent.width),h=Int(extent.height)
         let normalized=image.transformed(by:CGAffineTransform(translationX:-extent.minX,y:-extent.minY))
         let input=try load(normalized,width:w,height:h,cancellation:cancellation),output=try texture(w,h)
@@ -205,24 +211,35 @@ final class MetalBurstProcessor {
             guard value.isFinite else { throw CameraFailure.message("Medición tonal no válida.") }
             values.append(value)
         }
-        let plan=try NightTonePlan.make(luminances:values,maximumGain:maximumGain)
-        var params=MetalFusionParameters();params.control.y=Float(plan.gain);params.control.z=Float(plan.whitePoint)
-        params.tone=night ? SIMD4<Float>(0.003,LensCalibration.profile(lens).shadowChroma,0.02,NightChromaticityPlan.strength(pixels)):SIMD4<Float>(repeating:0)
+        let plan=try NightTonePlan.make(luminances:values,maximumGain:maximumGain,highlightCompression:options.highlightCompression)
+        var params=MetalFusionParameters();params.configure(options);params.control.y=Float(plan.gain);params.control.z=Float(plan.whitePoint)
+        let shadowChroma=LensCalibration.profile(options.lens).shadowChroma
+        let chroma=Float(options.chromaDenoise)
+        params.tone=SIMD4<Float>(night ? 0.003*(1-Float(options.liftShadows)*0.75):0,
+            night ? shadowChroma*(1+chroma*0.75):chroma*0.004,
+            night ? 0.02+chroma*0.06:chroma*0.06,
+            night ? NightChromaticityPlan.strength(pixels):0)
         let command=try command()
         try encode("uc_reconstruct_highlights",command,textures:[output,input])
         try encode("uc_tone_luma",command,textures:[input,base])
         try encode("uc_pyramid",command,textures:[base,middleBase])
         try encode("uc_pyramid",command,textures:[middleBase,wideBase])
         try encode("uc_night_tone",command,textures:[input,base,wideBase,output],parameters:params)
+        let hdrOutput=try options.preserveHDR ? texture(w,h):output
+        if options.preserveHDR {
+            params.finishing.z=1
+            try encode("uc_night_tone",command,textures:[input,base,wideBase,hdrOutput],parameters:params)
+        }
         try finish(command,cancellation:cancellation)
         guard let result=CIImage(mtlTexture:output,options:[.colorSpace:space]) else { throw CameraFailure.message("La GPU no devolvió la imagen tonal.") }
-        guard let reconstructed=CIImage(mtlTexture:input,options:[.colorSpace:space]) else { throw CameraFailure.message("No se pudo conservar el rango de luces.") }
-        let expanded=try AdaptiveHDR.rollOff(reconstructed,gain:Double(params.control.y),headroom:4)
+        guard let expanded=CIImage(mtlTexture:hdrOutput,options:[.colorSpace:space]) else { throw CameraFailure.message("No se pudo conservar el rango HDR.") }
         return (result,expanded)
     }
 
     func processRAW(_ frames:[SensorBayerFrame],referenceJPEG:Data,originalDNG:Data,options:ProcessingOptions,
                     cancellation:ProcessingCancellation?,progress:((String)->Void)?) throws -> CaptureResult {
+        _=try options.validated()
+        let effective=LensCalibration.profile(options.lens).recipe(options)
         guard !frames.isEmpty,(2...16).contains(frames.count) else { throw CameraFailure.message("Metal RAW necesita entre 2 y 16 fotogramas.") }
         guard frames.allSatisfy({$0.exposure.isValid}),zip(frames,frames.dropFirst()).allSatisfy({$0.timestamp<$1.timestamp}) else { throw CameraFailure.message("La pila RAW no está ordenada temporalmente.") }
         guard let anchorIndex=SensorBayerFrame.referenceIndex(in:frames,hdr:options.hdrBracketing) else { throw CameraFailure.message("No hay una serie RAW con exposición coherente.") }
@@ -232,7 +249,7 @@ final class MetalBurstProcessor {
         let reconstruction=try? SuperResolutionPlan.make(first,count:usable)
         defer { frames.forEach { $0.discardResidentPages() } }
         let fused:(dng:Data,count:Int,center:SIMD2<Double>?)=try autoreleasepool {
-        var params=MetalFusionParameters();params.size.w=1;params.flags.w=1;params.flags.x=options.astroCapture ? 1:0
+        var params=MetalFusionParameters();params.configure(effective);params.size.w=1;params.flags.w=1;params.flags.x=options.astroCapture ? 1:0
         params.roi=try BayerFusionRegion.make(width:first.width,height:first.height,geometry:first.calibration.geometry,zoom:first.zoom).vector
         params.tone.w=LensCalibration.profile(first.lens).motionTolerance
         params.luma=SIMD4<Float>(first.calibration.pattern[0]==1 ? 0.5:0,first.calibration.pattern[1]==1 ? 0.5:0,
@@ -296,9 +313,9 @@ final class MetalBurstProcessor {
         guard let developed=decoder.outputImage else { throw CameraFailure.message("El DNG de trabajo no se pudo revelar.") }
         progress?("Metal RAW · tono y color…")
         let optical=options.lensCorrections ? try correctOptics(developed,lens:first.lens,center:fused.center,cancellation:cancellation):developed
-        let mapped=try tone(optical,maximumGain:options.hdrBracketing ? 64:32,night:!options.hdrBracketing,lens:first.lens,cancellation:cancellation)
+        let mapped=try tone(optical,maximumGain:options.hdrBracketing ? 64:32,night:!options.hdrBracketing,options:effective,cancellation:cancellation)
         let prepared=try JPEGRenderer.prepare(mapped.sdr,extent:mapped.sdr.extent,options:options,context:context,
-            hdrSource:options.preserveHDR ? mapped.hdr:nil,hdrHeadroom:4,opticsApplied:options.lensCorrections)
+            hdrSource:options.preserveHDR ? mapped.hdr:nil,hdrHeadroom:4,opticsApplied:options.lensCorrections,metalToneApplied:true)
         let jpeg=try JPEGRenderer.encode(prepared,options:options,context:context,metadataReference:referenceJPEG,frames:fused.count)
         let companion:Data?
         if options.saveFusedDNG {
@@ -325,7 +342,7 @@ final class MetalBurstProcessor {
                 let aligned=normalized.transformed(by:CGAffineTransform(scaleX:CGFloat(w)/oriented.extent.width,y:CGFloat(h)/oriented.extent.height))
                 let command=try command();context.render(aligned,to:work.sample,commandBuffer:command,bounds:CGRect(x:0,y:0,width:w,height:h),colorSpace:space)
                 try finish(command,cancellation:cancellation)
-                var params=MetalFusionParameters();params.control.x=Self.noise(reference:patch,sample:try noisePatch(work.sample),channels:3)
+                var params=MetalFusionParameters();params.configure(options);params.control.x=Self.noise(reference:patch,sample:try noisePatch(work.sample),channels:3)
                 try fuse(work,parameters:params,cancellation:cancellation)
             }
         }

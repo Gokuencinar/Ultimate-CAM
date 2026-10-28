@@ -13,6 +13,8 @@ struct FusionParameters {
     uint4 flags; // Astro / reserved.
     float4 sr; // Crop origin in quads; output/source sampling scales.
     uint4 roi; // Half-open active quad box (or level-scaled box for flow).
+    float4 patch; // temporal sigma, fine detail, local contrast, shadow lift.
+    float4 finishing; // highlight compression, chroma denoise, HDR output, reject motion.
 };
 constexpr sampler pixels(coord::pixel,address::clamp_to_edge,filter::linear);
 
@@ -293,15 +295,17 @@ kernel void uc_fuse_tiles(texture2d<float,access::read> reference [[texture(0)]]
             localResidual+=delta/9.0f;localEnergy+=dot(delta*delta,float4(0.25f))/9.0f;
         }
         float biasEnergy=dot(localResidual*localResidual,float4(0.25f));
-        float occlusion=1.0f-smoothstep(9.0f*variance,64.0f*variance,biasEnergy);
+        float sigma=clamp(params.patch.x,1.5f,6.0f),thresholdScale=sigma*sigma/9;
+        float occlusion=1.0f-smoothstep(9.0f*variance*thresholdScale,64.0f*variance*thresholdScale,biasEnergy);
         // A coherent moved edge remains different across its neighbourhood;
         // independent sensor noise averages out instead of becoming a ghost.
         float motionTolerance=max(params.tone.w,1.0f);
-        float robust=exp(-energy/(18.0f*variance*motionTolerance*motionTolerance))*occlusion;
-        robust*=1.0f-smoothstep(36.0f*variance,144.0f*variance,localEnergy);
+        float robust=exp(-energy/(2*sigma*sigma*variance*motionTolerance*motionTolerance))*occlusion;
+        robust*=1.0f-smoothstep(36.0f*variance*thresholdScale,144.0f*variance*thresholdScale,localEnergy);
+        if(params.finishing.w<0.5f) robust=1;
         // A low-cost zero match is valid in smooth areas; a high-cost ambiguous
         // match is rejected. The reference always supplies weight one.
-        float reliable=motion.z<3.0f*sqrt(variance) ? 1.0f:motion.w;
+        float reliable=motion.z<sigma*sqrt(variance) ? 1.0f:motion.w;
         float spatial=(corner.x ? fraction.x:1-fraction.x)*(corner.y ? fraction.y:1-fraction.y);
         float exposureWeight=1.0f;
         if (params.search.z) {
@@ -355,12 +359,16 @@ kernel void uc_night_tone(texture2d<float,access::sample> input [[texture(0)]],
     float logL=log2(luminance);
     float2 uv=(float2(p)+0.5f)/float2(output.get_width(),output.get_height());
     // Two edge-aware scales: ~32 px and ~128 px radii at native 12 MP.
-    float baseLog=mix(uc_log_base(mediumBase,uv,logL),uc_log_base(wideBase,uv,logL),0.7f);
+    float baseWeight=clamp(0.7f+params.patch.z*0.12f,0.7f,0.88f);
+    float baseLog=mix(uc_log_base(mediumBase,uv,logL),uc_log_base(wideBase,uv,logL),baseWeight);
+    float detailLog=clamp(logL-baseLog,-4.0f,4.0f);
+    float detailBoost=1+0.3f*params.patch.y+0.12f*params.patch.z;
+    float shadowGain=exp2(1.5f*params.patch.w*(1-smoothstep(0.03f,0.4f,luminance)));
     float base=exp2(baseLog),scaled=base*params.control.y;
     float white=max(params.control.z,2.0f);
     float compressed=scaled*(1.0f+scaled/(white*white))/(1.0f+scaled);
     // Recombine full-resolution luminance without flattening fine detail.
-    float mapped=compressed*luminance/max(base,1e-6f);
+    float mapped=compressed*exp2(detailLog*detailBoost)*shadowGain;
     float toe=max(params.tone.x,0.0f);
     mapped=mapped*mapped/max(mapped+toe,1e-6f)*(0.18f+toe)/0.18f;
     // Only low-signal chroma is attenuated. Luma and hue ratios in supported
@@ -377,7 +385,13 @@ kernel void uc_night_tone(texture2d<float,access::sample> input [[texture(0)]],
     float smooth=1-smoothstep(0.5f,2.0f,abs(logL-baseLog));
     clean=mix(clean,float3(luminance),clamp(params.tone.w,0.0f,0.45f)*cast*dark*smooth);
     float3 result=clean*(mapped/luminance);
-    result/=max(1.0f,max(result.r,max(result.g,result.b)));
+    if(params.finishing.z>0.5f) {
+        result=clean*(params.control.y*shadowGain*exp2(detailLog*(detailBoost-1)));
+        float peak=max(result.r,max(result.g,result.b));
+        float range=3/(1+params.finishing.x);
+        float shoulder=peak<=1 ? peak:1+range*(1-exp(-(peak-1)/range));
+        result*=shoulder/max(peak,1e-6f);
+    } else result/=max(1.0f,max(result.r,max(result.g,result.b)));
     output.write(float4(result,1),p);
 }
 
@@ -440,7 +454,8 @@ kernel void uc_fuse_super_res(texture2d<float,access::sample> reference [[textur
   float anchor=mix(clean[phase],rawReference.sample(pixels,native+0.5f)[phase],supported[phase]);
   if(params.flags.y && supported[phase]>0.5f) previous[phase]=max(previous[phase],anchor);
   float signal=max(anchor,0.0f),variance=max(params.noise.x*signal+params.noise.y,1e-6f);
-  float reliable=motion.z<3*sqrt(variance) ? 1.0f:motion.w;
+  float sigma=clamp(params.patch.x,1.5f,6.0f);
+  float reliable=motion.z<sigma*sqrt(variance) ? 1.0f:motion.w;
   for (int y=-1;y<=2;++y) for (int x=-1;x<=2;++x) {
    int2 source=base+int2(x,y);if (any(source<0) || source.x>=int(sample.get_width()) || source.y>=int(sample.get_height())) continue;
    float sensor=mix(sample.read(uint2(source))[phase],rawSample.read(uint2(source))[phase],supported[phase]),value=sensor*params.control.w;
@@ -450,7 +465,7 @@ kernel void uc_fuse_super_res(texture2d<float,access::sample> reference [[textur
     radial=exp(-0.5f*clamp(mahalanobis,0.0f,60.0f));
    }
    // Allow genuine alias detail only for a registered, low-cost tile.
-   float robust=exp(-(value-anchor)*(value-anchor)/(18*variance));
+   float robust=params.finishing.w<0.5f ? 1:exp(-(value-anchor)*(value-anchor)/(2*sigma*sigma*variance));
    if (motion.z<sqrt(variance)) robust=max(robust,0.15f);
    float w=radial*robust*reliable;
    if (params.search.z) w*=UCHDRExposureWeight(sensor,sensor,params.control.w);

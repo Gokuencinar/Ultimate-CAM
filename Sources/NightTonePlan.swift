@@ -2,9 +2,9 @@ import Foundation
 
 struct NightTonePlan {
     let gain:Double,whitePoint:Double
-    static func make(luminances:[Double],maximumGain:Double) throws -> NightTonePlan {
+    static func make(luminances:[Double],maximumGain:Double,highlightCompression:Double=0) throws -> NightTonePlan {
         guard !luminances.isEmpty,maximumGain.isFinite,(1...64).contains(maximumGain),
-              luminances.allSatisfy({$0.isFinite && $0>=0}) else { throw CameraFailure.message("Medición tonal no válida.") }
+              highlightCompression.isFinite,(0...1).contains(highlightCompression),luminances.allSatisfy({$0.isFinite && $0>=0}) else { throw CameraFailure.message("Medición tonal no válida.") }
         let sorted=luminances.sorted()
         func percentile(_ p:Double)->Double { sorted[min(sorted.count-1,Int(Double(sorted.count)*p))] }
         let upper=percentile(0.9),highlight=percentile(0.995)
@@ -24,7 +24,7 @@ struct NightTonePlan {
         let midtoneLimit=max(1,0.5/max(upper,1e-6))
         let highlightLimit=max(2,2/max(highlight,1e-6))
         let gain=min(maximumGain,desired,midtoneLimit,highlightLimit)
-        return NightTonePlan(gain:gain,whitePoint:max(2,highlight*gain))
+        return NightTonePlan(gain:gain,whitePoint:max(2,highlight*gain)*pow(2,highlightCompression))
     }
 }
 

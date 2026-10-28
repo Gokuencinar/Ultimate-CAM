@@ -165,3 +165,12 @@ extension ProcessingOptions {
         _ = try validated()
     }
 }
+
+extension ProcessingOptions {
+    /// Controls consumed by the RAW half-float tone must not be run again by
+    /// the common finishing graph. Colour/LUT, exposure and sharpening remain.
+    var afterMetalTone:Self {
+        var o=self;o.liftShadows=0;o.fineDetail=0;o.localContrast=0
+        o.highlightCompression=0;o.chromaDenoise=0;return o
+    }
+}
