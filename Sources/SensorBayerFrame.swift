@@ -130,6 +130,8 @@ struct BayerReferenceArchive {
         mapped.storage.discardResidentPages()
     }
     func original(at index:Int)->Data? { originals[index] }
+    mutating func retain(indices:Set<Int>) { originals=originals.filter{indices.contains($0.key)} }
+    var retainedCount:Int { originals.count }
     mutating func reset() { originals.removeAll() }
 }
 

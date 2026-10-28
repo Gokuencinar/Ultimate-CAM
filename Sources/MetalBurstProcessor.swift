@@ -117,7 +117,19 @@ final class MetalBurstProcessor {
         let w=min(96,texture.width),h=min(64,texture.height)
         return try readback(texture,region:MTLRegionMake2D((texture.width-w)/2,(texture.height-h)/2,w,h))
     }
-    private func workspace(reference:MTLTexture,raw:Bool,parameters:MetalFusionParameters,cancellation:ProcessingCancellation?) throws -> FusionWorkspace {
+    private func protectedReference(_ frame:SensorBayerFrame,preservePoints:Bool,parameters:MetalFusionParameters,cancellation:ProcessingCancellation?) throws -> (clean:MTLTexture,original:MTLTexture?) {
+        try autoreleasepool {
+            try cancellation?.check()
+            let original=try upload(frame),clean=try texture(frame.width,frame.height),command=try command()
+            try encode("uc_protect_bayer",command,textures:[original,clean],parameters:parameters)
+            try finish(command,cancellation:cancellation)
+            frame.discardResidentPages()
+            // Astro / super-resolution retain temporal point evidence. HDR and
+            // ordinary night no longer retain the unprotected full sensor plane.
+            return (clean,preservePoints ? original:nil)
+        }
+    }
+    private func workspace(reference:MTLTexture,original:MTLTexture?=nil,raw:Bool,parameters:MetalFusionParameters,cancellation:ProcessingCancellation?) throws -> FusionWorkspace {
         let w=reference.width,h=reference.height
         var refs=[MTLTexture](),samples=[MTLTexture](),flows=[MTLTexture](),regularized=[MTLTexture]()
         var width=w,height=h
@@ -131,19 +143,18 @@ final class MetalBurstProcessor {
         let means=try [texture(w,h),texture(w,h)]
         let weights=try [texture(w,h,format:.r16Float),texture(w,h,format:.r16Float)]
         let sample=try texture(w,h),sampleUpload=try raw ? texture(w,h,storage:.shared):sample
-        let protectedReference=try raw ? texture(w,h):reference
-        let result=FusionWorkspace(original:reference,reference:protectedReference,sample:sample,sampleUpload:sampleUpload,referencePyramid:refs,samplePyramid:samples,flow:flows,regularizedFlow:regularized,means:means,weights:weights)
+        let protectedReference=reference
+        let result=FusionWorkspace(original:original ?? reference,reference:protectedReference,sample:sample,sampleUpload:sampleUpload,referencePyramid:refs,samplePyramid:samples,flow:flows,regularizedFlow:regularized,means:means,weights:weights)
         let command=try command()
         // Clean both the alignment anchor and the initial accumulated mean.
         // Otherwise the reference impulse would survive even after residuals
         // accepted clean samples. Original saved DNG bytes are untouched.
-        if raw { try encode("uc_protect_bayer",command,textures:[reference,protectedReference],parameters:parameters) }
         guard let blit=command.makeBlitCommandEncoder() else { throw CameraFailure.message("No se pudo preparar la acumulación.") }
         blit.copy(from:protectedReference,sourceSlice:0,sourceLevel:0,sourceOrigin:MTLOrigin(x:0,y:0,z:0),sourceSize:MTLSize(width:w,height:h,depth:1),
             to:means[0],destinationSlice:0,destinationLevel:0,destinationOrigin:MTLOrigin(x:0,y:0,z:0))
         blit.endEncoding()
         try encode("uc_initial_weights",command,textures:[weights[0]])
-        try encode("uc_luma",command,textures:[parameters.flags.x==1 ? reference:protectedReference,refs[0]],parameters:parameters)
+        try encode("uc_luma",command,textures:[parameters.flags.x==1 ? (original ?? reference):protectedReference,refs[0]],parameters:parameters)
         for level in 1..<3 { try encode("uc_pyramid",command,textures:[refs[level-1],refs[level]]) }
         try finish(command,cancellation:cancellation);return result
     }
@@ -261,7 +272,8 @@ final class MetalBurstProcessor {
         let referenceNoise=SensorNoiseModel.coefficients(iso:first.exposure.iso,profile:first.noiseProfile,lens:first.lens)
         params.sensorNoise=SIMD4<Float>(referenceNoise.x,referenceNoise.y,referenceNoise.x,referenceNoise.y)
         let work=try autoreleasepool {
-            try workspace(reference:upload(first),raw:true,parameters:params,cancellation:cancellation)
+            let prepared=try protectedReference(first,preservePoints:options.astroCapture || reconstruction != nil,parameters:params,cancellation:cancellation)
+            return try workspace(reference:prepared.clean,original:prepared.original,raw:true,parameters:params,cancellation:cancellation)
         }
         if let sr=reconstruction {
             params.flags.z=directionalSuperResolution ? 1:0

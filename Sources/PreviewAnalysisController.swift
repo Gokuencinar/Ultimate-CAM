@@ -47,6 +47,11 @@ final class PreviewAnalysisController:NSObject,AVCaptureVideoDataOutputSampleBuf
         output.deliversPreviewSizedOutputBuffers=true
         output.setSampleBufferDelegate(self,queue:queue)
     }
+    func releaseCaches() {
+        history.reset();motion.reset()
+        queue.async { self.context.clearCaches() }
+        DispatchQueue.main.async { self.completion(nil) }
+    }
     func setResources(_ budget:CaptureResourceBudget) {
         queue.async {
             guard self.resources != budget else { return };self.resources=budget

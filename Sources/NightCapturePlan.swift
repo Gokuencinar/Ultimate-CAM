@@ -68,3 +68,9 @@ struct CaptureResourceBudget:Equatable {
         return unrestricted
     }
 }
+
+/// An advisory notification alone is never a cancellation decision.
+enum CaptureMemoryPolicy {
+    static let criticalBytes:UInt64=35*1024*1024
+    static func isCritical(availableBytes:UInt64)->Bool { availableBytes<criticalBytes }
+}

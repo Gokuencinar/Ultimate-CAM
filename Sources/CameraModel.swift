@@ -3,6 +3,7 @@ import Combine
 import ImageIO
 import Photos
 import UIKit
+import os
 
 enum CameraLens: String, CaseIterable, Identifiable {
     case ultraWide, wide, telephoto, front
@@ -217,9 +218,16 @@ final class CameraModel: NSObject, ObservableObject, AVCapturePhotoCaptureDelega
             self.refreshResources();self.resourceRecovery?.cancel()
             let recovery=DispatchWorkItem { [weak self] in self?.refreshResources() }
             self.resourceRecovery=recovery;self.queue.asyncAfter(deadline:.now()+61,execute:recovery)
-            if self.processingCancellation != nil {
-                CaptureTrace.record("processing.memoryWarning")
-                self.processingCancellation?.cancel("Procesado detenido por presión de memoria; se conserva la referencia.")
+            self.previewAnalyzer.releaseCaches()
+            self.publish { self.previewAnalysisFrame=nil;self.preview=nil;self.referencePreview=nil }
+            // UIKit warnings are advisory; trim first, then sample the live
+            // process headroom after the main-thread images have been retired.
+            self.queue.asyncAfter(deadline:.now()+0.15) {
+                let available=UInt64(os_proc_available_memory())
+                CaptureTrace.record("processing.memoryWarning",["availableBytes":available])
+                if CaptureMemoryPolicy.isCritical(availableBytes:available) {
+                    self.processingCancellation?.cancel("Memoria disponible crítica; se conserva la referencia.")
+                }
             }
         }
     }
@@ -995,7 +1003,13 @@ final class CameraModel: NSObject, ObservableObject, AVCapturePhotoCaptureDelega
             if self.processingOptions.nightStatic || self.processingOptions.hdrMetalRAW && self.processingOptions.hdrBracketing, let raw = self.rawData {
                 let metal = self.processingOptions.nightStatic && self.processingOptions.nightMetalRAW || self.processingOptions.hdrBracketing && self.processingOptions.hdrMetalRAW
                 if metal {
-                    do { try self.bayerReferences.append(raw,index:self.sensorFrames.count-1) }
+                    do {
+                        if self.processingOptions.hdrBracketing,
+                           let anchor=SensorBayerFrame.referenceIndex(in:self.sensorFrames,hdr:true) {
+                            if anchor==self.sensorFrames.count-1 { try self.bayerReferences.append(raw,index:anchor) }
+                            self.bayerReferences.retain(indices:[anchor])
+                        } else { try self.bayerReferences.append(raw,index:self.sensorFrames.count-1) }
+                    }
                     catch { self.finishFailure(error);return }
                 } else { self.nightRawFrames.append(raw) }
                 self.rawData = nil
