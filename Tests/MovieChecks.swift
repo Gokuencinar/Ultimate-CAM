@@ -10,6 +10,10 @@ import Darwin
         catch { fputs("MOVIE CHECK FAILED: \(error)\n",stderr);exit(1) }
     }
     static func proConfiguration() throws {
+        let virtual=MovieLensZoomPlan(physical:.wide,constituents:[.ultraWide,.wide,.telephoto],switchFactors:[2,4])
+        try check(virtual.sensorZoom(for:.ultraWide)==1 && virtual.sensorZoom(for:.wide)==2 && virtual.sensorZoom(for:.telephoto)==4 && virtual.displayZoom(4)==2,"Virtual lens switch factors were treated as display zoom")
+        let physical=MovieLensZoomPlan(physical:.wide)
+        try check(physical.sensorZoom(for:.wide)==1 && physical.sensorZoom(for:.telephoto)==2,"Live physical-wide fallback cannot reach a 2x crop")
         let old=try JSONDecoder().decode(MovieConfiguration.self,from:Data(#"{"stabilized":false}"#.utf8))
         try check(old.stabilization == .off && !old.hdrVideo && old.lockWhiteBalance,"Legacy movie JSON lost compatibility")
         var pro=MovieConfiguration();pro.stabilization = .locked;pro.hdrVideo=true;pro.lockWhiteBalance=false;pro.exposureBias=1.2

@@ -49,24 +49,27 @@ final class CameraInteractionTests: XCTestCase {
         XCTAssertTrue(format.isEnabled)
     }
 
-    func testNativeNightStaysInsideUltimateCAMWithoutCapturing() {
+    func testUnifiedNightHasNoSeparateIOSMode() {
         continueAfterFailure=false
-        let app=XCUIApplication();app.launch()
+        let app=XCUIApplication();app.launchArguments=["-ui-test-raw-support"];app.launch()
         let windows=app.windows.count
-        revealMode(app,"camera.mode.nativeNight").tap()
-        // Simulator has no native camera capability; dismiss the compatibility
-        // explanation, without faking hardware support or pressing a shutter.
-        let accept=app.alerts.buttons["Aceptar"]
-        if accept.waitForExistence(timeout:2) { accept.tap() }
-        XCTAssertTrue(app.staticTexts["Noche · iOS"].waitForExistence(timeout:3))
-        XCTAssertEqual(app.state,.runningForeground)
-        XCTAssertEqual(app.windows.count,windows)
-        XCTAssertTrue(app.buttons["camera.shutter"].exists)
+        XCTAssertFalse(app.buttons["camera.mode.nativeNight"].exists)
+        revealMode(app,"camera.mode.night").tap()
         app.buttons["camera.quickSettings"].tap()
-        XCTAssertEqual(app.buttons["camera.quickFormat"].value as? String,"JPEG · iOS")
-        XCTAssertFalse(app.buttons["camera.quickFormat"].isEnabled)
-        revealMode(app,"camera.mode.photo").tap()
-        XCTAssertTrue(app.staticTexts["Cámara"].exists)
+        let format=app.buttons["camera.quickFormat"]
+        if format.value as? String != "RAW*" { format.tap() }
+        XCTAssertEqual(format.value as? String,"RAW*")
+        XCTAssertTrue(app.staticTexts["Noche · RAW Metal"].exists)
+        app.buttons["camera.quickSettings"].tap()
+        app.buttons["camera.settings"].tap();app.buttons["settings.night"].tap()
+        let raw=app.switches["night.computationalRAW"]
+        XCTAssertTrue(raw.waitForExistence(timeout:3));setSwitch(raw,to:"0");setSwitch(raw,to:"1")
+        XCTAssertFalse(app.buttons["processing.nativeNight"].exists)
+        app.navigationBars.buttons.element(boundBy:0).tap();app.buttons["Listo"].tap()
+        XCTAssertEqual(app.windows.count,windows);XCTAssertTrue(app.buttons["camera.shutter"].exists)
+        XCTAssertFalse(app.buttons["camera.mode.nativeNight"].exists)
+        capture(app,"unified-night")
+        revealMode(app,"camera.mode.photo").tap();XCTAssertTrue(app.staticTexts["Cámara"].exists)
     }
 
     func testGuidedModesAndPreviewToolsWithoutTakingPhotos() {
@@ -93,6 +96,16 @@ final class CameraInteractionTests: XCTestCase {
             XCTAssertEqual(app.descendants(matching:.any).matching(identifier:"camera.viewfinder").count,1,"Guided mode created another visor")
             XCTAssertEqual(finder.frame,originalFrame,"Guided mode changed the persistent viewfinder geometry")
             XCTAssertFalse(app.buttons[mode+".close"].exists,"Guided mode must not present a separate camera")
+            if mode=="panorama" {
+                XCTAssertTrue(app.descendants(matching:.any).matching(identifier:"panorama.sweepGuide").firstMatch.exists)
+                XCTAssertEqual(app.buttons["panorama.capture"].label,"Iniciar barrido panorámico")
+                XCTAssertFalse(app.buttons["panorama.merge"].isEnabled)
+            }
+            if mode=="sphere" {
+                let automatic=app.switches["sphere.autoCapture"]
+                XCTAssertTrue(automatic.isHittable);setSwitch(automatic,to:"1");setSwitch(automatic,to:"0")
+                XCTAssertFalse(app.buttons["sphere.merge"].isEnabled)
+            }
             if mode=="sphere",app.buttons["sphere.retryMotion"].exists {
                 app.buttons["sphere.retryMotion"].tap();XCTAssertEqual(app.state,.runningForeground)
             }

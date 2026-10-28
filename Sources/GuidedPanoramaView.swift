@@ -1,6 +1,7 @@
 import Photos
 import AVKit
 import SwiftUI
+import Combine
 import UIKit
 
 struct GuidedPanoramaView:View {
@@ -85,7 +86,7 @@ struct GuidedPanoramaView:View {
                     HStack(spacing:1) { ForEach(thumbnails.indices,id:\.self) { i in Image(uiImage:thumbnails[i]).resizable().scaledToFill().frame(width:max(12,(g.size.width-40)/10),height:42).clipped() } }.padding(.horizontal,12).opacity(0.65)
                     Image(systemName:(sweep?.direction ?? 1)>=0 ? "arrow.right":"arrow.left").font(.title2.bold())
                         .foregroundStyle(sweep?.warning==nil ? CameraPalette.accent:.orange)
-                        .offset(x:12+max(0,g.size.width-52)*(sweep?.progress ?? 0))
+                        .offset(x:12+max(0,g.size.width-52)*CGFloat(sweep?.progress ?? 0))
                 }
             }.frame(height:62)
             ProgressView(value:sweep?.progress ?? 0).accessibilityIdentifier("panorama.progress")

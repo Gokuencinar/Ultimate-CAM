@@ -11,6 +11,7 @@ import simd
     }
     static func run() throws {
         try checkMultiBand()
+        try checkOddRegistrationAndSweep()
         try check(CoveredRectangle.largest([UInt8](repeating:255,count:32),width:8,height:4)==CGRect(x:0,y:0,width:8,height:4),"Full coverage cropped incorrectly")
         try check(CoveredRectangle.largest([UInt8](repeating:0,count:32),width:8,height:4)==nil,"Empty coverage accepted")
         var mask=[UInt8](repeating:255,count:32);for i in 24..<32 { mask[i]=0 }
@@ -43,6 +44,26 @@ import simd
         rejected=false
         do { _=try PanoramaProcessor().process([a,b],options:ProcessingOptions(),cancellation:cancellation) } catch { rejected=true }
         try check(rejected,"Cancelled panorama continued processing")
+    }
+    static func checkOddRegistrationAndSweep() throws {
+        let w=642,h=1017,space=CGColorSpace(name:CGColorSpace.sRGB)!
+        var seed:UInt32=1337,bytes=[UInt8](repeating:255,count:w*h*4)
+        for i in 0..<w*h { for c in 0..<3 { seed=seed &* 1664525 &+ 1013904223;bytes[i*4+c]=UInt8(30+(seed>>24)%190) } }
+        let scene=CIImage(bitmapData:Data(bytes),bytesPerRow:w*4,size:CGSize(width:w,height:h),format:.RGBA8,colorSpace:space)
+            .clampedToExtent().applyingFilter("CIGaussianBlur",parameters:[kCIInputRadiusKey:1]).cropped(to:CGRect(x:0,y:0,width:w,height:h))
+        let reference=scene.cropped(to:CGRect(x:0,y:0,width:641,height:1016))
+        let transform=try PanoramaProcessor().registration(reference:reference,floating:scene)
+        try check(abs(transform[2].x)<2 && abs(transform[2].y)<2,"Odd/disparate Vision patches changed identity registration")
+        let upright=simd_float3x3(simd_quatf(angle:Float.pi/2,axis:SIMD3(1,0,0))),down=SIMD3<Float>(0,0,-1)
+        func sample(_ degrees:Float,_ speed:Float=0.1)->SphereMotionSnapshot {
+            let r=simd_float3x3(simd_quatf(angle:-degrees*Float.pi/180,axis:SIMD3(0,0,1)))*upright
+            return SphereMotionSnapshot(rotation:r,gravity:r.transpose*down,rotationSpeed:speed,timestamp:10+Double(degrees)/10)
+        }
+        var plan=try PanoramaSweepPlan(sample(0));try plan.update(sample(25))
+        try check(plan.needsFrame(fieldOfView:65) && plan.progress>0.1,"Continuous panorama failed to sample angular overlap")
+        plan.captured();try check(!plan.needsFrame(fieldOfView:65),"Panorama repeated a stationary sample")
+        try plan.update(sample(50,1));try check(plan.warning != nil && !plan.needsFrame(fieldOfView:65),"Fast sweep ignored its quality gate")
+        print("ODD VISION PATCHES / CONTINUOUS SWEEP CHECKS PASSED")
     }
     static func checkMultiBand() throws {
         let w=256,h=96,e=CGRect(x:0,y:0,width:w,height:h)

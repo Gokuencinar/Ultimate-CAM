@@ -89,6 +89,7 @@ struct ProcessorChecks {
         try check017()
         try check018Lens()
         try check019Portrait()
+        try check020NativePortrait()
         let plan = try NightCapturePlan.make(iso: 1600, seconds: 1.0 / 30, isoRange: 25...3200, durationRange: 0.00001...0.333)
         try require(plan.seconds == 0.25 && plan.iso < 250 && plan.count == 16, "Static night did not trade ISO for exposure")
         try require(abs(plan.iso * plan.seconds - 1600.0 / 30) < 0.001, "Night plan changed metered brightness")
@@ -413,7 +414,7 @@ struct ProcessorChecks {
         let result=read(try PortraitProcessor.apply(image(pixels),mask:image(matte),extent:e,amount:1,context:ctx))
         var inputEnergy=0.0,outputEnergy=0.0
         for y in 45..<83 { for x in 160..<200 { let j=(y*w+x)*4;inputEnergy+=Double(pixels[j]-0.02);outputEnergy+=Double(result[j]-0.02) } }
-        let peak=result[(64*w+180)*4],rim=result[(64*w+185)*4]
+        let peak=result[(64*w+180)*4],rim=result[(64*w+190)*4]
         try require(outputEnergy>inputEnergy*1.3 && peak>1,"Linear HDR portrait lost specular energy / clipped the bokeh")
         try require(rim<peak*0.2+0.03 && result[(64*w+181)*4]>peak*0.7,"Specular point did not retain a bounded disc footprint")
         for y in 0..<h { for x in 0..<w {
@@ -425,6 +426,31 @@ struct ProcessorChecks {
         try require(clean[(64*w+100)*4]<pixels[(64*w+100)*4]-0.05,"Bright-background silhouette contamination was not removed")
         try require(abs(clean[(64*w+80)*4]-0.12)<0.001,"Edge cleanup altered the opaque foreground")
         log("HDR DISC BOKEH / SILHOUETTE COLOUR CHECKS PASSED")
+    }
+
+    static func check020NativePortrait() throws {
+        let e=CGRect(x:0,y:0,width:4032,height:3024),linear=CGColorSpace(name:CGColorSpace.extendedLinearSRGB)!
+        let ctx=CIContext(options:[.workingColorSpace:linear,.cacheIntermediates:false])
+        guard let chart=CIFilter(name:"CICheckerboardGenerator",parameters:["inputCenter":CIVector(x:0,y:0),"inputColor0":CIColor(red:0.05,green:0.05,blue:0.05),"inputColor1":CIColor(red:0.9,green:0.9,blue:0.9),"inputWidth":12,"inputSharpness":1])?.outputImage?.cropped(to:e) else { throw CameraFailure.message("Missing native portrait chart") }
+        let subject=CGRect(x:1400,y:500,width:1200,height:2000)
+        let original=CIImage(color:CIColor(red:0.4,green:0.3,blue:0.2)).cropped(to:subject).composited(over:chart).cropped(to:e)
+        let matte=CIImage(color:CIColor(red:0.9,green:0.9,blue:0.9)).cropped(to:subject)
+            .composited(over:CIImage(color:CIColor(red:0.1,green:0.1,blue:0.1)).cropped(to:e))
+        let output=try PortraitProcessor.apply(original,mask:matte,extent:e,amount:0.5,context:ctx)
+        try require(output.extent==e && (40...50).contains(PortraitProcessor.blurRadius(extent:e,amount:0.5)),"Native portrait radius/geometry did not scale with resolution")
+        let region=CGRect(x:100,y:1000,width:384,height:256),count=384*256*4
+        func pixels(_ image:CIImage,_ bounds:CGRect,_ count:Int)->[UInt8] {
+            var p=[UInt8](repeating:0,count:count)
+            p.withUnsafeMutableBytes { ctx.render(image,toBitmap:$0.baseAddress!,rowBytes:Int(bounds.width)*4,bounds:bounds,format:.RGBA8,colorSpace:CGColorSpace(name:CGColorSpace.sRGB)!) };return p
+        }
+        let a=pixels(original,region,count),b=pixels(output,region,count)
+        var sum=0.0,n=0
+        for j in stride(from:0,to:count,by:4) { for c in 0..<3 { let d=Double(a[j+c])-Double(b[j+c]);sum+=d*d;n+=1 } }
+        let rmse=sqrt(sum/Double(n));try require(rmse>15,"Native portrait background RMSE was only \(rmse)")
+        let core=CGRect(x:1900,y:1400,width:32,height:32)
+        let before=pixels(original,core,32*32*4),after=pixels(output,core,32*32*4)
+        try require(zip(before,after).allSatisfy{abs(Int($0)-Int($1))<=1},"Native bokeh blurred the opaque subject")
+        print("NATIVE 12 MP PORTRAIT BACKGROUND RMSE",rmse)
     }
 
 }

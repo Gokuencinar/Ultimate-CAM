@@ -63,8 +63,29 @@ import simd
         let metadata=CGImageSourceCopyMetadataAtIndex(source,0,nil)!
         try check(CGImageMetadataCopyStringValueWithPath(metadata,nil,"GPano:ProjectionType" as CFString) as String? == "equirectangular","JPEG has no GPano projection metadata")
         try check(CGImageMetadataCopyStringValueWithPath(metadata,nil,"GPano:FullPanoWidthPixels" as CFString) as String? == "512","GPano dimensions differ from actual file")
+        let partial=try SphereProcessor().process(Array(frames.prefix(4)),width:512)
+        guard let partialImage=PreviewDecoder.image(partial.jpeg,maximumDimension:512) else { throw CameraFailure.message("Partial sphere produced no JPEG") }
+        try check(partialImage.width==512 && partialImage.height==256 && partial.details.contains("parcial"),"Four-view sphere failed 2:1 geometry / honest coverage")
+        var point=[Float](repeating:0,count:4)
+        point.withUnsafeMutableBytes { context.render(CIImage(cgImage:partialImage),toBitmap:$0.baseAddress!,rowBytes:16,bounds:CGRect(x:256,y:255,width:1,height:1),format:.RGBAf,colorSpace:space) }
+        try check(point[0]+point[1]+point[2]>0.08 && point.allSatisfy(\.isFinite),"Partial sphere left uncovered sky black/invalid")
+        let aimed=try reference.pose(initial)
+        let node=SphereNodeSelection.completedTarget(planned:0,pose:aimed,first:true)
+        try check(node==0,"Captured reticle did not complete its reserved node")
+        let after=try? SphereAim.make(initial,reference:reference,captured:[0],now:1.1)
+        try check(after==nil || after?.target.id != node,"Completed node was targeted twice")
+        for target in SphereTarget.all {
+            let p=SphereNodeSelection.point(yaw:Double(target.yaw),pitch:Double(target.pitch),size:CGSize(width:375,height:110))
+            try check(p.x>=12 && p.x<=363 && p.y>=12 && p.y<=98,"A sphere map node touches a clipped border")
+        }
+        let screen=SphereNodeSelection.projected(SphereTarget.all[0],pose:aimed,size:CGSize(width:375,height:812))
+        try check(screen != nil && abs(screen!.x-187.5)<0.01 && abs(screen!.y-406)<0.01,"Sphere target projection disagrees with the portrait reticle")
+        var gate=SphereAutoCaptureGate()
+        try check(!gate.update(target:0,stable:true,time:1) && !gate.update(target:0,stable:true,time:1.39) && gate.update(target:0,stable:true,time:1.4),"Auto sphere ignored the 0.4 second dwell")
+        _=gate.update(target:1,stable:true,time:2);_=gate.update(target:1,stable:false,time:2.3)
+        try check(!gate.update(target:1,stable:true,time:2.4),"Unstable aim retained an automatic capture")
         var rejected=false
-        do { _=try SphereProcessor().process(Array(frames.prefix(2)),width:512) } catch { rejected=true }
+        do { _=try SphereProcessor().process(Array(frames.prefix(2)),width:512,minimumCoverage:0.995) } catch { rejected=true }
         try check(rejected,"Incomplete sphere was labeled complete")
     }
     static func checkMeridianBlend() throws {

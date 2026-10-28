@@ -102,7 +102,7 @@ enum SphereNodeSelection {
     static func projected(_ target:SphereTarget,pose:SpherePose,size:CGSize,fieldOfView:Double=67)->CGPoint? {
         let ray=pose.sphereToDevice*target.direction,z = -ray.z
         guard z>0.01,fieldOfView.isFinite,(30...130).contains(fieldOfView) else { return nil }
-        let f=max(size.width,size.height)*0.5/tan(fieldOfView*Double.pi/360)
+        let f=max(size.width,size.height)*CGFloat(0.5/tan(fieldOfView*Double.pi/360))
         let point=CGPoint(x:size.width/2+CGFloat(ray.x/z)*f,y:size.height/2-CGFloat(ray.y/z)*f)
         return CGRect(origin:.zero,size:size).insetBy(dx:20,dy:20).contains(point) ? point:nil
     }
@@ -119,6 +119,6 @@ struct SphereAutoCaptureGate {
     mutating func update(target next:Int?,stable:Bool,time:Double)->Bool {
         guard stable,let next,time.isFinite else { reset();return false }
         if target != next || since==nil || time<(since ?? time) { target=next;since=time;return false }
-        if time-(since ?? time)>=0.4 { reset();return true };return false
+        if time-(since ?? time)+1e-6>=0.4 { reset();return true };return false
     }
 }

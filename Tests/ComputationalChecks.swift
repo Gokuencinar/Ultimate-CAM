@@ -8,6 +8,8 @@ import Darwin
         if !condition { throw CameraFailure.message(message) }
     }
     static func resourceChecks() throws {
+        try require(!CaptureMemoryPolicy.isCritical(availableBytes:80*1024*1024),"Preventive memory warning canceled a healthy processing budget")
+        try require(CaptureMemoryPolicy.isCritical(availableBytes:34*1024*1024) && !CaptureMemoryPolicy.isCritical(availableBytes:35*1024*1024),"Critical process headroom boundary changed")
         let hot=CaptureResourceBudget.make(thermal:.serious),critical=CaptureResourceBudget.make(thermal:.critical)
         try require(hot.maximumFrames==8 && critical.maximumFrames==4 && critical.previewInterval>=1,"Thermal policy did not reduce frame/preview budgets")
         try require(CaptureResourceBudget.make(thermal:.nominal,memoryPressure:true)==critical,"Memory pressure ignored the conservative capture policy")
@@ -322,6 +324,15 @@ import Darwin
         try require(anchor==5 && original[0]==jpegs[anchor][0],"DNG/JPEG do not share the final dominant-cohort sharp anchor")
         let hdr=SensorBayerFrame.referenceIndex(in:frames,hdr:true)!
         try require(hdr==0 && archive.original(at:hdr)==Data([0,0x44]),"HDR original no longer matches its shortest exposure")
+        archive.retain(indices:[hdr])
+        try require(archive.retainedCount==1 && archive.original(at:hdr)==Data([0,0x44]),"HDR retained non-anchor DNG mappings")
+        let unified=PhotoModePolicy.unifiedNight(from:ProcessingOptions(),supportsRAW:true,nativeAvailable:true)
+        try require(unified.isNightMode && unified.nightMetalRAW && !unified.nativeNight,"Automatic night did not select calibrated Bayer on a RAW lens")
+        var system=unified;system.nightSystemPreferred=true
+        let nativeUnified=PhotoModePolicy.unifiedNight(from:system,supportsRAW:true,nativeAvailable:true)
+        try require(nativeUnified.isNightMode && nativeUnified.nativeNight && !nativeUnified.nightStatic,"System engine escaped the unified night mode")
+        let jpegFallback=PhotoModePolicy.unifiedNight(from:system,supportsRAW:false,nativeAvailable:false)
+        try require(jpegFallback.nightStatic && !jpegFallback.nightRAW && !jpegFallback.nativeNight,"Unsupported night requested a private/raw capability")
         let info=DNGCaptureInfo(exposure:frames[anchor].exposure,aperture:1.8,focalLength:4.25,lensModel:"Synthetic lens",make:"Apple",model:"iPhone")
         let encoded=try FusedDNG.encode(quads:quads,width:256,height:192,calibration:calibration,capture:info)
         let tags=try DNGMetadata.read(encoded)
