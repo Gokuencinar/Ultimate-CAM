@@ -89,7 +89,7 @@ final class MovieCameraModel: NSObject, ObservableObject, AVCaptureFileOutputRec
         }
     }
     private func isHDR10(_ format:AVCaptureDevice.Format)->Bool {
-        CMFormatDescriptionGetMediaSubType(format.formatDescription)==kCVPixelFormatType_420YpCbCr10BiPlanarVideoRange && format.supportedColorSpaces.contains(.HLG_BT2020) && format.isVideoHDRSupported
+        CMFormatDescriptionGetMediaSubType(format.formatDescription)==kCVPixelFormatType_420YpCbCr10BiPlanarVideoRange && format.supportedColorSpaces.contains(.HLG_BT2020)
     }
     private func avStabilization(_ mode:MovieStabilizationMode)->AVCaptureVideoStabilizationMode {
         switch mode { case .off:return .off;case .standard:return .standard;case .cinematic:return .cinematic;case .locked:return .cinematicExtended }

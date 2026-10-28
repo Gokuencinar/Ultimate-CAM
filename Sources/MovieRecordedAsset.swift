@@ -27,10 +27,12 @@ struct MovieRecordedAsset {
         }
         var hdr=false
         for description in try await track.load(.formatDescriptions) {
-            let extensions=CMFormatDescriptionGetExtensions(description) as NSDictionary
-            let atoms=extensions[kCMFormatDescriptionExtension_SampleDescriptionExtensionAtoms] as? [String:Any]
-            let configuration=atoms?["hvcC"] as? Data
-            let transfer=extensions[kCMFormatDescriptionExtension_TransferFunction] as? String ?? ""
+            guard let extensions=CMFormatDescriptionGetExtensions(description) as? [String:Any] else { continue }
+            let atomKey=kCMFormatDescriptionExtension_SampleDescriptionExtensionAtoms as String
+            let transferKey=kCMFormatDescriptionExtension_TransferFunction as String
+            let atoms:[String:Any]?=extensions[atomKey] as? [String:Any]
+            let configuration:Data?=atoms?["hvcC"] as? Data
+            let transfer:String=extensions[transferKey] as? String ?? ""
             if let configuration,configuration.count>=23 {
                 let bitDepth=8+Int(configuration[17]&7),profile=configuration[1]&31
                 hdr = hdr || (profile==2 && bitDepth>=10 && (transfer.contains("HLG") || transfer.contains("2084")))
