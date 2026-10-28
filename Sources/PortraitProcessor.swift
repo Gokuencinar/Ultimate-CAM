@@ -14,7 +14,7 @@ enum PortraitProcessor {
         let request=VNGeneratePersonSegmentationRequest()
         request.qualityLevel = .accurate
         request.outputPixelFormat=kCVPixelFormatType_OneComponent8
-        try VNImageRequestHandler(cgImage:cg).perform([request])
+        try VNImageRequestHandler(cgImage:cg,orientation:.up).perform([request])
         guard let pixel=request.results?.first?.pixelBuffer else { throw CameraFailure.message("No se recibió una máscara de persona.") }
         let mask=CIImage(cvPixelBuffer:pixel)
         let average=mask.applyingFilter("CIAreaAverage",parameters:[kCIInputExtentKey:CIVector(cgRect:mask.extent)])
@@ -42,17 +42,25 @@ enum PortraitProcessor {
             .transformed(by:transform.inverted())
         return guidedKernel?.apply(extent:extent,arguments:[guide,averaged]) ?? mask
     }
+    static func blurRadius(extent:CGRect,amount:Double)->Double {
+        max(1,min(85,max(extent.width,extent.height)*0.022)*amount)
+    }
+    static func contrastedMask(_ mask:CIImage,extent:CGRect)->CIImage {
+        contrastKernel?.apply(extent:extent,arguments:[mask]) ?? mask.cropped(to:extent)
+    }
+    private static let contrastKernel=CIColorKernel(source:"kernel vec4 portraitContrast(__sample m) {return vec4(vec3(smoothstep(0.25,0.75,m.r)),1.0);}")
     static func apply(_ input:CIImage,mask:CIImage,extent:CGRect,amount:Double,depth:PortraitDepth?=nil,context:CIContext?=nil) throws -> CIImage {
         guard amount.isFinite,(0...1).contains(amount),input.extent.contains(extent),mask.extent.contains(extent) else {
             throw CameraFailure.message("Parámetros de retrato no válidos.")
         }
         if amount==0 { return input.cropped(to:extent) }
-        let radius=max(1,min(48,extent.width*0.012*amount))
-        let soft=guidedMask(mask,guide:input,extent:extent)
+        let radius=blurRadius(extent:extent,amount:amount)
+        let matte=contrastedMask(mask,extent:extent)
+        let soft=guidedMask(matte,guide:input,extent:extent)
         // The refined alpha blends the final edge. A conservative union matte
         // separately excludes foreground from the background convolution; using
         // a fractional guided edge here bleeds face/hair colour into the bokeh.
-        let exclusion=mask.applyingFilter("CIMaximumCompositing",parameters:[kCIInputBackgroundImageKey:soft])
+        let exclusion=matte.applyingFilter("CIMaximumCompositing",parameters:[kCIInputBackgroundImageKey:soft])
             .clampedToExtent().applyingFilter("CIMorphologyMaximum",parameters:[kCIInputRadiusKey:2]).cropped(to:extent)
         guard let weighted=weightedKernel?.apply(extent:extent,arguments:[input,exclusion,amount]),
               let weight=weightKernel?.apply(extent:extent,arguments:[exclusion]) else { throw CameraFailure.message("No se pudo separar el fondo del retrato.") }
