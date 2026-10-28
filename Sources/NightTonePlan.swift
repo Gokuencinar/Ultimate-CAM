@@ -20,10 +20,10 @@ struct NightTonePlan {
         }
         guard totalWeight>0 else { return NightTonePlan(gain:1,whitePoint:2) }
         let midtone=exp(weightedLog/totalWeight)
-        let desired=max(1,0.18/max(midtone,1e-6))
-        let midtoneLimit=max(1,0.5/max(upper,1e-6))
-        let highlightLimit=max(2,2/max(highlight,1e-6))
-        let gain=min(maximumGain,desired,midtoneLimit,highlightLimit)
+        let desired=max(1,0.14/max(midtone,1e-6))
+        let midtoneLimit=max(1,0.35/max(upper,1e-6))
+        let highlightLimit=max(1,1/max(highlight,1e-6))
+        let gain=min(8,maximumGain,desired,midtoneLimit,highlightLimit)
         return NightTonePlan(gain:gain,whitePoint:max(2,highlight*gain)*pow(2,highlightCompression))
     }
 }

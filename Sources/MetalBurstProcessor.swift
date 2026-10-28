@@ -14,6 +14,7 @@ struct MetalFusionParameters {
     var roi=SIMD4<UInt32>(0,0,0,0)
     var patch=SIMD4<Float>(3,0,0,0)
     var finishing=SIMD4<Float>(0,0,0,1)
+    var neutral=SIMD4<Float>(repeating:1)
     mutating func configure(_ o:ProcessingOptions) {
         patch=SIMD4(Float(o.motionSigma),Float(o.fineDetail),Float(o.localContrast),Float(o.liftShadows))
         finishing=SIMD4(Float(o.highlightCompression),Float(o.chromaDenoise),0,o.rejectMotion ? 1:0)
@@ -206,9 +207,7 @@ final class MetalBurstProcessor {
     private func tone(_ image:CIImage,maximumGain:Double,night:Bool,options:ProcessingOptions,cancellation:ProcessingCancellation?) throws -> (sdr:CIImage,hdr:CIImage) {
         let extent=image.extent.integral,w=Int(extent.width),h=Int(extent.height)
         let normalized=image.transformed(by:CGAffineTransform(translationX:-extent.minX,y:-extent.minY))
-        // Reuse the uploaded source as the final destination only after the
-        // reconstruction kernel has read it into the separate corrected plane.
-        let output=try load(normalized,width:w,height:h,cancellation:cancellation),input=try texture(w,h)
+        let input=try load(normalized,width:w,height:h,cancellation:cancellation),output=try texture(w,h)
         let base=try texture(max(1,(w+15)/16),max(1,(h+15)/16),format:.r16Float)
         let middleBase=try texture(max(1,base.width/2),max(1,base.height/2),format:.r16Float)
         let wideBase=try texture(max(1,middleBase.width/2),max(1,middleBase.height/2),format:.r16Float)
@@ -233,7 +232,6 @@ final class MetalBurstProcessor {
             night ? 0.02+chroma*0.06:chroma*0.06,
             night ? NightChromaticityPlan.strength(pixels):0)
         let command=try command()
-        try encode("uc_reconstruct_highlights",command,textures:[output,input])
         try encode("uc_tone_luma",command,textures:[input,base])
         try encode("uc_pyramid",command,textures:[base,middleBase])
         try encode("uc_pyramid",command,textures:[middleBase,wideBase])
@@ -264,6 +262,7 @@ final class MetalBurstProcessor {
         defer { frames.forEach { $0.discardResidentPages() } }
         let fused:(dng:Data,count:Int,center:SIMD2<Double>?)=try autoreleasepool {
         var params=MetalFusionParameters();params.configure(effective);params.size.w=1;params.flags.w=1;params.flags.x=options.astroCapture ? 1:0
+        params.neutral=BayerSaturationPolicy.neutralPhases(first.calibration)
         params.roi=try BayerFusionRegion.make(width:first.width,height:first.height,geometry:first.calibration.geometry,zoom:first.zoom).vector
         params.tone.w=LensCalibration.profile(first.lens).motionTolerance
         params.luma=SIMD4<Float>(first.calibration.pattern[0]==1 ? 0.5:0,first.calibration.pattern[1]==1 ? 0.5:0,

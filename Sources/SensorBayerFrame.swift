@@ -387,7 +387,7 @@ enum BayerQuadPacking {
         defer { if !transferred { output.deallocate() } }
         let b=SIMD4<Float>(black[0],black[1],black[2],black[3])
         let gain=SIMD4<Float>(repeating:1)/(SIMD4<Float>(repeating:white)-b)
-        @inline(__always) func normalized(_ value:UInt16,_ phase:Int) -> UInt16 { Float16((Float(UInt16(littleEndian:value))-b[phase])*gain[phase]).bitPattern.littleEndian }
+        @inline(__always) func normalized(_ value:UInt16,_ phase:Int) -> UInt16 { Float16(min(1,max(0,(Float(UInt16(littleEndian:value))-b[phase])*gain[phase]))).bitPattern.littleEndian }
         if step==1 {
             // Native 4032x3024: two tight loops and four explicitly typed loads.
             // No per-pixel division, interpolation, Data indexing or extra copy.
@@ -416,7 +416,7 @@ enum BayerQuadPacking {
                     guard value<=16383 else { throw CameraFailure.message("Bayer fuera de rango.") }
                     sum+=Float(value)*(dx==0 ? 1-fx:fx)*(dy==0 ? 1-fy:fy)
                 } }
-                output[(y*width+x)*4+phase]=Float16((sum-b[phase])*gain[phase]).bitPattern.littleEndian
+                output[(y*width+x)*4+phase]=Float16(min(1,max(0,(sum-b[phase])*gain[phase]))).bitPattern.littleEndian
             } } }
         }
         let data=Data(bytesNoCopy:UnsafeMutableRawPointer(output),count:count*2,deallocator:.custom { pointer,_ in pointer.assumingMemoryBound(to:UInt16.self).deallocate() })
@@ -426,6 +426,26 @@ enum BayerQuadPacking {
 
 /// Calibrated uncompressed DNG for CIRAWFilter and optional computational RAW
 /// export. The original camera DNG remains the default export choice.
+enum BayerSaturationPolicy {
+    static let black:UInt16=4096,white:UInt16=61439
+    static let span:Float=Float(white-black)
+    static func neutralPhases(_ calibration:BayerCalibration)->SIMD4<Float> {
+        let peak=max(calibration.neutral[0],calibration.neutral[1],calibration.neutral[2])
+        let p=calibration.pattern.map{Float(calibration.neutral[Int($0)]/peak)}
+        return SIMD4(p[0],p[1],p[2],p[3])
+    }
+    /// Clipped channels contain no recoverable chroma. Only remove unsupported
+    /// energy, using the camera's own neutral; never raise another CFA phase.
+    static func limited(_ value:SIMD4<Float>,neutral:SIMD4<Float>)->SIMD4<Float> {
+        var v=value
+        for c in 0..<4 { v[c]=min(1,max(0,v[c])) }
+        let peak=max(max(v.x,v.y),max(v.z,v.w))
+        let t=min(1,max(0,(peak-0.96)/0.02)),blend=t*t*(3-2*t)
+        for c in 0..<4 { v[c]+=(min(v[c],neutral[c])-v[c])*blend }
+        return v
+    }
+}
+
 enum FusedDNG {
     static func encode(quads:Data,width:Int,height:Int,calibration c:BayerCalibration,noiseProfile:[Double]=[],zoom:Double=1,capture:DNGCaptureInfo?=nil) throws -> Data {
         guard width>0,height>0,width<=2048,height<=2048,quads.count==width*height*8,c.pattern.count==4,
@@ -461,7 +481,7 @@ enum FusedDNG {
         add(50706,1,4,Data([1,4,0,0]));add(50707,1,4,Data([1,3,0,0]))
         let model=Data("UltimateCAM working mosaic\0".utf8);add(50708,2,UInt32(model.count),model)
         add(50710,1,3,Data([0,1,2]));add(50711,3,1,u16(1))
-        add(50713,3,2,u16(1)+u16(1));add(50714,5,1,rational(4096));add(50717,4,1,u32(61439))
+        add(50713,3,2,u16(1)+u16(1));add(50714,5,1,rational(Double(BayerSaturationPolicy.black)));add(50717,4,1,u32(UInt32(BayerSaturationPolicy.white)))
         if c.geometry != nil || zoom>1 {
             let geometry=outputGeometry
             guard geometry.valid(width:w,height:h) else { throw CameraFailure.message("La corrección de lente no coincide con el mosaico.") }
@@ -557,19 +577,23 @@ enum FusedDNG {
         try quads.withUnsafeBytes { bytes in
             guard let address=bytes.baseAddress,Int(bitPattern:address)%2==0 else { throw CameraFailure.message("Cuartetos RAW desalineados.") }
             let input=UnsafeBufferPointer(start:address.assumingMemoryBound(to:UInt16.self),count:width*height*4)
-            @inline(__always) func encoded(_ bits:UInt16) throws -> UInt16 {
-                let value=Float(Float16(bitPattern:UInt16(littleEndian:bits)))
-                guard value.isFinite else { throw CameraFailure.message("La fusión RAW devolvió un valor no finito.") }
-                let sample=min(Float(65535),max(0,(value*57343+4096).rounded()))
-                return UInt16(sample).littleEndian
+            let neutral=BayerSaturationPolicy.neutralPhases(c)
+            @inline(__always) func encoded(_ value:Float)->UInt16 {
+                UInt16((min(1,max(0,value))*BayerSaturationPolicy.span+Float(BayerSaturationPolicy.black)).rounded()).littleEndian
             }
             for y in 0..<height {
                 let top=mosaic.advanced(by:y*2*w),bottom=top.advanced(by:w)
                 let row=input.baseAddress!.advanced(by:y*width*4)
                 for x in 0..<width {
                     let q=row.advanced(by:x*4),pixel=x*2
-                    top[pixel]=try encoded(q[0]);top[pixel+1]=try encoded(q[1])
-                    bottom[pixel]=try encoded(q[2]);bottom[pixel+1]=try encoded(q[3])
+                    var values=SIMD4<Float>(repeating:0)
+                    for phase in 0..<4 {
+                        values[phase]=Float(Float16(bitPattern:UInt16(littleEndian:q[phase])))
+                        guard values[phase].isFinite else { throw CameraFailure.message("La fusión RAW devolvió un valor no finito.") }
+                    }
+                    values=BayerSaturationPolicy.limited(values,neutral:neutral)
+                    top[pixel]=encoded(values[0]);top[pixel+1]=encoded(values[1])
+                    bottom[pixel]=encoded(values[2]);bottom[pixel+1]=encoded(values[3])
                 }
             }
         }

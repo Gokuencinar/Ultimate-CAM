@@ -21,11 +21,10 @@ struct NightCapturePlan {
         }
         let budget=max(1,requestedBudget*resources.nightBudgetScale)
         if let motionLimit { guard motionLimit.isFinite,(1.0/1000...1).contains(motionLimit) else { throw CameraFailure.message("Medición de movimiento fuera de rango.") } }
-        // AE can hit its preview ISO/shutter ceiling before reaching its target.
-        // Compensate only measured underexposure at high ISO, with a 2 EV cap.
-        let compensation = iso >= isoRange.upperBound * 0.8 && seconds >= 1.0 / 30
-            ? min(2, max(0, -targetOffset)) : 0
-        let meteredProduct = iso * seconds * pow(2, compensation)
+        // Preserve AE's measured sensor exposure. A preview target offset is
+        // not highlight headroom and must not request an extra +2 EV in RAW.
+        let compensation=0.0
+        let meteredProduct=iso*seconds
         guard meteredProduct.isFinite, seconds <= 1 else {
             throw CameraFailure.message("La medición supera el presupuesto de captura nocturna.")
         }

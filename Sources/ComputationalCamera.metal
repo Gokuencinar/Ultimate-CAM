@@ -15,8 +15,15 @@ struct FusionParameters {
     uint4 roi; // Half-open active quad box (or level-scaled box for flow).
     float4 patch; // temporal sigma, fine detail, local contrast, shadow lift.
     float4 finishing; // highlight compression, chroma denoise, HDR output, reject motion.
+    float4 neutral; // Camera-neutral CFA phase values at the shared sensor ceiling.
 };
 constexpr sampler pixels(coord::pixel,address::clamp_to_edge,filter::linear);
+
+inline float4 uc_safe_bayer(float4 v,constant FusionParameters &params) {
+    v=clamp(v,0.0f,1.0f);
+    float peak=max(max(v.x,v.y),max(v.z,v.w));
+    return mix(v,min(v,clamp(params.neutral,0.0f,1.0f)),smoothstep(0.96f,0.98f,peak));
+}
 
 kernel void uc_protect_bayer(texture2d<float,access::read> input [[texture(0)]],
                              texture2d<float,access::write> output [[texture(1)]],
@@ -54,7 +61,7 @@ kernel void uc_protect_bayer(texture2d<float,access::read> input [[texture(0)]],
             }
         }
     }
-    output.write(center,p);
+    output.write(params.size.w==1 ? uc_safe_bayer(center,params):center,p);
 }
 
 kernel void uc_initial_weights(texture2d<float,access::write> output [[texture(0)]],uint2 p [[thread_position_in_grid]]) {
@@ -320,7 +327,7 @@ kernel void uc_fuse_tiles(texture2d<float,access::read> reference [[texture(0)]]
     float weight=oldWeight+accepted;
     float4 fused=(acc*oldWeight+contribution)/max(weight,1.0f);
     if (!params.size.w) fused.a=1;
-    nextMean.write(fused,p);nextWeights.write(float4(weight),p);
+    nextMean.write(params.size.w ? uc_safe_bayer(fused,params):fused,p);nextWeights.write(float4(weight),p);
 }
 
 // Compact luminance base: sixteen area samples, no full-resolution extra plane.
@@ -361,14 +368,14 @@ kernel void uc_night_tone(texture2d<float,access::sample> input [[texture(0)]],
     // Two edge-aware scales: ~32 px and ~128 px radii at native 12 MP.
     float baseWeight=clamp(0.7f+params.patch.z*0.12f,0.7f,0.88f);
     float baseLog=mix(uc_log_base(mediumBase,uv,logL),uc_log_base(wideBase,uv,logL),baseWeight);
-    float detailLog=clamp(logL-baseLog,-4.0f,4.0f);
-    float detailBoost=1+0.3f*params.patch.y+0.12f*params.patch.z;
+    float detailLog=clamp(logL-baseLog,-2.0f,2.0f);
+    float detailGain=exp2(clamp(detailLog*(0.12f*params.patch.y+0.08f*params.patch.z),-0.25f,0.25f));
     float shadowGain=exp2(1.5f*params.patch.w*(1-smoothstep(0.03f,0.4f,luminance)));
-    float base=exp2(baseLog),scaled=base*params.control.y;
+    float scaled=luminance*clamp(params.control.y,1.0f,8.0f);
     float white=max(params.control.z,2.0f);
     float compressed=scaled*(1.0f+scaled/(white*white))/(1.0f+scaled);
     // Recombine full-resolution luminance without flattening fine detail.
-    float mapped=compressed*exp2(detailLog*detailBoost)*shadowGain;
+    float mapped=compressed*detailGain*shadowGain;
     float toe=max(params.tone.x,0.0f);
     mapped=mapped*mapped/max(mapped+toe,1e-6f)*(0.18f+toe)/0.18f;
     // Only low-signal chroma is attenuated. Luma and hue ratios in supported
@@ -386,7 +393,7 @@ kernel void uc_night_tone(texture2d<float,access::sample> input [[texture(0)]],
     clean=mix(clean,float3(luminance),clamp(params.tone.w,0.0f,0.45f)*cast*dark*smooth);
     float3 result=clean*(mapped/luminance);
     if(params.finishing.z>0.5f) {
-        result=clean*(params.control.y*shadowGain*exp2(detailLog*(detailBoost-1)));
+        result=clean*(clamp(params.control.y,1.0f,8.0f)*shadowGain*detailGain);
         float peak=max(result.r,max(result.g,result.b));
         float range=3/(1+params.finishing.x);
         float shoulder=peak<=1 ? peak:1+range*(1-exp(-(peak-1)/range));
@@ -496,35 +503,10 @@ kernel void uc_lca(texture2d<float,access::sample> input [[texture(0)]],texture2
 // chromaticity and the still-linear channels at the centre. All-channel clipping
 // or ambiguous/unsupported ratios retain the measured value. Extended values
 // survive in rgba16Float until the tone / HDR shoulder.
+// Compatibility kernel: clipping must not invent red/blue energy. The shipping
+// RAW path uses calibrated CFA saturation handling before demosaic instead.
 kernel void uc_reconstruct_highlights(texture2d<float,access::read> input [[texture(0)]],
  texture2d<float,access::write> output [[texture(1)]],uint2 p [[thread_position_in_grid]]) {
  if(p.x>=output.get_width() || p.y>=output.get_height()) return;
- float4 original=input.read(p);float3 center=max(original.rgb,0.0f);
- bool3 clipped=center>=float3(0.96f);
- if(!any(clipped) || all(clipped) || max(center.r,max(center.g,center.b))>1.05f) { output.write(original,p);return; }
- float3 chroma=0;float total=0;
- int2 edge=int2(input.get_width()-1,input.get_height()-1);
- for(int y=-4;y<=4;++y) for(int x=-4;x<=4;++x) {
-  if(x==0 && y==0) continue;
-  float3 value=max(input.read(uint2(clamp(int2(p)+int2(x,y),int2(0),edge))).rgb,0.0f);
-  float peak=max(value.r,max(value.g,value.b)),floor=min(value.r,min(value.g,value.b));
-  if(peak>=0.94f || floor<0.015f) continue;
-  float mean=(value.r+value.g+value.b)/3;
-  float3 ratio=value/max(mean,1e-6f);float dotRC=0,dotRR=0;
-  for(uint c=0;c<3;++c) if(!clipped[c] && center[c]>0.015f) { dotRC+=ratio[c]*center[c];dotRR+=ratio[c]*ratio[c]; }
-  if(dotRR<0.001f) continue;
-  float scale=dotRC/dotRR,error=0;
-  for(uint c=0;c<3;++c) if(!clipped[c]) error+=abs(ratio[c]*scale-center[c])/max(center[c],0.02f);
-  float weight=exp(-float(x*x+y*y)/12.0f-error*8.0f);
-  chroma+=ratio*weight;total+=weight;
- }
- if(total>0.1f) {
-  chroma/=total;float numerator=0,denominator=0;
-  for(uint c=0;c<3;++c) if(!clipped[c] && center[c]>0.015f) { numerator+=chroma[c]*center[c];denominator+=chroma[c]*chroma[c]; }
-  float3 predicted=chroma*(numerator/max(denominator,1e-6f));
-  for(uint c=0;c<3;++c) if(clipped[c] && predicted[c]>center[c]) {
-   float blend=smoothstep(0.96f,0.995f,center[c]);center[c]=mix(center[c],min(predicted[c],4.0f),blend);
-  }
- }
- output.write(float4(center,original.a),p);
+ output.write(clamp(input.read(p),0.0f,1.0f),p);
 }
