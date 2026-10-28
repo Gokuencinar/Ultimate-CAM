@@ -5,6 +5,13 @@ final class CameraInteractionTests: XCTestCase {
         continueAfterFailure=false
         let app=XCUIApplication();app.launchArguments=["-ui-test-raw-support"];app.launch()
         app.buttons["camera.quickSettings"].tap()
+        let shadows=app.sliders["camera.shadowLift"]
+        XCTAssertTrue(shadows.waitForExistence(timeout:3));shadows.adjust(toNormalizedSliderPosition:0.7)
+        app.buttons["camera.quickSettings"].tap()
+        XCTAssertTrue(app.buttons["camera.headerShadows"].waitForExistence(timeout:3))
+        app.buttons["camera.headerShadows"].tap()
+        XCTAssertTrue(app.buttons["camera.headerShadows"].waitForNonExistence(timeout:3))
+        app.buttons["camera.quickSettings"].tap()
         let exposure=app.sliders["camera.exposureBias"],reset=app.buttons["camera.resetExposureBias"]
         XCTAssertTrue(exposure.waitForExistence(timeout:3))
         exposure.adjust(toNormalizedSliderPosition:0.75)
@@ -85,6 +92,9 @@ final class CameraInteractionTests: XCTestCase {
             XCTAssertEqual(app.descendants(matching:.any).matching(identifier:"camera.viewfinder").count,1,"Guided mode created another visor")
             XCTAssertEqual(finder.frame,originalFrame,"Guided mode changed the persistent viewfinder geometry")
             XCTAssertFalse(app.buttons[mode+".close"].exists,"Guided mode must not present a separate camera")
+            if mode=="sphere",app.buttons["sphere.retryMotion"].exists {
+                app.buttons["sphere.retryMotion"].tap();XCTAssertEqual(app.state,.runningForeground)
+            }
             XCTAssertEqual(app.buttons[mode+".capture"].frame.midX,app.frame.midX,accuracy:2)
         }
         revealMode(app,"camera.mode.video").tap()
@@ -110,6 +120,10 @@ final class CameraInteractionTests: XCTestCase {
         XCTAssertTrue(transition.waitForNonExistence(timeout:5),"Video transition did not complete")
         XCTAssertTrue(app.buttons["video.quickResolution"].exists)
         XCTAssertTrue(app.buttons["video.quickFPS"].exists)
+        let videoEV=app.sliders["camera.exposureBias"]
+        XCTAssertTrue(videoEV.isHittable);videoEV.adjust(toNormalizedSliderPosition:0.75)
+        XCTAssertNotEqual(app.buttons["camera.resetExposureBias"].value as? String,"0.0")
+        app.buttons["camera.resetExposureBias"].tap()
         app.buttons["video.quickResolution"].tap()
         XCTAssertTrue(app.buttons["720p"].waitForExistence(timeout:3));app.buttons["720p"].tap()
         XCTAssertTrue(transition.waitForNonExistence(timeout:5))

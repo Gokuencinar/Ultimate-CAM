@@ -7,9 +7,26 @@ import Darwin
     static func require(_ condition:Bool,_ message:String) throws {
         if !condition { throw CameraFailure.message(message) }
     }
+    static func resourceChecks() throws {
+        let hot=CaptureResourceBudget.make(thermal:.serious),critical=CaptureResourceBudget.make(thermal:.critical)
+        try require(hot.maximumFrames==8 && critical.maximumFrames==4 && critical.previewInterval>=1,"Thermal policy did not reduce frame/preview budgets")
+        try require(CaptureResourceBudget.make(thermal:.nominal,memoryPressure:true)==critical,"Memory pressure ignored the conservative capture policy")
+        let normal=try NightCapturePlan.make(iso:3200,seconds:0.06,isoRange:25...3200,durationRange:0.00001...1,budget:16)
+        let limited=try NightCapturePlan.make(iso:3200,seconds:0.06,isoRange:25...3200,durationRange:0.00001...1,budget:16,resources:critical)
+        try require(limited.count<=4 && limited.count<normal.count && Double(limited.count)*limited.seconds<=16*critical.nightBudgetScale,"Hot night still scheduled a full-length burst")
+        let ring=TemporalFrameBuffer<Int>(capacity:4,maximumBytes:12)
+        for i in 1...3 { ring.append(i,time:Double(i),bytes:4) };ring.setMaximumBytes(5)
+        try require(ring.snapshot(at:3,age:10).map(\.value)==[3] && ring.maximumBytes==5,"Memory trimming retained over-budget preview frames")
+        var o=ProcessingOptions();o.fineDetail=1;o.localContrast=0.5;o.liftShadows=0.8;o.highlightCompression=0.7;o.chromaDenoise=0.6;o.sharpening=0.4;o.saturation=1.3;o.preserveHDR=true
+        let clean=o.afterMetalTone
+        try require(clean.fineDetail==0 && clean.localContrast==0 && clean.liftShadows==0 && clean.highlightCompression==0 && clean.chromaDenoise==0,"GPU finishing controls were applied twice")
+        try require(clean.sharpening==0.4 && clean.saturation==1.3 && clean.preserveHDR,"GPU finishing erased independent style controls")
+        print("THERMAL / MEMORY / HALF-FLOAT PATCHER OWNERSHIP CHECKS PASSED")
+    }
     static func main() {
         setbuf(stdout,nil)
         do {
+            try resourceChecks()
             print("Core format: bounded ring")
             let ring=TemporalFrameBuffer<Int>(capacity:4,maximumBytes:10)
             ring.append(1,time:1,bytes:4);ring.append(2,time:1.1,bytes:4);ring.append(3,time:1.2,bytes:4)

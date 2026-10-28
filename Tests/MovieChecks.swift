@@ -9,7 +9,24 @@ import Darwin
         do { try await run();print("MOVIE CHECKS PASSED · state, formats and a real synthetic MOV; no device recording") }
         catch { fputs("MOVIE CHECK FAILED: \(error)\n",stderr);exit(1) }
     }
+    static func proConfiguration() throws {
+        let old=try JSONDecoder().decode(MovieConfiguration.self,from:Data(#"{"stabilized":false}"#.utf8))
+        try check(old.stabilization == .off && !old.hdrVideo && old.lockWhiteBalance,"Legacy movie JSON lost compatibility")
+        var pro=MovieConfiguration();pro.stabilization = .locked;pro.hdrVideo=true;pro.lockWhiteBalance=false;pro.exposureBias=1.2
+        try check(try JSONDecoder().decode(MovieConfiguration.self,from:JSONEncoder().encode(pro))==pro,"Pro movie fields did not survive JSON round trip")
+        try check(MovieStabilizationMode.locked.resolved(supported:[.off,.standard]) == .standard,"Extended stabilization ignored device fallback")
+        try check(MovieStabilizationMode.locked.resolved(supported:[.off,.standard,.cinematic]) == .cinematic,"Cinematic fallback was skipped")
+        try check(MovieStabilizationMode.off.resolved(supported:Set(MovieStabilizationMode.allCases)) == .off,"Disabled stabilization changed mode")
+        try check(!pro.matches(width:1920,height:1080,ranges:[24...60],hdr10Bit:false),"An 8-bit format was mislabeled HDR10")
+        try check(pro.matches(width:1920,height:1080,ranges:[24...60],hdr10Bit:true),"Compatible HDR10 format was rejected")
+        pro.codec = .h264;var accepted=false
+        do { _=try pro.validated();accepted=true } catch { };try check(!accepted,"HDR10 accepted incompatible H.264 encoding")
+        pro.hdrVideo=false;pro.exposureBias = .nan;accepted=false
+        do { _=try pro.validated();accepted=true } catch { };try check(!accepted,"Video exposure accepted non-finite values")
+        print("PRO MOVIE JSON / HDR CAPABILITY / STABILIZATION / WB CHECKS PASSED")
+    }
     static func run() async throws {
+        try proConfiguration()
         for (input,expected) in [(-90.0,270.0),(0,0),(89.9,90),(180,180),(270.1,270),(360,0),(450,90)] {
             try check(try CaptureRotation.cardinal(input)==expected,"Capture rotation lost the cardinal convention")
         }

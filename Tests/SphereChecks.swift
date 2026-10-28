@@ -12,6 +12,7 @@ import simd
     }
     static func run() throws {
         try checkMeridianBlend()
+        try checkTiltedCapture()
         let upright=simd_float3x3(simd_quatf(angle:Float.pi/2,axis:SIMD3(1,0,0)))
         let down=SIMD3<Float>(0,0,-1)
         let initial=SphereMotionSnapshot(rotation:upright,gravity:upright.transpose*down,rotationSpeed:0,timestamp:1)
@@ -93,6 +94,34 @@ import simd
         print("Sphere wrapped gain",result.gain,"join error ratio",after/before,"meridian discontinuity",seamError/Double(h-8))
         try check(after<before*0.1,"Wrapped sphere gain / multiband did not improve exposure continuity")
         try check(seamError/Double(h-8)<0.003,"Multiband join opened the longitude meridian")
+    }
+
+    static func checkTiltedCapture() throws {
+        let down=SIMD3<Float>(0,0,-1)
+        let tilted=simd_float3x3(simd_quatf(angle:Float.pi/3,axis:SIMD3(1,0,0)))
+        let sample=SphereMotionSnapshot(rotation:tilted,gravity:tilted.transpose*down,rotationSpeed:0.2,timestamp:10)
+        let aim=try SphereAim.make(sample,reference:nil,captured:[],now:10.1)
+        try check(abs(aim.target.pitch+30)<0.01,"A tilted first view was disabled or assigned to the wrong sphere row")
+        try check(SphereAim.acceptsMotion(sample,seconds:0.001,fieldOfView:70),"Brief exposure rejected harmless finger motion")
+        try check(!SphereAim.acceptsMotion(sample,seconds:0.5,fieldOfView:70),"Long blurred sphere exposure was accepted")
+        var staleAccepted=false
+        do { _=try SphereAim.make(sample,reference:nil,captured:[],now:11);staleAccepted=true } catch { }
+        try check(!staleAccepted,"Stale IMU data was assigned to a new view")
+        let upright=simd_float3x3(simd_quatf(angle:Float.pi/2,axis:SIMD3(1,0,0)))
+        let opposite=simd_float3x3(simd_quatf(angle:Float.pi,axis:SIMD3(0,0,1)))*upright
+        let first=SphereMotionSnapshot(rotation:opposite,gravity:opposite.transpose*down,rotationSpeed:0,timestamp:1)
+        let direct=try SphereReference(first)
+        let inverse=try SphereReference(SphereMotionSnapshot(rotation:opposite.transpose,gravity:first.gravity,rotationSpeed:0,timestamp:1))
+        let turn=simd_float3x3(simd_quatf(angle:Float.pi+0.5,axis:SIMD3(0,0,1)))*upright
+        // Learn convention away from the symmetric first orientation, retain
+        // it at the poles where gravity cannot resolve heading/roll alone.
+        for (i,m) in [turn,simd_float3x3(simd_quatf(angle:0.8,axis:SIMD3(0,0,1)))].enumerated() {
+            let g=m.transpose*down
+            let a=try direct.pose(SphereMotionSnapshot(rotation:m,gravity:g,rotationSpeed:0,timestamp:Double(i+2)))
+            let b=try inverse.pose(SphereMotionSnapshot(rotation:m.transpose,gravity:g,rotationSpeed:0,timestamp:Double(i+2)))
+            for c in 0..<3 { try check(simd_length(a.sphereToDevice[c]-b.sphereToDevice[c])<0.001,"Matrix convention flipped sphere roll at a pole") }
+        }
+        print("TILTED / 180-DEGREE / POLAR SPHERE CAPTURE CHECKS PASSED")
     }
 
 }

@@ -46,12 +46,14 @@ import Darwin
         print("Full processRAW GPU:",device.name)
         var options=ProcessingOptions();options.nightStatic=true;options.nightRAW=true;options.nightMetalRAW=true;options.saveFusedDNG=true;options.lensCorrections=false
         let reference=try JPEGRenderer.render(CIImage(color:CIColor(red:0.2,green:0.2,blue:0.2)).cropped(to:CGRect(x:0,y:0,width:w*2,height:h*2)),extent:CGRect(x:0,y:0,width:w*2,height:h*2),options:options,context:context).data
-        func execute(_ frames:[SensorBayerFrame],_ recipe:ProcessingOptions,engine:MetalBurstProcessor?=nil) throws -> Mosaic {
+        func result(_ frames:[SensorBayerFrame],_ recipe:ProcessingOptions,engine:MetalBurstProcessor?=nil) throws -> CaptureResult {
             let original=try FusedDNG.encode(quads:frames[0].quads,width:w,height:h,calibration:calibration)
-            let result=try (engine ?? processor).processRAW(frames,referenceJPEG:reference,originalDNG:original,options:recipe,cancellation:nil,progress:nil)
-            try require(result.source=="Bayer-Metal" && result.mergedFrames==frames.count && result.rawIsFused && !result.jpeg.isEmpty,"The full RAW pipeline fell back or bypassed fusion")
-            guard let data=result.raw else { throw CameraFailure.message("Missing GPU-produced DNG") }
-            return try Mosaic(data)
+            let output=try (engine ?? processor).processRAW(frames,referenceJPEG:reference,originalDNG:original,options:recipe,cancellation:nil,progress:nil)
+            try require(output.source=="Bayer-Metal" && output.mergedFrames==frames.count && output.rawIsFused && !output.jpeg.isEmpty,"The full RAW pipeline fell back or bypassed fusion")
+            return output
+        }
+        func execute(_ frames:[SensorBayerFrame],_ recipe:ProcessingOptions,engine:MetalBurstProcessor?=nil) throws -> Mosaic {
+            guard let data=try result(frames,recipe,engine:engine).raw else { throw CameraFailure.message("Missing GPU-produced DNG") };return try Mosaic(data)
         }
         let edge:(Double,Double)->Double={ x,y in 0.055+0.24*(0.5+0.5*tanh((x-Double(w)*0.51-0.18*(y-Double(h)/2))/0.65)) }
         let noise=[0.0001,0.000002]
@@ -120,7 +122,38 @@ import Darwin
         let star=celestial.values[(61*w+41)*4],hot=celestial.values[(40*w+100)*4]
         print("Full Astro star / single-frame hot pixel:",star,hot)
         try require(star>0.4 && hot<0.05,"End-to-end Astro erased a consistent point or preserved an isolated hot pixel")
+        var moving=makeFrames(count:4,noise:[1e-6,4e-6],scene:{_,_ in 0.15})
+        for index in 1..<moving.count {
+            let old=moving[index];var values=halfValues(old.quads)
+            for y in 35..<65 { for x in 50..<80 { values[(y*w+x)*4]+=0.02 } }
+            moving[index]=SensorBayerFrame(width:w,height:h,quads:pack(values),calibration:calibration,exposure:old.exposure,timestamp:old.timestamp,noiseProfile:old.noiseProfile,sharpness:old.sharpness)
+        }
+        var strict=options;strict.motionSigma=1.5;var tolerant=options;tolerant.motionSigma=6
+        let low=try execute(moving,strict),high=try execute(moving,tolerant)
+        var lowMean=0.0,highMean=0.0
+        for y in 42..<58 { for x in 58..<72 { let j=(y*w+x)*4;lowMean+=Double(low.values[j]);highMean+=Double(high.values[j]) } }
+        let motionDifference=(highMean-lowMean)/Double(16*14)
+        try require(motionDifference>0.0015,"motionSigma did not control real temporal Bayer rejection")
+        let toneBurst=makeFrames(count:4,noise:[1e-7,1e-8],scene:{ x,y in 0.025+0.008*sin(x*0.8)*cos(y*0.3) })
+        let neutral=try result(toneBurst,options)
+        var shadows=options;shadows.liftShadows=0.8
+        let lifted=try result(toneBurst,shadows)
+        var detail=options;detail.fineDetail=1
+        let detailed=try result(toneBurst,detail)
+        let a=try jpegPixels(neutral.jpeg,context),b=try jpegPixels(lifted.jpeg,context),c=try jpegPixels(detailed.jpeg,context)
+        var shadowDelta=0.0,detailDelta=0.0
+        for j in stride(from:0,to:a.count,by:4) {
+            shadowDelta+=Double(b[j+1]-a[j+1]);detailDelta+=abs(Double(c[j+1]-a[j+1]))
+        }
+        shadowDelta/=Double(a.count/4);detailDelta/=Double(a.count/4)
+        print("GPU patcher motion / shadows / detail deltas",motionDifference,shadowDelta,detailDelta)
+        try require(shadowDelta>0.015 && detailDelta>0.0005,"RAW GPU shadow/detail controls were not reflected in the developed export")
         print("FULL RAW GPU QUANTITATIVE CHECKS PASSED (synthetic sensor; no physical camera opened)")
+    }
+    static func jpegPixels(_ data:Data,_ context:CIContext) throws -> [Float] {
+        guard let image=CIImage(data:data,options:[.applyOrientationProperty:true]) else { throw CameraFailure.message("Cannot read GPU tone fixture") }
+        let e=image.extent,w=Int(e.width),h=Int(e.height);var values=[Float](repeating:0,count:w*h*4)
+        values.withUnsafeMutableBytes { context.render(image,toBitmap:$0.baseAddress!,rowBytes:w*16,bounds:e,format:.RGBAf,colorSpace:CGColorSpace(name:CGColorSpace.extendedLinearSRGB)!) };return values
     }
     static func sensorStages(_ device:MTLDevice,_ library:MTLLibrary) throws {
         let queue=device.makeCommandQueue()!,width=64,height=48

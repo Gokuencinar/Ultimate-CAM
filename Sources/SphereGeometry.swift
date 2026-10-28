@@ -23,26 +23,35 @@ struct SpherePose {
     let forward:SIMD3<Float>
 }
 struct SphereReference {
+    private final class Convention {
+        let lock=NSLock()
+        var transposed:Bool?
+    }
+    private let convention=Convention()
     private let basis:simd_float3x3
     init(_ first:SphereMotionSnapshot) throws {
         _=try first.validated()
         guard first.gravity.y < -0.25,abs(first.gravity.z)<0.92 else { throw CameraFailure.message("Sujeta el teléfono en vertical, sin apuntar completamente al suelo o al techo al empezar.") }
-        let r=try Self.deviceToWorld(first)
+        let r=try Self.deviceToWorld(first,convention:convention)
         let raw=r*SIMD3<Float>(0,0,-1),up=SIMD3<Float>(0,0,1)
         let forward=simd_normalize(SIMD3<Float>(raw.x,raw.y,0)),right=simd_normalize(simd_cross(forward,up))
         basis=simd_float3x3(columns:(right,up,forward))
     }
-    private static func deviceToWorld(_ sample:SphereMotionSnapshot) throws -> simd_float3x3 {
+    private static func deviceToWorld(_ sample:SphereMotionSnapshot,convention:Convention) throws -> simd_float3x3 {
         let gravity=simd_normalize(sample.gravity),down=SIMD3<Float>(0,0,-1)
         let direct=simd_dot(sample.rotation*gravity,down),inverse=simd_dot(sample.rotation.transpose*gravity,down)
         guard max(direct,inverse)>0.95 else { throw CameraFailure.message("La orientación aún no está calibrada. Mantén el teléfono quieto.") }
         // At 180° the two matrices can be identical. Rejecting an ambiguous
         // transpose at that instant used to reject a perfectly valid reference.
-        return inverse>direct ? sample.rotation.transpose:sample.rotation
+        convention.lock.lock();defer { convention.lock.unlock() }
+        if convention.transposed==nil && abs(direct-inverse)>0.001 { convention.transposed=inverse>direct }
+        let transposed=convention.transposed ?? (inverse>direct)
+        guard (transposed ? inverse:direct)>0.9 else { throw CameraFailure.message("La referencia de orientación se interrumpió. Reinicia la esfera.") }
+        return transposed ? sample.rotation.transpose:sample.rotation
     }
     func pose(_ snapshot:SphereMotionSnapshot) throws -> SpherePose {
         _=try snapshot.validated()
-        let r=try Self.deviceToWorld(snapshot)
+        let r=try Self.deviceToWorld(snapshot,convention:convention)
         let worldForward=simd_mul(r,SIMD3<Float>(0,0,-1))
         let sphereForward=simd_mul(basis.transpose,worldForward)
         return SpherePose(sphereToDevice:simd_mul(r.transpose,basis),forward:simd_normalize(sphereForward))

@@ -48,7 +48,8 @@ struct MovieConfiguration:Codable,Equatable {
         fps=try c.decodeIfPresent(Int.self,forKey:.fps) ?? fps
         codec=try c.decodeIfPresent(MovieCodec.self,forKey:.codec) ?? codec
         audio=try c.decodeIfPresent(Bool.self,forKey:.audio) ?? audio
-        stabilization=try c.decodeIfPresent(MovieStabilizationMode.self,forKey:.stabilization) ?? ((c.decodeIfPresent(Bool.self,forKey:.stabilized) ?? true) ? .standard:.off)
+        let legacy=try c.decodeIfPresent(Bool.self,forKey:.stabilized) ?? true
+        stabilization=try c.decodeIfPresent(MovieStabilizationMode.self,forKey:.stabilization) ?? (legacy ? .standard:.off)
         hdrVideo=try c.decodeIfPresent(Bool.self,forKey:.hdrVideo) ?? hdrVideo
         lockWhiteBalance=try c.decodeIfPresent(Bool.self,forKey:.lockWhiteBalance) ?? lockWhiteBalance
         exposureBias=try c.decodeIfPresent(Double.self,forKey:.exposureBias) ?? exposureBias

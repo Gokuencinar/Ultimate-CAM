@@ -239,11 +239,12 @@ final class MetalBurstProcessor {
     func processRAW(_ frames:[SensorBayerFrame],referenceJPEG:Data,originalDNG:Data,options:ProcessingOptions,
                     cancellation:ProcessingCancellation?,progress:((String)->Void)?) throws -> CaptureResult {
         _=try options.validated()
-        let effective=LensCalibration.profile(options.lens).recipe(options)
         guard !frames.isEmpty,(2...16).contains(frames.count) else { throw CameraFailure.message("Metal RAW necesita entre 2 y 16 fotogramas.") }
         guard frames.allSatisfy({$0.exposure.isValid}),zip(frames,frames.dropFirst()).allSatisfy({$0.timestamp<$1.timestamp}) else { throw CameraFailure.message("La pila RAW no está ordenada temporalmente.") }
         guard let anchorIndex=SensorBayerFrame.referenceIndex(in:frames,hdr:options.hdrBracketing) else { throw CameraFailure.message("No hay una serie RAW con exposición coherente.") }
         let first=frames[anchorIndex]
+        var recipe=options;recipe.lens=first.lens
+        let effective=LensCalibration.profile(first.lens).recipe(recipe)
         let usable=frames.filter { options.hdrBracketing || $0.matchesExposure(of:first) }.count
         // Unsupported optical opcodes retain the ordinary sensor-coordinate path.
         let reconstruction=try? SuperResolutionPlan.make(first,count:usable)

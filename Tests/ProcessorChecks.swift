@@ -88,6 +88,7 @@ struct ProcessorChecks {
     static func run() throws {
         try check017()
         try check018Lens()
+        try check019Portrait()
         let plan = try NightCapturePlan.make(iso: 1600, seconds: 1.0 / 30, isoRange: 25...3200, durationRange: 0.00001...0.333)
         try require(plan.seconds == 0.25 && plan.iso < 250 && plan.count == 16, "Static night did not trade ISO for exposure")
         try require(abs(plan.iso * plan.seconds - 1600.0 / 30) < 0.001, "Night plan changed metered brightness")
@@ -394,6 +395,36 @@ struct ProcessorChecks {
         } }
         log("Radial LCA estimate \(plan.red) / \(plan.blue), corner chromatic error ratio \(after/before)")
         try require(plan.active && after<before*0.8,"r²/r⁴ LCA correction did not improve held-out corner colour alignment")
+    }
+
+    static func check019Portrait() throws {
+        let w=256,h=128,e=CGRect(x:0,y:0,width:w,height:h),linear=CGColorSpace(name:CGColorSpace.extendedLinearSRGB)!
+        let ctx=CIContext(options:[.workingColorSpace:linear,.cacheIntermediates:false])
+        var pixels=[Float](repeating:1,count:w*h*4),matte=pixels
+        for y in 0..<h { for x in 0..<w {
+            let j=(y*w+x)*4,subject=x<100,spot=(179...181).contains(x) && (63...65).contains(y)
+            for c in 0..<3 { pixels[j+c]=subject ? 0.12:(spot ? 8:0.02);matte[j+c]=subject ? 1:0 }
+        } }
+        func image(_ v:[Float])->CIImage { CIImage(bitmapData:v.withUnsafeBufferPointer{Data(buffer:$0)},bytesPerRow:w*16,size:e.size,format:.RGBAf,colorSpace:linear) }
+        func read(_ image:CIImage)->[Float] {
+            var v=[Float](repeating:0,count:w*h*4)
+            v.withUnsafeMutableBytes { ctx.render(image,toBitmap:$0.baseAddress!,rowBytes:w*16,bounds:e,format:.RGBAf,colorSpace:linear) };return v
+        }
+        let result=read(try PortraitProcessor.apply(image(pixels),mask:image(matte),extent:e,amount:1,context:ctx))
+        var inputEnergy=0.0,outputEnergy=0.0
+        for y in 45..<83 { for x in 160..<200 { let j=(y*w+x)*4;inputEnergy+=Double(pixels[j]-0.02);outputEnergy+=Double(result[j]-0.02) } }
+        let peak=result[(64*w+180)*4],rim=result[(64*w+185)*4]
+        try require(outputEnergy>inputEnergy*1.3 && peak>1,"Linear HDR portrait lost specular energy / clipped the bokeh")
+        try require(rim<peak*0.2+0.03 && result[(64*w+181)*4]>peak*0.7,"Specular point did not retain a bounded disc footprint")
+        for y in 0..<h { for x in 0..<w {
+            let j=(y*w+x)*4,m:Float=x<100 ? 1:(x==100 ? 0.75:(x==101 ? 0.4:(x==102 ? 0.1:0)))
+            for c in 0..<3 { matte[j+c]=m;pixels[j+c]=0.12*m+1*(1-m) }
+        } }
+        let white=CIImage(color:CIColor.white).cropped(to:e)
+        let clean=read(try PortraitProcessor.cleanForeground(image(pixels),mask:image(matte),background:white,extent:e,amount:1))
+        try require(clean[(64*w+100)*4]<pixels[(64*w+100)*4]-0.05,"Bright-background silhouette contamination was not removed")
+        try require(abs(clean[(64*w+80)*4]-0.12)<0.001,"Edge cleanup altered the opaque foreground")
+        log("HDR DISC BOKEH / SILHOUETTE COLOUR CHECKS PASSED")
     }
 
 }
