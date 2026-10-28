@@ -9,6 +9,7 @@ final class CameraInteractionTests: XCTestCase {
         XCTAssertTrue(shadows.waitForExistence(timeout:3));shadows.adjust(toNormalizedSliderPosition:0.7)
         app.buttons["camera.quickSettings"].tap()
         XCTAssertTrue(app.buttons["camera.headerShadows"].waitForExistence(timeout:3))
+        XCTAssertEqual(app.buttons["camera.previewTools"].value as? String,"Activo")
         app.buttons["camera.headerShadows"].tap()
         XCTAssertTrue(app.buttons["camera.headerShadows"].waitForNonExistence(timeout:3))
         app.buttons["camera.quickSettings"].tap()

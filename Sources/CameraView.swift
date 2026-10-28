@@ -120,6 +120,9 @@ struct CameraView: View {
     @State private var focusPosition: Double = 0.5
     private var zoom: Double { camera.zoomFactor }
     private var lens: CameraLens { camera.selectedLens }
+    private var effectivePreviewTools:PreviewAnalysisOptions {
+        var tools=previewTools;tools.colorLook = tools.colorLook || options.liftShadows>0.005;return tools
+    }
     private var rawAvailable:Bool {
         #if DEBUG && targetEnvironment(simulator)
         // UI-only capability fixture. The actual model/session remains unable
@@ -244,9 +247,9 @@ struct CameraView: View {
         .onChange(of: options) { _, value in
             profiles.remember(options,lens:lens.rawValue)
         }
-        .onChange(of: options) { _, value in camera.setPreviewTools(previewTools,processing:value) }
-        .onChange(of: previewTools) { _, value in camera.setPreviewTools(value,processing:options) }
-        .onChange(of: camera.busy) { _, value in if !value { camera.setPreviewTools(previewTools,processing:options) } }
+        .onChange(of: options) { _, value in camera.setPreviewTools(effectivePreviewTools,processing:value) }
+        .onChange(of: previewTools) { _, value in camera.setPreviewTools(effectivePreviewTools,processing:options) }
+        .onChange(of: camera.busy) { _, value in if !value { camera.setPreviewTools(effectivePreviewTools,processing:options) } }
         .onChange(of:bias) { _,value in if videoMode { movie.setExposureBias(value) } else { camera.setBias(Float(value)) } }
         .onChange(of:movie.configuration.exposureBias) { _,value in if videoMode && abs(value-bias)>0.001 { bias=value } }
         .onChange(of: stack) { _, value in if value { rawEnabled = false; flash = .off } }
@@ -328,8 +331,8 @@ struct CameraView: View {
                 Toggle("Resaltar enfoque",isOn:$previewTools.peaking)
                 Toggle("Cebras de luces",isOn:$previewTools.zebras)
                 Toggle("Vista de color y LUT · 5 FPS",isOn:$previewTools.colorLook)
-            } label: { Image(systemName:"viewfinder").foregroundStyle(previewTools.enabled ? CameraPalette.accent:Color.white).font(.system(size:19)).frame(width:44,height:44).background(.black.opacity(0.55),in:Circle()) }
-                .accessibilityLabel("Guías y herramientas del visor").accessibilityIdentifier("camera.previewTools").disabled(!controlsEnabled)
+            } label: { Image(systemName:"viewfinder").foregroundStyle(effectivePreviewTools.enabled ? CameraPalette.accent:Color.white).font(.system(size:19)).frame(width:44,height:44).background(.black.opacity(0.55),in:Circle()) }
+                .accessibilityLabel("Guías y herramientas del visor").accessibilityIdentifier("camera.previewTools").accessibilityValue(effectivePreviewTools.enabled ? "Activo":"Inactivo").disabled(!controlsEnabled)
         }
     }
 
