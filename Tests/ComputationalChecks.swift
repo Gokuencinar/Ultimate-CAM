@@ -449,7 +449,10 @@ import Darwin
         try require(UCTemporalPoint(0.7,0.01,0.5,0.01,0.001,0.5,0.02,0)==0,"Sensor-fixed hot pixel was accepted under measurable motion")
         try require(UCTemporalPoint(0.7,0.01,0.7,0.01,0.001,0,0,0)==1,"Indistinguishable stationary point was erased")
         let meter=PreviewMotionMeter()
-        let texture=(0..<64*48).map { i -> Float in Float((i*7381^(i/64)*193)%239)/300 }
+        let texture:[Float]=(0..<(64*48)).map { (i:Int) -> Float in
+            let a:Int=i*7381,b:Int=(i/64)*193
+            return Float((a^b)%239)/300
+        }
         for index in 0..<18 { meter.append(texture,time:10+Double(index)*0.1) }
         try require(meter.estimate(at:11.71)?.tripodStable==true,"Stable textured tripod did not qualify")
         meter.reset();try require(meter.estimate(at:11.71)==nil,"Motion reset retained tripod state")
