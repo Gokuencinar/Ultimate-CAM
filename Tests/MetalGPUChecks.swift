@@ -40,6 +40,7 @@ import Darwin
         let header=try String(contentsOfFile:"Sources/FusionMath.h",encoding:.utf8)
         let source=try String(contentsOfFile:"Sources/ComputationalCamera.metal",encoding:.utf8).replacingOccurrences(of:"#include \"FusionMath.h\"",with:header)
         let library=try device.makeLibrary(source:source,options:nil)
+        try sensorStages(device,library)
         let processor=try MetalBurstProcessor(device:device,library:library)
         let context=CIContext(mtlDevice:device,options:[.cacheIntermediates:false])
         print("Full processRAW GPU:",device.name)
@@ -120,6 +121,43 @@ import Darwin
         print("Full Astro star / single-frame hot pixel:",star,hot)
         try require(star>0.4 && hot<0.05,"End-to-end Astro erased a consistent point or preserved an isolated hot pixel")
         print("FULL RAW GPU QUANTITATIVE CHECKS PASSED (synthetic sensor; no physical camera opened)")
+    }
+    static func sensorStages(_ device:MTLDevice,_ library:MTLLibrary) throws {
+        let queue=device.makeCommandQueue()!,width=64,height=48
+        func texture()->MTLTexture {
+            let d=MTLTextureDescriptor.texture2DDescriptor(pixelFormat:.rgba16Float,width:width,height:height,mipmapped:false)
+            d.storageMode = .shared;d.usage=[.shaderRead,.shaderWrite];return device.makeTexture(descriptor:d)!
+        }
+        func execute(_ name:String,_ values:[Float],_ params:MetalFusionParameters) throws -> [Float] {
+            let input=texture(),output=texture(),halves=values.map{Float16($0).bitPattern}
+            halves.withUnsafeBytes { input.replace(region:MTLRegionMake2D(0,0,width,height),mipmapLevel:0,withBytes:$0.baseAddress!,bytesPerRow:width*8) }
+            let state=try device.makeComputePipelineState(function:library.makeFunction(name:name)!)
+            let command=queue.makeCommandBuffer()!,encoder=command.makeComputeCommandEncoder()!
+            encoder.setComputePipelineState(state);encoder.setTexture(input,index:0);encoder.setTexture(output,index:1)
+            var p=params;encoder.setBytes(&p,length:MemoryLayout<MetalFusionParameters>.stride,index:0)
+            encoder.dispatchThreads(MTLSize(width:width,height:height,depth:1),threadsPerThreadgroup:MTLSize(width:8,height:8,depth:1))
+            encoder.endEncoding();command.commit();command.waitUntilCompleted()
+            try require(command.status == .completed,"Sensor stage failed on the GPU")
+            var result=[UInt16](repeating:0,count:width*height*4)
+            result.withUnsafeMutableBytes { output.getBytes($0.baseAddress!,bytesPerRow:width*8,from:MTLRegionMake2D(0,0,width,height),mipmapLevel:0) }
+            return result.map{Float(Float16(bitPattern:$0))}
+        }
+        var p=MetalFusionParameters();p.size.w=1;p.flags.w=1;p.luma=SIMD4(0,0.5,0.5,0);p.sensorNoise=SIMD4(0,1e-5,0,1e-5)
+        var bayer=[Float](repeating:0,count:width*height*4)
+        for y in 0..<height { for x in 0..<width {
+            let j=(y*width+x)*4,base:Float=x<32 ? 0.2:0.6
+            bayer[j]=base*0.8;bayer[j+1]=base+0.004;bayer[j+2]=base-0.004;bayer[j+3]=base*0.6
+        } }
+        let green=try execute("uc_protect_bayer",bayer,p),flat=(24*width+16)*4,edge=(24*width+31)*4
+        try require(abs(green[flat+1]-green[flat+2])<0.001,"Uniform green phases were not balanced")
+        try require(abs(green[edge+1]-green[edge+2])>0.006 && abs(green[edge+1]-bayer[edge+1])<0.001,"Green equilibration erased an edge")
+        var rgb=[Float](repeating:1,count:width*height*4)
+        for j in stride(from:0,to:rgb.count,by:4) { rgb[j]=0.5;rgb[j+1]=0.4;rgb[j+2]=0.25 }
+        let center=(24*width+32)*4;rgb[center]=1;rgb[center+1]=0.9;rgb[center+2]=0.5625
+        let recovered=try execute("uc_reconstruct_highlights",rgb,p)
+        try require(abs(recovered[center]/recovered[center+1]-1.25)<0.006 && recovered[center]>1.1,"Clipped highlight did not recover neighbouring chromaticity / HDR energy")
+        try require(abs(recovered[center+1]-0.9)<0.001 && recovered[flat]==Float(Float16(0.5)),"Highlight reconstruction changed supported channels / shadows")
+        print("GPU green phases / edge preservation / extended highlight chromaticity passed")
     }
     static func makeFrames(count:Int,noise:[Double],shifts:[SIMD2<Double>]=[],exposures:[Double]=[],zoom:Double=1,scene:(Double,Double)->Double)->[SensorBayerFrame] {
         (0..<count).map { index in

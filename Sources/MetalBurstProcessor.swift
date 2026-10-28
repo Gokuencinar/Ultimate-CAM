@@ -44,7 +44,7 @@ final class MetalBurstProcessor {
         let library=try suppliedLibrary ?? device.makeDefaultLibrary(bundle:Bundle.main)
         guard library.device.registryID==device.registryID else { throw CameraFailure.message("La biblioteca Metal pertenece a otra GPU.") }
         var kernels=[String:MTLComputePipelineState]()
-        for name in ["uc_lca","uc_structure_tensor","uc_fuse_super_res","uc_clear","uc_initial_weights","uc_protect_bayer","uc_luma","uc_pyramid","uc_tile_flow","uc_regularize_flow","uc_fuse_tiles","uc_tone_luma","uc_night_tone"] {
+        for name in ["uc_reconstruct_highlights","uc_lca","uc_structure_tensor","uc_fuse_super_res","uc_clear","uc_initial_weights","uc_protect_bayer","uc_luma","uc_pyramid","uc_tile_flow","uc_regularize_flow","uc_fuse_tiles","uc_tone_luma","uc_night_tone"] {
             guard let function=library.makeFunction(name:name) else { throw CameraFailure.message("Falta un shader del procesador Metal.") }
             kernels[name]=try device.makeComputePipelineState(function:function)
         }
@@ -179,7 +179,7 @@ final class MetalBurstProcessor {
         guard plan.active else { return image }
         let e=image.extent,w=Int(e.width),h=Int(e.height)
         let normalized=image.transformed(by:CGAffineTransform(translationX:-e.minX,y:-e.minY))
-        let input=try load(normalized,width:w,height:h,cancellation:cancellation),output=try texture(w,h)
+        let output=try load(normalized,width:w,height:h,cancellation:cancellation),input=try texture(w,h)
         var parameters=MetalFusionParameters();parameters.sr=plan.coefficients;parameters.control=plan.geometry(normalized.extent)
         let command=try command();try encode("uc_lca",command,textures:[input,output],parameters:parameters)
         try finish(command,cancellation:cancellation)
@@ -209,13 +209,15 @@ final class MetalBurstProcessor {
         var params=MetalFusionParameters();params.control.y=Float(plan.gain);params.control.z=Float(plan.whitePoint)
         params.tone=night ? SIMD4<Float>(0.003,LensCalibration.profile(lens).shadowChroma,0.02,NightChromaticityPlan.strength(pixels)):SIMD4<Float>(repeating:0)
         let command=try command()
+        try encode("uc_reconstruct_highlights",command,textures:[output,input])
         try encode("uc_tone_luma",command,textures:[input,base])
         try encode("uc_pyramid",command,textures:[base,middleBase])
         try encode("uc_pyramid",command,textures:[middleBase,wideBase])
         try encode("uc_night_tone",command,textures:[input,base,wideBase,output],parameters:params)
         try finish(command,cancellation:cancellation)
         guard let result=CIImage(mtlTexture:output,options:[.colorSpace:space]) else { throw CameraFailure.message("La GPU no devolvió la imagen tonal.") }
-        let expanded=try AdaptiveHDR.rollOff(normalized,gain:Double(params.control.y),headroom:4)
+        guard let reconstructed=CIImage(mtlTexture:input,options:[.colorSpace:space]) else { throw CameraFailure.message("No se pudo conservar el rango de luces.") }
+        let expanded=try AdaptiveHDR.rollOff(reconstructed,gain:Double(params.control.y),headroom:4)
         return (result,expanded)
     }
 
@@ -230,7 +232,7 @@ final class MetalBurstProcessor {
         let reconstruction=try? SuperResolutionPlan.make(first,count:usable)
         defer { frames.forEach { $0.discardResidentPages() } }
         let fused:(dng:Data,count:Int,center:SIMD2<Double>?)=try autoreleasepool {
-        var params=MetalFusionParameters();params.size.w=1;params.flags.x=options.astroCapture ? 1:0
+        var params=MetalFusionParameters();params.size.w=1;params.flags.w=1;params.flags.x=options.astroCapture ? 1:0
         params.roi=try BayerFusionRegion.make(width:first.width,height:first.height,geometry:first.calibration.geometry,zoom:first.zoom).vector
         params.tone.w=LensCalibration.profile(first.lens).motionTolerance
         params.luma=SIMD4<Float>(first.calibration.pattern[0]==1 ? 0.5:0,first.calibration.pattern[1]==1 ? 0.5:0,

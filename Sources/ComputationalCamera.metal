@@ -20,11 +20,11 @@ kernel void uc_protect_bayer(texture2d<float,access::read> input [[texture(0)]],
                              texture2d<float,access::write> output [[texture(1)]],
                              constant FusionParameters &params [[buffer(0)]],uint2 p [[thread_position_in_grid]]) {
     if (p.x>=output.get_width() || p.y>=output.get_height()) return;
-    float4 center=input.read(p),low=float4(INFINITY),high=float4(-INFINITY);uint count=0;
+    float4 center=input.read(p),low=float4(INFINITY),high=float4(-INFINITY),sum=0;uint count=0;
     for (int y=-1;y<=1;++y) for (int x=-1;x<=1;++x) {
         int2 q=int2(p)+int2(x,y);
         if ((x==0 && y==0) || any(q<0) || q.x>=int(input.get_width()) || q.y>=int(input.get_height())) continue;
-        float4 neighbor=input.read(uint2(q));low=min(low,neighbor);high=max(high,neighbor);++count;
+        float4 neighbor=input.read(uint2(q));low=min(low,neighbor);high=max(high,neighbor);sum+=neighbor;++count;
     }
     if (count>=3) {
         // Component-wise only: each texture channel is one fixed CFA phase.
@@ -33,6 +33,24 @@ kernel void uc_protect_bayer(texture2d<float,access::read> input [[texture(0)]],
         float4 threshold=6.0f*sqrt(variance),bounded=clamp(center,low,high);
         float4 strength=smoothstep(threshold,threshold*2.0f,abs(center-bounded));
         center=mix(center,bounded,strength);
+        if(params.size.w==1 && params.flags.w) {
+            uint g0=4,g1=4;
+            for(uint c=0;c<4;++c) if(abs(params.luma[c]-0.5f)<0.001f) { if(g0==4) g0=c;else g1=c; }
+            if(g1<4) {
+                float4 average=sum/float(count);
+                float signal=max(0.0f,(average[g0]+average[g1])*0.5f);
+                float sigma=sqrt(max(params.sensorNoise.x*signal+params.sensorNoise.y,1e-8f));
+                float range=max(high[g0]-low[g0],high[g1]-low[g1]);
+                float flat=1-smoothstep(4*sigma,12*sigma,range);
+                float difference=average[g0]-average[g1];
+                float uncertainty=sigma*sqrt(2.0f/float(count));
+                float systematic=smoothstep(2*uncertainty,4*uncertainty,abs(difference));
+                // Estimate a neighbourhood phase bias, not a local G average:
+                // retain independent texture/noise in the centre and at edges.
+                float correction=0.5f*clamp(difference,-8*sigma,8*sigma)*flat*systematic;
+                center[g0]-=correction;center[g1]+=correction;
+            }
+        }
     }
     output.write(center,p);
 }
@@ -457,4 +475,41 @@ kernel void uc_lca(texture2d<float,access::sample> input [[texture(0)]],texture2
  pixel.r=input.sample(pixels,q+d*(params.sr.x*r2+params.sr.y*r4)).r;
  pixel.b=input.sample(pixels,q+d*(params.sr.z*r2+params.sr.w*r4)).b;
  output.write(pixel,p);
+}
+
+// Reconstruct a partially clipped linear RGB highlight from nearby un-clipped
+// chromaticity and the still-linear channels at the centre. All-channel clipping
+// or ambiguous/unsupported ratios retain the measured value. Extended values
+// survive in rgba16Float until the tone / HDR shoulder.
+kernel void uc_reconstruct_highlights(texture2d<float,access::read> input [[texture(0)]],
+ texture2d<float,access::write> output [[texture(1)]],uint2 p [[thread_position_in_grid]]) {
+ if(p.x>=output.get_width() || p.y>=output.get_height()) return;
+ float4 original=input.read(p);float3 center=max(original.rgb,0.0f);
+ bool3 clipped=center>=float3(0.96f);
+ if(!any(clipped) || all(clipped) || max(center.r,max(center.g,center.b))>1.05f) { output.write(original,p);return; }
+ float3 chroma=0;float total=0;
+ int2 edge=int2(input.get_width()-1,input.get_height()-1);
+ for(int y=-4;y<=4;++y) for(int x=-4;x<=4;++x) {
+  if(x==0 && y==0) continue;
+  float3 value=max(input.read(uint2(clamp(int2(p)+int2(x,y),int2(0),edge))).rgb,0.0f);
+  float peak=max(value.r,max(value.g,value.b)),floor=min(value.r,min(value.g,value.b));
+  if(peak>=0.94f || floor<0.015f) continue;
+  float mean=(value.r+value.g+value.b)/3;
+  float3 ratio=value/max(mean,1e-6f);float dotRC=0,dotRR=0;
+  for(uint c=0;c<3;++c) if(!clipped[c] && center[c]>0.015f) { dotRC+=ratio[c]*center[c];dotRR+=ratio[c]*ratio[c]; }
+  if(dotRR<0.001f) continue;
+  float scale=dotRC/dotRR,error=0;
+  for(uint c=0;c<3;++c) if(!clipped[c]) error+=abs(ratio[c]*scale-center[c])/max(center[c],0.02f);
+  float weight=exp(-float(x*x+y*y)/12.0f-error*8.0f);
+  chroma+=ratio*weight;total+=weight;
+ }
+ if(total>0.1f) {
+  chroma/=total;float numerator=0,denominator=0;
+  for(uint c=0;c<3;++c) if(!clipped[c] && center[c]>0.015f) { numerator+=chroma[c]*center[c];denominator+=chroma[c]*chroma[c]; }
+  float3 predicted=chroma*(numerator/max(denominator,1e-6f));
+  for(uint c=0;c<3;++c) if(clipped[c] && predicted[c]>center[c]) {
+   float blend=smoothstep(0.96f,0.995f,center[c]);center[c]=mix(center[c],min(predicted[c],4.0f),blend);
+  }
+ }
+ output.write(float4(center,original.a),p);
 }
