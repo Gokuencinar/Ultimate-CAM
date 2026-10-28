@@ -15,6 +15,9 @@ final class MovieCameraModel: NSObject, ObservableObject, AVCaptureFileOutputRec
     @Published private(set) var lens=CameraLens.wide
     @Published private(set) var zoom:Double=1
     @Published private(set) var maximumZoom:Double=1
+    @Published private(set) var minimumZoom:Double=1
+    @Published private(set) var inPlaceLenses=Set<CameraLens>()
+    private var zoomPlan=MovieLensZoomPlan(physical:.wide)
     @Published private(set) var torch=false
     @Published private(set) var torchAvailable=false
     @Published private(set) var previewURL:URL?
@@ -77,6 +80,9 @@ final class MovieCameraModel: NSObject, ObservableObject, AVCaptureFileOutputRec
     }
     func configure(_ options:MovieConfiguration,lens:CameraLens) {
         queue.async {
+            if self.machine.phase == .recording {
+                guard options==self.current else { return };self.switchLensOnQueue(lens);return
+            }
             guard !self.machine.busy else { return }
             if self.active { self.start(options,lens:lens) }
             else {
@@ -99,10 +105,24 @@ final class MovieCameraModel: NSObject, ObservableObject, AVCaptureFileOutputRec
         ui { self.ready=false }
         do {
             var request=try options.validated();request.audio = request.audio && audioAllowed
-            guard let camera=lens.device,let format=camera.formats.first(where:{ format in
-                let d=CMVideoFormatDescriptionGetDimensions(format.formatDescription)
-                return request.matches(width:Int(d.width),height:Int(d.height),ranges:format.videoSupportedFrameRateRanges.map { $0.minFrameRate...$0.maxFrameRate },hdr10Bit:isHDR10(format)) && (request.hdrVideo || format.supportedColorSpaces.contains(.sRGB))
-            }) else { throw CameraFailure.message("Esa combinación de lente, resolución, FPS y rango de color no está disponible.") }
+            let candidates: [AVCaptureDevice]
+            if lens == .front { candidates=[lens.device].compactMap{$0} }
+            else {
+                let virtualTypes:[AVCaptureDevice.DeviceType]=[.builtInTripleCamera,.builtInDualWideCamera,.builtInDualCamera]
+                candidates=virtualTypes.compactMap { AVCaptureDevice.default($0,for:.video,position:.back) }+[lens.device].compactMap{$0}
+            }
+            var choice:(AVCaptureDevice,AVCaptureDevice.Format)?
+            for candidate in candidates {
+                let plan=makeZoomPlan(candidate)
+                let target=plan.sensorZoom(for:LensIdentity(rawValue:lens.rawValue) ?? .wide)
+                if let format=candidate.formats.first(where:{ f in
+                    let d=CMVideoFormatDescriptionGetDimensions(f.formatDescription)
+                    return request.matches(width:Int(d.width),height:Int(d.height),ranges:f.videoSupportedFrameRateRanges.map{$0.minFrameRate...$0.maxFrameRate},hdr10Bit:isHDR10(f)) &&
+                        (request.hdrVideo || f.supportedColorSpaces.contains(.sRGB)) && target>=1 && target<=Double(f.videoMaxZoomFactor)
+                }) { choice=(candidate,format);break }
+            }
+            guard let (camera,format)=choice else { throw CameraFailure.message("Esa combinación de lente, resolución, FPS y rango de color no está disponible.") }
+            let plan=makeZoomPlan(camera)
             let newInput=try AVCaptureDeviceInput(device:camera)
             let audioInput:AVCaptureDeviceInput?
             if request.audio,let microphone=AVCaptureDevice.default(for:.audio) { audioInput=try AVCaptureDeviceInput(device:microphone) }
@@ -138,7 +158,7 @@ final class MovieCameraModel: NSObject, ObservableObject, AVCaptureFileOutputRec
                 if camera.isFocusModeSupported(.continuousAutoFocus) { camera.focusMode = .continuousAutoFocus }
                 if camera.isExposureModeSupported(.continuousAutoExposure) { camera.exposureMode = .continuousAutoExposure }
                 if camera.isWhiteBalanceModeSupported(.continuousAutoWhiteBalance) { camera.whiteBalanceMode = .continuousAutoWhiteBalance }
-                camera.videoZoomFactor=max(1,camera.minAvailableVideoZoomFactor)
+                camera.videoZoomFactor=CGFloat(max(Double(camera.minAvailableVideoZoomFactor),min(Double(camera.maxAvailableVideoZoomFactor),plan.sensorZoom(for:LensIdentity(rawValue:lens.rawValue) ?? .wide))))
                 request.exposureBias=Double(max(camera.minExposureTargetBias,min(camera.maxExposureTargetBias,Float(request.exposureBias))))
                 camera.setExposureTargetBias(Float(request.exposureBias),completionHandler:nil)
                 if camera.hasTorch { camera.torchMode = .off }
@@ -180,7 +200,7 @@ final class MovieCameraModel: NSObject, ObservableObject, AVCaptureFileOutputRec
                 if configured && active { session.startRunning() }
                 throw error
             }
-            device=camera;selected=lens;current=request;configured=true
+            device=camera;selected=lens;current=request;configured=true;zoomPlan=plan
             rotationCoordinator=AVCaptureDevice.RotationCoordinator(device:camera,previewLayer:nil)
             session.startRunning()
             let running=session.isRunning
@@ -188,8 +208,13 @@ final class MovieCameraModel: NSObject, ObservableObject, AVCaptureFileOutputRec
                 let d=CMVideoFormatDescriptionGetDimensions(candidate.formatDescription)
                 return Int(d.width)==request.resolution.width && Int(d.height)==request.resolution.height && self.isHDR10(candidate) && candidate.videoSupportedFrameRateRanges.contains { $0.minFrameRate<=Double(request.fps) && $0.maxFrameRate>=Double(request.fps) }
             }
-            ui { self.supportsHDR10=hdrAvailable; self.ready=running;self.configuration=request;self.lens=lens;self.zoom=1
-                self.maximumZoom=Double(min(camera.activeFormat.videoMaxZoomFactor,8));self.torch=false
+            ui { self.supportsHDR10=hdrAvailable; self.ready=running;self.configuration=request;self.lens=lens;self.zoom=plan.displayZoom(Double(camera.videoZoomFactor))
+                self.minimumZoom=plan.displayZoom(Double(camera.minAvailableVideoZoomFactor))
+                self.maximumZoom=min(8,plan.displayZoom(Double(camera.maxAvailableVideoZoomFactor)))
+                self.inPlaceLenses=Set(self.lenses.filter { item in
+                    let factor=plan.sensorZoom(for:LensIdentity(rawValue:item.rawValue) ?? .wide)
+                    return lens != .front && item != .front && factor>=Double(camera.minAvailableVideoZoomFactor)-0.001 && factor<=Double(camera.maxAvailableVideoZoomFactor)+0.001
+                });self.torch=false
                 self.torchAvailable=camera.hasTorch && camera.isTorchAvailable
                 self.status=running ? "\(request.resolution.label) · \(request.fps) FPS · \(request.audio ? "con audio" : "sin audio") · \(request.hdrVideo ? "HDR 10 bits":"SDR")" : "No se pudo iniciar la sesión de vídeo." }
             recoverDraftIfNeeded()
@@ -383,12 +408,30 @@ final class MovieCameraModel: NSObject, ObservableObject, AVCaptureFileOutputRec
             if d.isFocusModeSupported(f) { d.focusMode=f };if d.isExposureModeSupported(e) { d.exposureMode=e }
         }
     }
-    func setZoom(_ value:Double,smooth:Bool=false) {
-        queue.async { guard value.isFinite,let d=self.device,(try? d.lockForConfiguration()) != nil else { return }
-            let selected=min(max(1,value),min(8,Double(d.activeFormat.videoMaxZoomFactor)))
-            if smooth { d.ramp(toVideoZoomFactor:CGFloat(selected),withRate:4) }
-            else { d.cancelVideoZoomRamp();d.videoZoomFactor=CGFloat(selected) }
-            d.unlockForConfiguration();self.ui { self.zoom=selected } }
+    private func identity(_ device:AVCaptureDevice)->LensIdentity {
+        if device.position == .front { return .front }
+        switch device.deviceType { case .builtInUltraWideCamera:return .ultraWide;case .builtInTelephotoCamera:return .telephoto;default:return .wide }
+    }
+    private func makeZoomPlan(_ camera:AVCaptureDevice)->MovieLensZoomPlan {
+        MovieLensZoomPlan(physical:identity(camera),constituents:camera.constituentDevices.map{identity($0)},switchFactors:camera.virtualDeviceSwitchOverVideoZoomFactors.map{$0.doubleValue})
+    }
+    func switchLensInPlace(_ lens:CameraLens) { queue.async { self.switchLensOnQueue(lens) } }
+    private func switchLensOnQueue(_ lens:CameraLens) {
+        guard active,configured,[.idle,.recording].contains(machine.phase),let d=device,d.position == .back,lens != .front else { return }
+        let factor=zoomPlan.sensorZoom(for:LensIdentity(rawValue:lens.rawValue) ?? .wide)
+        guard factor>=Double(d.minAvailableVideoZoomFactor)-0.001,factor<=Double(d.maxAvailableVideoZoomFactor)+0.001 else {
+            ui { self.status="Ese encuadre necesita cambiar de cámara. Detén el vídeo para seleccionarlo." };return
+        }
+        setZoomOnQueue(zoomPlan.displayZoom(factor),smooth:true)
+        selected=lens;ui { self.lens=lens }
+    }
+    func setZoom(_ value:Double,smooth:Bool=false) { queue.async { self.setZoomOnQueue(value,smooth:smooth) } }
+    private func setZoomOnQueue(_ value:Double,smooth:Bool) {
+        guard value.isFinite,active,let d=device,![.finishing,.saving].contains(machine.phase),(try? d.lockForConfiguration()) != nil else { return }
+        let selected=min(max(Double(d.minAvailableVideoZoomFactor),value*zoomPlan.sensorPerDisplay),min(Double(d.maxAvailableVideoZoomFactor),8*zoomPlan.sensorPerDisplay))
+        if smooth { d.ramp(toVideoZoomFactor:CGFloat(selected),withRate:4) }
+        else { d.cancelVideoZoomRamp();d.videoZoomFactor=CGFloat(selected) }
+        d.unlockForConfiguration();let displayed=zoomPlan.displayZoom(selected);ui { self.zoom=displayed }
     }
     func toggleTorch() {
         queue.async { guard let d=self.device,d.hasTorch,d.isTorchAvailable,(try? d.lockForConfiguration()) != nil else { return }

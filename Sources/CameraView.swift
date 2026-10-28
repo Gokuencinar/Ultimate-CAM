@@ -633,6 +633,9 @@ struct CameraView: View {
     }
     private func configureMovie(_ options:MovieConfiguration,lens:CameraLens) {
         guard videoMode else { movie.configure(options,lens:lens);return }
+        if options==movie.configuration,lens != .front,movie.inPlaceLenses.contains(lens) {
+            movie.switchLensInPlace(lens);return
+        }
         guard controlsEnabled else { return }
         beginModeTransition { token in
             allowPreviewAttachment=true;var request=options;request.exposureBias=bias;movie.configure(request,lens:lens);finishModeTransition(token)
@@ -699,11 +702,13 @@ struct CameraView: View {
             HStack(spacing:8) {
                 ForEach(movie.lenses.filter { $0 != .front }) { item in
                     Button(item.label) { configureMovie(movie.configuration,lens:item) }
+                        .accessibilityIdentifier("video.lens."+item.rawValue)
+                        .disabled(movie.phase == .recording && !movie.inPlaceLenses.contains(item))
                         .font(.subheadline.bold()).frame(width:44,height:36)
                         .background(movie.lens==item ? CameraPalette.accent:Color(white:0.14),in:Capsule())
                         .foregroundStyle(movie.lens==item ? .black:.white)
                 }
-            }.disabled(movieBusy || openingVideo)
+            }.disabled([.finishing,.saving].contains(movie.phase) || openingVideo)
             HStack {
                 Button { showMovieReview=true } label: { Image(systemName:"play.rectangle").font(.title2).frame(width:50,height:50) }
                     .accessibilityLabel("Revisar vídeo").accessibilityIdentifier("video.gallery").disabled(movie.previewURL==nil || movieBusy)

@@ -88,3 +88,20 @@ struct MovieRecordingState {
     mutating func saved(_ id: UUID) -> Bool { guard token==id, phase == .saving else { return false };phase = .review;return true }
     mutating func discard() -> Bool { guard phase == .review else { return false };phase = .idle;token=nil;return true }
 }
+
+/// Display zoom uses the wide camera as 1×; virtual sensor zoom starts at the
+/// widest constituent. No capture graph mutation is needed to cross a lens.
+struct MovieLensZoomPlan {
+    let factors:[LensIdentity:Double]
+    let sensorPerDisplay:Double
+    static func optical(_ lens:LensIdentity)->Double { lens == .ultraWide ? 0.5:(lens == .telephoto ? 2:1) }
+    init(physical:LensIdentity,constituents:[LensIdentity]=[],switchFactors:[Double]=[]) {
+        if !constituents.isEmpty,constituents.count==switchFactors.count+1 {
+            var map=[LensIdentity:Double]()
+            for (lens,factor) in zip(constituents,[1]+switchFactors) where factor.isFinite && factor>=1 { map[lens]=factor }
+            factors=map;sensorPerDisplay=map[.wide] ?? (1/Self.optical(constituents[0]))
+        } else { factors=[:];sensorPerDisplay=1/Self.optical(physical) }
+    }
+    func sensorZoom(for lens:LensIdentity)->Double { factors[lens] ?? Self.optical(lens)*sensorPerDisplay }
+    func displayZoom(_ sensor:Double)->Double { sensor/sensorPerDisplay }
+}
