@@ -176,9 +176,20 @@ struct GuidedSphereView:View {
             ZStack {
                 Image(systemName:"plus").font(.system(size:22,weight:.light)).foregroundStyle(.white)
                     .position(x:viewport.width/2-origin.x,y:viewport.height/2-origin.y)
-                if let sample=motion.snapshot,let ref=reference ?? (try? SphereReference(sample)),let pose=try? ref.pose(sample),let next,
-                   let point=SphereNodeSelection.projected(next,pose:pose,size:viewport,fieldOfView:lastFieldOfView) {
-                    Circle().stroke(aimReady ? CameraPalette.accent:.white,lineWidth:3).frame(width:40,height:40).position(x:point.x-origin.x,y:point.y-origin.y)
+                if let sample=motion.snapshot,let ref=reference ?? (try? SphereReference(sample)),let pose=try? ref.pose(sample) {
+                    ForEach(SphereTarget.all.filter{captured[$0.id]==nil}) { target in
+                        if let point=SphereNodeSelection.projected(target,pose:pose,size:viewport,fieldOfView:lastFieldOfView) {
+                            Circle().stroke(target.id==next?.id ? CameraPalette.accent:.white.opacity(0.6),lineWidth:target.id==next?.id ? 3:2)
+                                .frame(width:40,height:40).position(x:point.x-origin.x,y:point.y-origin.y)
+                        }
+                    }
+                    if let next,SphereNodeSelection.projected(next,pose:pose,size:viewport,fieldOfView:lastFieldOfView)==nil {
+                        let ray=pose.sphereToDevice*next.direction
+                        let arrow=abs(ray.y)>abs(ray.x) ? (ray.y>0 ? "arrow.up":"arrow.down"):(ray.x<0 ? "arrow.left":"arrow.right")
+                        Label("Gira hacia el siguiente objetivo",systemImage:arrow).font(.subheadline.bold())
+                            .padding(10).background(.black.opacity(0.65),in:Capsule())
+                            .position(x:viewport.width/2-origin.x,y:viewport.height/2+70-origin.y)
+                    }
                 }
             }
         }

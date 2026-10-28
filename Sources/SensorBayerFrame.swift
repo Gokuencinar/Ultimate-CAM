@@ -188,7 +188,7 @@ struct SensorBayerFrame {
         // The file representation may quantize a native sensor buffer. Never
         // combine the file's white level with the buffer's black level.
         let nativeLevels = !sensorNumbers("BlackLevel").isEmpty && !sensorNumbers("WhiteLevel").isEmpty
-        let levelKeys:Set<String>=["BlackLevel","WhiteLevel","BlackLevelRepeatDim","BlackLevelDeltaH","BlackLevelDeltaV","LinearizationTable"]
+        let levelKeys:Set<String>=["BlackLevel","WhiteLevel"]
         func numbers(_ key:String) -> [Double] {
             if nativeLevels && levelKeys.contains(key) { return sensorNumbers(key) }
             if let tag=DNGMetadata.namedTags[key],let field=rawMetadata.fields[tag] { return field.numbers }

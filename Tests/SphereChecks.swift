@@ -12,9 +12,9 @@ import simd
     }
     static func run() throws {
         try checkRealignment()
-        let completed=Set(0..<22),node=SphereTarget.all[22]
-        try check(SphereNodeSelection.next(captured:completed,direction:node.direction)?.id==22,"Sphere target disappeared after the 22nd view")
-        try check(SphereNodeSelection.next(captured:Set(0..<62),direction:node.direction)==nil,"Completed sphere still suggests a view")
+        let completed=Set(0..<22),remaining=SphereTarget.all[22]
+        try check(SphereNodeSelection.next(captured:completed,direction:remaining.direction)?.id==22,"Sphere target disappeared after the 22nd view")
+        try check(SphereNodeSelection.next(captured:Set(0..<62),direction:remaining.direction)==nil,"Completed sphere still suggests a view")
         let fov=CaptureProjection.longSideFOV(equivalent35mm:26,aspect:4.0/3)!
         try check(fov>66 && fov<69,"Portrait capture incorrectly uses the full-frame width for its diagonal equivalent")
         try checkMeridianBlend()
