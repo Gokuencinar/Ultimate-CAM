@@ -180,7 +180,17 @@ struct SensorBayerFrame {
             throw CameraFailure.message("El RAW no contiene plano Bayer y calibración DNG accesibles.")
         }
         let rawMetadata=try DNGMetadata.read(dng)
+        let sensorTags=photo.metadata[kCGImagePropertyDNGDictionary as String] as? [String:Any] ?? [:]
+        func sensorNumbers(_ key:String)->[Double] {
+            if let value=sensorTags[key] as? NSNumber { return [value.doubleValue] }
+            return (sensorTags[key] as? [NSNumber])?.map(\.doubleValue) ?? []
+        }
+        // The file representation may quantize a native sensor buffer. Never
+        // combine the file's white level with the buffer's black level.
+        let nativeLevels = !sensorNumbers("BlackLevel").isEmpty && !sensorNumbers("WhiteLevel").isEmpty
+        let levelKeys:Set<String>=["BlackLevel","WhiteLevel","BlackLevelRepeatDim","BlackLevelDeltaH","BlackLevelDeltaV","LinearizationTable"]
         func numbers(_ key:String) -> [Double] {
+            if nativeLevels && levelKeys.contains(key) { return sensorNumbers(key) }
             if let tag=DNGMetadata.namedTags[key],let field=rawMetadata.fields[tag] { return field.numbers }
             if let n=tags[key] as? NSNumber { return [n.doubleValue] }
             return (tags[key] as? [NSNumber])?.map(\.doubleValue) ?? []
@@ -249,6 +259,7 @@ struct SensorBayerFrame {
         let samples=UnsafeBufferPointer(start:base.assumingMemoryBound(to:UInt16.self),count:rowBytes/2*h)
         let packed=try BayerQuadPacking.pack(samples,rowElements:rowBytes/2,originX:offsetX,originY:offsetY,
             cropWidth:packedWidth,cropHeight:packedHeight,step:step,black:levels,white:Float(white))
+        CaptureTrace.record("raw.sensor.levels",["native":nativeLevels,"black":black,"white":white,"fileWhite":rawMetadata[50717]])
         let exif=props[kCGImagePropertyExifDictionary as String] as? [String:Any] ?? [:]
         let exposure=FrameExposure(seconds:(exif[kCGImagePropertyExifExposureTime as String] as? NSNumber)?.doubleValue ?? 0,
             iso:(exif[kCGImagePropertyExifISOSpeedRatings as String] as? [NSNumber])?.first?.doubleValue ?? 0)

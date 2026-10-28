@@ -149,6 +149,18 @@ import Darwin
         print("GPU patcher motion / shadows / detail deltas",motionDifference,shadowDelta,detailDelta)
         try require(shadowDelta>0.015 && detailDelta>0.0005,"RAW GPU shadow/detail controls were not reflected in the developed export")
         try clippedNight(processor,context:context,options:options,reference:reference)
+        let gray=[Float](repeating:0.08,count:256)
+        var pink=gray,white=gray,valid=gray,colored=gray
+        for i in stride(from:0,to:gray.count,by:4) {
+            pink[i]=0.9;pink[i+1]=0.1;pink[i+2]=0.9
+            white[i]=1;white[i+1]=1;white[i+2]=1
+            valid[i]=0.2;valid[i+1]=0.2;valid[i+2]=0.2
+            colored[i]=0.8;colored[i+1]=0.05;colored[i+2]=0.6
+        }
+        try require(RAWRenderValidation.rejects(rendered:pink,reference:gray),"Global magenta decode was silently exported")
+        try require(RAWRenderValidation.rejects(rendered:white,reference:gray),"Burned night decode was silently exported")
+        try require(!RAWRenderValidation.rejects(rendered:valid,reference:gray),"Valid night lift was rejected")
+        try require(!RAWRenderValidation.rejects(rendered:colored,reference:colored),"A genuinely coloured subject was rejected")
         print("FULL RAW GPU QUANTITATIVE CHECKS PASSED (synthetic sensor; no physical camera opened)")
     }
     static func clippedNight(_ processor:MetalBurstProcessor,context:CIContext,options:ProcessingOptions,reference:Data) throws {

@@ -37,9 +37,9 @@ struct GuidedSphereView:View {
         guard let candidate=reference ?? (try? SphereReference(snapshot)) else { return nil };return try? candidate.pose(snapshot).forward
     }
     private var next:SphereTarget? {
-        guard captured.count<22 else { return nil }
+        guard captured.count<SphereTarget.all.count else { return nil }
         guard let direction else { return SphereTarget.all[0] }
-        return SphereTarget.all.filter { captured[$0.id]==nil }.min { $0.angle(to:direction)<$1.angle(to:direction) }
+        return SphereNodeSelection.next(captured:Set(captured.keys),direction:direction)
     }
     private var angle:Float { if let next,let direction { return next.angle(to:direction) };return reference==nil ? 0:180 }
     private var aimReady:Bool {

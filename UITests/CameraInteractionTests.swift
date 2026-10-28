@@ -1,6 +1,17 @@
 import XCTest
 
 final class CameraInteractionTests: XCTestCase {
+    func testRecoveredMovieDoesNotHijackRecordButton() {
+        continueAfterFailure=false
+        let app=XCUIApplication();app.launchArguments=["-ui-test-movie-review"];app.launch()
+        revealMode(app,"camera.mode.video").tap()
+        let record=app.buttons["video.record"]
+        XCTAssertTrue(record.waitForExistence(timeout:8))
+        let transition=app.descendants(matching:.any).matching(identifier:"camera.modeTransition").firstMatch
+        XCTAssertTrue(transition.waitForNonExistence(timeout:5))
+        XCTAssertEqual(record.label,"Grabar vídeo")
+        XCTAssertTrue(app.buttons["video.gallery"].exists)
+    }
     func testQuickExposureAndRAWFormatsWithoutCapturing() {
         continueAfterFailure=false
         let app=XCUIApplication();app.launchArguments=["-ui-test-raw-support"];app.launch()

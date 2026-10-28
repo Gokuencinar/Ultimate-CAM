@@ -328,6 +328,11 @@ final class MetalBurstProcessor {
         progress?("Metal RAW · tono y color…")
         let optical=options.lensCorrections ? try correctOptics(developed,lens:first.lens,center:fused.center,cancellation:cancellation):developed
         let mapped=try tone(optical,maximumGain:options.hdrBracketing ? 64:32,night:!options.hdrBracketing,options:effective,cancellation:cancellation)
+        if first.zoom<1.05,RAWRenderValidation.rejects(mapped.sdr,reference:referenceJPEG,context:context) {
+            return CaptureResult(jpeg:referenceJPEG,reference:referenceJPEG,
+                details:"Se conserva la foto de cámara: el revelado RAW no mantuvo el color.",
+                mergedFrames:1,raw:originalDNG,source:"camera-reference-color-recovery")
+        }
         let prepared=try JPEGRenderer.prepare(mapped.sdr,extent:mapped.sdr.extent,options:options,context:context,
             hdrSource:options.preserveHDR ? mapped.hdr:nil,hdrHeadroom:4,opticsApplied:options.lensCorrections,metalToneApplied:true)
         let jpeg=try JPEGRenderer.encode(prepared,options:options,context:context,metadataReference:referenceJPEG,frames:fused.count)
@@ -378,5 +383,38 @@ final class MetalBurstProcessor {
         } }
         residuals.sort();let sigma=residuals[residuals.count/2]/1.3489795
         return min(0.01,max(1e-7,sigma*sigma))
+    }
+}
+
+/// Compare the scene before user colour/LUT adjustments. This rejects severe
+/// global decode failures, not ordinary tone differences or coloured subjects.
+/// The sensor original and camera JPEG remain available for a future re-edit.
+enum RAWRenderValidation {
+    static func rejects(_ image:CIImage,reference:Data,context:CIContext)->Bool {
+        guard let camera=CIImage(data:reference,options:[.applyOrientationProperty:true]) else { return false }
+        func pixels(_ source:CIImage)->[Float] {
+            let e=source.extent
+            let small=source.transformed(by:CGAffineTransform(translationX:-e.minX,y:-e.minY))
+                .transformed(by:CGAffineTransform(scaleX:48/e.width,y:48/e.height))
+            var p=[Float](repeating:0,count:48*48*4)
+            p.withUnsafeMutableBytes { context.render(small,toBitmap:$0.baseAddress!,rowBytes:48*16,bounds:CGRect(x:0,y:0,width:48,height:48),format:.RGBAf,colorSpace:CGColorSpace(name:CGColorSpace.extendedLinearSRGB)!) }
+            return p
+        }
+        return rejects(rendered:pixels(image),reference:pixels(camera))
+    }
+    static func rejects(rendered:[Float],reference:[Float])->Bool {
+        guard rendered.count==reference.count,rendered.count>=64,rendered.count%4==0 else { return false }
+        var neutral=0,magenta=0,dark=0,washed=0,invalid=0
+        for i in stride(from:0,to:rendered.count,by:4) {
+            let a=SIMD3(reference[i],reference[i+1],reference[i+2]),b=SIMD3(rendered[i],rendered[i+1],rendered[i+2])
+            guard b.x.isFinite,b.y.isFinite,b.z.isFinite else { invalid+=1;continue }
+            let al=(a.x+a.y+a.z)/3,bl=(b.x+b.y+b.z)/3
+            if al>0.015 && al<0.65 && max(a.x,a.y,a.z)-min(a.x,a.y,a.z)<max(0.02,al*0.25) {
+                neutral+=1
+                if min(b.x,b.z)>max(0.03,b.y*1.55) { magenta+=1 }
+            }
+            if al<0.2 { dark+=1;if bl>0.8 { washed+=1 } }
+        }
+        return invalid>rendered.count/64 || (neutral>=32 && magenta*3>neutral) || (dark>=32 && washed*4>dark*3)
     }
 }

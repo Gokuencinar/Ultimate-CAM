@@ -22,6 +22,23 @@ struct SphereMotionSnapshot {
 struct SpherePose {
     let sphereToDevice:simd_float3x3
     let forward:SIMD3<Float>
+    func corrected(yaw:Float,pitch:Float)->Self {
+        let right=sphereToDevice.transpose*SIMD3<Float>(1,0,0)
+        let y=simd_float3x3(simd_quatf(angle:yaw,axis:SIMD3(0,1,0)))
+        let p=simd_float3x3(simd_quatf(angle:-pitch,axis:simd_normalize(right)))
+        let turn=y*p
+        return Self(sphereToDevice:sphereToDevice*turn.transpose,forward:simd_normalize(turn*forward))
+    }
+}
+
+enum CaptureProjection {
+    /// 35 mm equivalent uses the full-frame diagonal, not its 36 mm width.
+    /// The delivered portrait JPEG's long side is the sensor landscape width.
+    static func longSideFOV(equivalent35mm:Double,aspect:Double)->Double? {
+        guard equivalent35mm.isFinite,(10...200).contains(equivalent35mm),aspect.isFinite,(1...3).contains(aspect) else { return nil }
+        let diagonal=sqrt(36.0*36+24.0*24),longSide=diagonal/sqrt(1+1/(aspect*aspect))
+        return 2*atan(longSide/(2*equivalent35mm))*180/Double.pi
+    }
 }
 struct SphereReference {
     private final class Convention {
@@ -95,6 +112,9 @@ struct SphereAim {
 }
 
 enum SphereNodeSelection {
+    static func next(captured:Set<Int>,direction:SIMD3<Float>)->SphereTarget? {
+        SphereTarget.all.filter{!captured.contains($0.id)}.min{$0.angle(to:direction)<$1.angle(to:direction)}
+    }
     static func completedTarget(planned:Int,pose:SpherePose,first:Bool)->Int? {
         guard SphereTarget.all.indices.contains(planned),SphereTarget.all[planned].angle(to:pose.forward)<(first ? 16:12) else { return nil }
         return planned

@@ -14,7 +14,8 @@ import simd
         try check(sweep.canStitch(validFrames:2,processing:false),"Short sweep blocked two valid frames")
         try check(!sweep.canStitch(validFrames:1,processing:false) && !sweep.canStitch(validFrames:2,processing:true),"Invalid stitch transaction accepted")
         sweep.reset();try check(!sweep.sweeping && !sweep.pending && !sweep.finishRequested,"Short/failed sweep did not rearm immediately")
-        try check(PanoramaSweepState.needsTimedSample(now:1,lastRequest:0.5) && !PanoramaSweepState.needsTimedSample(now:1,lastRequest:0.9),"Delayed IMU has no bounded visual sampling fallback")
+        try check(PanoramaSweepState.needsTimedSample(now:2,lastRequest:0.5) && !PanoramaSweepState.needsTimedSample(now:1,lastRequest:0.9),"Delayed IMU has no bounded visual sampling fallback")
+        try checkCylindricalSweep()
         try checkMultiBand()
         try checkOddRegistrationAndSweep()
         try check(CoveredRectangle.largest([UInt8](repeating:255,count:32),width:8,height:4)==CGRect(x:0,y:0,width:8,height:4),"Full coverage cropped incorrectly")
@@ -71,6 +72,37 @@ import simd
         plan.captured();try check(!plan.needsFrame(fieldOfView:65),"Panorama repeated a stationary sample")
         try plan.update(sample(50,1));try check(plan.warning != nil && !plan.needsFrame(fieldOfView:65),"Fast sweep ignored its quality gate")
         print("ODD VISION PATCHES / CONTINUOUS SWEEP CHECKS PASSED")
+    }
+    static func checkCylindricalSweep() throws {
+        let w=192,h=256,worldWidth=1024
+        let context=CIContext(options:[.useSoftwareRenderer:true]),space=CGColorSpace(name:CGColorSpace.sRGB)!
+        var seed:UInt32=19,world=[Float](repeating:0,count:worldWidth*h)
+        for i in world.indices { seed=seed &* 1664525 &+ 1013904223;world[i]=Float(25+(seed>>24)%200) }
+        let focal=Double(h)*0.5/tan(67*Double.pi/360)
+        func sample(_ x:Double,_ y:Double)->Float {
+            let ix=min(worldWidth-2,max(0,Int(x))),iy=min(h-2,max(0,Int(y)))
+            let fx=Float(x-Double(ix)),fy=Float(y-Double(iy))
+            let top=world[iy*worldWidth+ix]*(1-fx)+world[iy*worldWidth+ix+1]*fx
+            let bottom=world[(iy+1)*worldWidth+ix]*(1-fx)+world[(iy+1)*worldWidth+ix+1]*fx
+            return top*(1-fy)+bottom*fy
+        }
+        var frames=[Data]()
+        for degrees in [0.0,25,50,75,100] {
+            var pixels=[UInt8](repeating:255,count:w*h*4)
+            for y in 0..<h { for x in 0..<w {
+                let theta=atan((Double(x)+0.5-Double(w)/2)/focal)
+                let wx=200+focal*(theta+degrees*Double.pi/180),wy=(Double(y)+0.5-Double(h)/2)*cos(theta)+Double(h)/2
+                let v=UInt8(clamping:Int(sample(wx,wy)))
+                for c in 0..<3 { pixels[(y*w+x)*4+c]=v }
+            } }
+            let image=CIImage(bitmapData:Data(pixels),bytesPerRow:w*4,size:CGSize(width:w,height:h),format:.RGBA8,colorSpace:space)
+                .clampedToExtent().applyingFilter("CIGaussianBlur",parameters:[kCIInputRadiusKey:0.7]).cropped(to:CGRect(x:0,y:0,width:w,height:h))
+            frames.append(context.pngRepresentation(of:image,format:.RGBA8,colorSpace:space)!)
+        }
+        let result=try PanoramaProcessor().process(frames,options:ProcessingOptions(),fieldOfView:67)
+        guard let image=PreviewDecoder.image(result.jpeg) else { throw CameraFailure.message("Cylindrical panorama produced no image") }
+        print("100-degree cylindrical sweep",image.width,image.height,result.mergedFrames)
+        try check(result.mergedFrames>=4 && image.width>450 && image.height>180,"A wide rotational sweep folded, shortened or lost its valid coverage")
     }
     static func checkMultiBand() throws {
         let w=256,h=96,e=CGRect(x:0,y:0,width:w,height:h)

@@ -1,5 +1,6 @@
 import CoreImage
 import simd
+import Vision
 
 struct SphereImageFrame {
     let data:Data
@@ -22,18 +23,12 @@ final class SphereProcessor {
             try cancellation?.check();progress?("Proyectando esfera \(index+1) de \(frames.count)…")
             let joined=try autoreleasepool { () throws -> MultiBandStitcher.Result in
             guard SphereCaptureOrientation.valid(frame.pose),frame.fieldOfView.isFinite,(30...130).contains(frame.fieldOfView),let decoded=CIImage(data:frame.data,options:[.applyOrientationProperty:true]) else { throw CameraFailure.message("Fotograma esférico no válido.") }
-            let target=max(128,min(1400,Double(width)*frame.fieldOfView/360*1.15))
-            let scale=min(1,target/max(decoded.extent.width,decoded.extent.height))
-            var image=decoded.transformed(by:CGAffineTransform(scaleX:scale,y:scale))
-            image=image.transformed(by:CGAffineTransform(translationX:-image.extent.minX,y:-image.extent.minY))
-            let focal=max(image.extent.width,image.extent.height)*0.5/tan(frame.fieldOfView*Double.pi/360)
-            let matrix=frame.pose.sphereToDevice
-            let rows=(0..<3).map { row in CIVector(x:CGFloat(matrix[0][row]),y:CGFloat(matrix[1][row]),z:CGFloat(matrix[2][row])) }
-            guard let projected=Self.projectKernel?.apply(extent:extent,roiCallback:{_,_ in image.extent},arguments:[image,
-                CIVector(x:CGFloat(width),y:CGFloat(width/2)),CIVector(x:image.extent.width,y:image.extent.height),
-                focal,rows[0],rows[1],rows[2]]),
-                let color=Self.colorKernel?.apply(extent:extent,arguments:[projected]),
-                let coverage=Self.coverKernel?.apply(extent:extent,arguments:[projected]) else { throw CameraFailure.message("No se pudo proyectar la esfera.") }
+            var projected=try projection(decoded,pose:frame.pose,fieldOfView:frame.fieldOfView,width:width)
+            if index>0,let correction=try alignment(projected.color,coverage:projected.coverage,reference:mean,referenceCoverage:weight,width:width) {
+                let pose=frame.pose.corrected(yaw:correction.x*2*Float.pi/Float(width),pitch:correction.y*2*Float.pi/Float(width))
+                projected=try projection(decoded,pose:pose,fieldOfView:frame.fieldOfView,width:width)
+            }
+            let color=projected.color,coverage=projected.coverage
             return try MultiBandStitcher.blend(mean,coverage:weight,color,coverage:coverage,
                 extent:extent,context:context,wrapX:true,cancellation:cancellation)
             }
@@ -72,6 +67,61 @@ final class SphereProcessor {
         return CaptureResult(jpeg:jpeg,reference:frames[0].data,
             details:"\(coverage[0]<0.995 ? "Esfera parcial":"Esfera 360°") · \(frames.count) fotos · \(rendered.width) × \(rendered.height) · cobertura \(String(format:"%.1f",coverage[0]*100)) %. Orientación relativa; sin rumbo GPS ni corrección de paralaje.",
             mergedFrames:frames.count,source:"guided-equirectangular-sphere")
+    }
+    private func projection(_ decoded:CIImage,pose:SpherePose,fieldOfView:Double,width:Int) throws -> (color:CIImage,coverage:CIImage) {
+        let extent=CGRect(x:0,y:0,width:width,height:width/2)
+            let target=max(128,min(1400,Double(width)*fieldOfView/360*1.15))
+            let scale=min(1,target/max(decoded.extent.width,decoded.extent.height))
+            var image=decoded.transformed(by:CGAffineTransform(scaleX:scale,y:scale))
+            image=image.transformed(by:CGAffineTransform(translationX:-image.extent.minX,y:-image.extent.minY))
+            let focal=max(image.extent.width,image.extent.height)*0.5/tan(fieldOfView*Double.pi/360)
+            let matrix=pose.sphereToDevice
+            let rows=(0..<3).map { row in CIVector(x:CGFloat(matrix[0][row]),y:CGFloat(matrix[1][row]),z:CGFloat(matrix[2][row])) }
+            guard let projected=Self.projectKernel?.apply(extent:extent,roiCallback:{_,_ in image.extent},arguments:[image,
+                CIVector(x:CGFloat(width),y:CGFloat(width/2)),CIVector(x:image.extent.width,y:image.extent.height),
+                focal,rows[0],rows[1],rows[2]]),
+                let color=Self.colorKernel?.apply(extent:extent,arguments:[projected]),
+                let coverage=Self.coverKernel?.apply(extent:extent,arguments:[projected]) else { throw CameraFailure.message("No se pudo proyectar la esfera.") }
+        return (color,coverage)
+    }
+    /// Small IMU drift is corrected from a fully covered common patch. A
+    /// projective fit is deliberately excluded: it cannot repair parallax and
+    /// would distort an equirectangular sphere. Keep the IMU pose when evidence
+    /// is weak or the measured correction exceeds five degrees.
+    func alignment(_ color:CIImage,coverage:CIImage,reference:CIImage,referenceCoverage:CIImage,width:Int) throws -> SIMD2<Float>? {
+        let w=512,h=256,scale=CGFloat(w)/CGFloat(width),e=CGRect(x:0,y:0,width:w,height:h)
+        let transform=CGAffineTransform(scaleX:scale,y:scale)
+        let a=reference.transformed(by:transform),b=color.transformed(by:transform)
+        let ca=referenceCoverage.transformed(by:transform),cb=coverage.transformed(by:transform)
+        var av=[UInt8](repeating:0,count:w*h),bv=av
+        av.withUnsafeMutableBytes { context.render(ca,toBitmap:$0.baseAddress!,rowBytes:w,bounds:e,format:.L8,colorSpace:nil) }
+        bv.withUnsafeMutableBytes { context.render(cb,toBitmap:$0.baseAddress!,rowBytes:w,bounds:e,format:.L8,colorSpace:nil) }
+        for i in av.indices { av[i]=(av[i]>180 && bv[i]>180) ? 255:0 }
+        guard let covered=CoveredRectangle.largest(av,width:w,height:h),covered.width>=32,covered.height>=32 else { return nil }
+        let patch=covered.insetBy(dx:8,dy:8).integral
+        guard let ac=context.createCGImage(a,from:patch,format:.RGBA8,colorSpace:space),
+              let bc=context.createCGImage(b,from:patch,format:.RGBA8,colorSpace:space) else { return nil }
+        let request=VNTranslationalImageRegistrationRequest(targetedCGImage:bc)
+        request.regionOfInterest=CGRect(x:0,y:0,width:1,height:1)
+        do { try VNImageRequestHandler(cgImage:ac,orientation:.up).perform([request]) } catch { return nil }
+        guard let result=request.results?.first,result.confidence>=0.5 else { return nil }
+        let dx=result.alignmentTransform.tx,dy=result.alignmentTransform.ty,limit=CGFloat(w)*5/360
+        guard dx.isFinite,dy.isFinite,abs(dx)<=limit,abs(dy)<=limit,abs(dx)+abs(dy)>0.25 else { return nil }
+        let bounds=patch.insetBy(dx:ceil(abs(dx))+2,dy:ceil(abs(dy))+2)
+        guard bounds.width>=8,bounds.height>=8 else { return nil }
+        func pixels(_ image:CIImage)->[Float] {
+            let image=image.cropped(to:bounds).transformed(by:CGAffineTransform(translationX:-bounds.minX,y:-bounds.minY))
+                .transformed(by:CGAffineTransform(scaleX:32/bounds.width,y:32/bounds.height))
+            var values=[Float](repeating:0,count:32*32*4)
+            values.withUnsafeMutableBytes { context.render(image,toBitmap:$0.baseAddress!,rowBytes:32*16,bounds:CGRect(x:0,y:0,width:32,height:32),format:.RGBAf,colorSpace:space) };return values
+        }
+        let baseline=pixels(a),before=pixels(b),after=pixels(b.transformed(by:CGAffineTransform(translationX:dx,y:dy)))
+        var old:Double=0,new:Double=0
+        for i in stride(from:0,to:baseline.count,by:4) { for c in 0..<3 {
+            old+=abs(Double(baseline[i+c]-before[i+c]));new+=abs(Double(baseline[i+c]-after[i+c]))
+        } }
+        guard old>0.5,new<old*0.9 else { return nil }
+        return SIMD2(Float(dx/scale),Float(dy/scale))
     }
     private static let projectKernel=CIKernel(source:"""
         kernel vec4 sphereProject(sampler frame,vec2 outputSize,vec2 inputSize,float focal,vec3 row0,vec3 row1,vec3 row2) {

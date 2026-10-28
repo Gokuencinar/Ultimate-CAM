@@ -76,6 +76,10 @@ struct MovieRecordingState {
         guard phase == .idle else { return nil }
         token=UUID();phase = .starting;return token
     }
+    mutating func beginKeepingDraft() -> UUID? {
+        if phase == .review { phase = .idle;token=nil }
+        return begin()
+    }
     mutating func started(_ id:UUID)->Bool {
         guard token==id,phase == .starting else { return false };phase = .recording;return true
     }

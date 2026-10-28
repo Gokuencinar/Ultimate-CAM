@@ -37,6 +37,12 @@ import Darwin
         do { _=try CaptureRotation.cardinal(.nan);throw CameraFailure.message("Invalid rotation accepted") }
         catch CameraFailure.message(let text) where text == "Invalid rotation accepted" { throw CameraFailure.message(text) }
         catch { }
+        var recovered=MovieRecordingState()
+        try check(recovered.recover(),"Cannot recover an existing movie")
+        let old=recovered.token
+        let fresh=recovered.beginKeepingDraft()
+        try check(fresh != nil && fresh != old && recovered.phase == .starting,"A recovered draft hijacked the new-record button")
+        try check(recovered.beginKeepingDraft()==nil && recovered.started(fresh!) && recovered.phase == .recording,"Draft recovery overlapped or immediately stopped the next recording")
         var state=MovieRecordingState()
         try check(!state.stop() && state.beginSave()==nil,"Idle operation accepted")
         let first=state.begin()!

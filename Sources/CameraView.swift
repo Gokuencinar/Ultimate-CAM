@@ -677,7 +677,6 @@ struct CameraView: View {
         let now=ProcessInfo.processInfo.systemUptime
         guard now-lastVideoAction>=0.35,movie.phase != .starting else { return };lastVideoAction=now
         if movie.phase == .recording { movie.stopRecording() }
-        else if movie.phase == .review { showMovieReview=true }
         else { movie.record() }
     }
     private func updateMovie(_ change:(inout MovieConfiguration)->Void) {
@@ -728,7 +727,7 @@ struct CameraView: View {
                             .frame(width:movie.phase == .recording ? 30:60,height:movie.phase == .recording ? 30:60)
                         if [.starting,.finishing,.saving].contains(movie.phase) { ProgressView().tint(.white) }
                     }
-                }.accessibilityIdentifier("video.record").accessibilityLabel(movie.phase == .recording ? "Detener vídeo":(movie.phase == .review ? "Revisar vídeo":"Grabar vídeo"))
+                }.accessibilityIdentifier("video.record").accessibilityLabel(movie.phase == .recording ? "Detener vídeo":"Grabar vídeo")
                     .disabled(openingVideo || [.starting,.finishing,.saving].contains(movie.phase) || (!movie.ready && movie.phase != .review))
                 Spacer()
                 Button { configureMovie(movie.configuration,lens:movie.lens == .front ? lastBackLens:.front) } label: {

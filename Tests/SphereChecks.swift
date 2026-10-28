@@ -11,6 +11,12 @@ import simd
         catch { fputs("SPHERE CHECK FAILED: \(error)\n",stderr);exit(1) }
     }
     static func run() throws {
+        try checkRealignment()
+        let completed=Set(0..<22),node=SphereTarget.all[22]
+        try check(SphereNodeSelection.next(captured:completed,direction:node.direction)?.id==22,"Sphere target disappeared after the 22nd view")
+        try check(SphereNodeSelection.next(captured:Set(0..<62),direction:node.direction)==nil,"Completed sphere still suggests a view")
+        let fov=CaptureProjection.longSideFOV(equivalent35mm:26,aspect:4.0/3)!
+        try check(fov>66 && fov<69,"Portrait capture incorrectly uses the full-frame width for its diagonal equivalent")
         try checkMeridianBlend()
         try checkTiltedCapture()
         let upright=simd_float3x3(simd_quatf(angle:Float.pi/2,axis:SIMD3(1,0,0)))
@@ -97,6 +103,24 @@ import simd
         var rejected=false
         do { _=try SphereProcessor().process(Array(frames.prefix(2)),width:512,minimumCoverage:0.995) } catch { rejected=true }
         try check(rejected,"Incomplete sphere was labeled complete")
+    }
+    static func checkRealignment() throws {
+        let w=512,h=256,e=CGRect(x:0,y:0,width:w,height:h)
+        let space=CGColorSpace(name:CGColorSpace.extendedLinearSRGB)!
+        var seed:UInt32=213,values=[Float](repeating:1,count:w*h*4)
+        for i in 0..<w*h {
+            seed=seed &* 1664525 &+ 1013904223
+            let v=Float(20+(seed>>24)%200)/255
+            for c in 0..<3 { values[i*4+c]=v }
+        }
+        let a=CIImage(bitmapData:values.withUnsafeBufferPointer{Data(buffer:$0)},bytesPerRow:w*16,size:e.size,format:.RGBAf,colorSpace:space)
+            .clampedToExtent().applyingFilter("CIGaussianBlur",parameters:[kCIInputRadiusKey:1]).cropped(to:e)
+        let b=a.transformed(by:CGAffineTransform(translationX:5,y:-2)),cover=CIImage(color:.white).cropped(to:e)
+        let delta=try SphereProcessor().alignment(b,coverage:cover,reference:a,referenceCoverage:cover,width:w)
+        try check(delta != nil && abs(delta!.x+5)<0.8 && abs(delta!.y-2)<0.8,"Sphere visual drift correction failed its measured overlap")
+        let pose=SphereCaptureOrientation.resolve(captured:nil,atShutter:nil,target:SphereTarget.all[0])
+        let corrected=pose.corrected(yaw:0.05,pitch:0.02)
+        try check(SphereCaptureOrientation.valid(corrected) && corrected.forward.x>0.04 && corrected.forward.y>0.015,"Pose correction inverted camera axes")
     }
     static func checkMeridianBlend() throws {
         let w=256,h=128,e=CGRect(x:0,y:0,width:w,height:h),space=CGColorSpace(name:CGColorSpace.extendedLinearSRGB)!

@@ -16,8 +16,7 @@ final class SphereMotionProvider:ObservableObject {
         guard manager.isDeviceMotionAvailable else { message="Este entorno no dispone de orientación de cámara.";return }
         lock.lock();if active { lock.unlock();return };active=true;token=UUID();let epoch=token;lock.unlock()
         manager.deviceMotionUpdateInterval=1.0/30
-        let supported=CMMotionManager.availableAttitudeReferenceFrames()
-        let reference:CMAttitudeReferenceFrame=supported.contains(.xArbitraryCorrectedZVertical) ? .xArbitraryCorrectedZVertical:.xArbitraryZVertical
+        let reference:CMAttitudeReferenceFrame = .xArbitraryZVertical
         var lastUI:Double=0
         manager.startDeviceMotionUpdates(using:reference,to:queue) { [weak self] motion,error in
             guard let self else { return }

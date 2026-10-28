@@ -47,6 +47,12 @@ final class MovieCameraModel: NSObject, ObservableObject, AVCaptureFileOutputRec
     private var directory:URL { FileManager.default.urls(for:.documentDirectory,in:.userDomainMask)[0].appendingPathComponent("VideoDrafts",isDirectory:true) }
     override init() {
         super.init()
+        #if DEBUG
+        if ProcessInfo.processInfo.arguments.contains("-ui-test-movie-review") {
+            _=machine.recover();phase = .review
+            previewURL=FileManager.default.temporaryDirectory.appendingPathComponent("existing-draft.mov")
+        }
+        #endif
         NotificationCenter.default.addObserver(self,selector:#selector(interrupted),name:AVCaptureSession.wasInterruptedNotification,object:session)
         NotificationCenter.default.addObserver(self,selector:#selector(failed(_:)),name:AVCaptureSession.runtimeErrorNotification,object:session)
     }
@@ -221,15 +227,16 @@ final class MovieCameraModel: NSObject, ObservableObject, AVCaptureFileOutputRec
     }
     func record() {
         queue.async {
-            guard self.active,self.configured,self.session.isRunning,self.machine.phase == .idle else { return }
+            guard self.active,self.configured,self.session.isRunning,[.idle,.review].contains(self.machine.phase) else { return }
             do {
                 guard self.output.connection(with:.video) != nil else { throw CameraFailure.message("No se pudo preparar la conexión de vídeo.") }
                 try FileManager.default.createDirectory(at:self.directory,withIntermediateDirectories:true)
-                guard let token=self.machine.begin() else { return }
+                guard let token=self.machine.beginKeepingDraft() else { return }
                 let url=self.directory.appendingPathComponent("UltimateCAM-\(token.uuidString).mov")
                 self.recordingURL=url;self.recordingToken=token;self.savedOnQueue=false;self.uncertainOnQueue=false;self.startTime=0
                 self.ui { self.saved=false;self.saveUncertain=false;self.previewURL=nil;self.elapsed=0 }
                 self.syncUI("Iniciando grabación…")
+                CaptureTrace.record("movie.start.request",["token":token.uuidString,"preset":self.session.sessionPreset.rawValue,"codec":self.current.codec.rawValue])
                 self.output.startRecording(to:url,recordingDelegate:self)
                 self.queue.asyncAfter(deadline:.now()+30) {
                     guard self.recordingToken==token,self.startTime==0,[.starting,.recording].contains(self.machine.phase) else { return }
@@ -257,12 +264,14 @@ final class MovieCameraModel: NSObject, ObservableObject, AVCaptureFileOutputRec
     func stopRecording() { queue.async { self.stopOnQueue() } }
     private func stopOnQueue() {
         guard machine.stop() else { return };timer?.cancel();timer=nil
+        CaptureTrace.record("movie.stop.request")
         syncUI("Terminando archivo de vídeo…");output.stopRecording()
     }
     func fileOutput(_ output:AVCaptureFileOutput,didStartRecordingTo fileURL:URL,from connections:[AVCaptureConnection]) {
         queue.async {
             guard self.recordingURL==fileURL,let token=self.recordingToken,self.machine.started(token) else { return }
             self.startTime=CACurrentMediaTime();self.syncUI("Grabando")
+            CaptureTrace.record("movie.started",["token":token.uuidString])
             let timer=DispatchSource.makeTimerSource(queue:self.queue);timer.schedule(deadline:.now(),repeating:0.25)
             timer.setEventHandler { [weak self] in guard let self else { return };let seconds=CACurrentMediaTime()-self.startTime;self.ui { self.elapsed=seconds } }
             self.timer=timer;timer.resume()
@@ -272,6 +281,8 @@ final class MovieCameraModel: NSObject, ObservableObject, AVCaptureFileOutputRec
         queue.async {
             guard self.recordingURL==fileURL,let token=self.recordingToken else { return }
             self.timer?.cancel();self.timer=nil
+            let ns=error as NSError?
+            CaptureTrace.record("movie.finished",["token":token.uuidString,"seconds":self.startTime>0 ? CACurrentMediaTime()-self.startTime:0,"errorDomain":ns?.domain ?? "","errorCode":ns?.code ?? 0,"error":ns?.localizedDescription ?? "none"])
             let requireHDR=self.current.hdrVideo
             let finished=error == nil || ((error as NSError?)?.userInfo[AVErrorRecordingSuccessfullyFinishedKey] as? Bool == true)
             Task {

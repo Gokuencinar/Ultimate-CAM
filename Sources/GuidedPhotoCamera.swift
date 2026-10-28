@@ -155,7 +155,18 @@ final class GuidedPhotoCamera:NSObject,ObservableObject,AVCapturePhotoCaptureDel
             guard self.expected==resolvedSettings.uniqueID else { return }
             if self.captureResetRequested { self.expected=nil;self.rearmOnQueue();return }
             let data=self.received,failure=error ?? self.captureError
-            let motion=self.capturedMotion,fieldOfView=Double(self.device?.activeFormat.videoFieldOfView ?? 70)
+            let motion=self.capturedMotion
+            var fieldOfView=Double(self.device?.activeFormat.videoFieldOfView ?? 70)
+            if let data,let source=CGImageSourceCreateWithData(data as CFData,nil),
+               let properties=CGImageSourceCopyPropertiesAtIndex(source,0,nil) as? [String:Any],
+               let exif=properties[kCGImagePropertyExifDictionary as String] as? [String:Any],
+               let equivalent=exif[kCGImagePropertyExifFocalLenIn35mmFilm as String] as? NSNumber,
+               let w=properties[kCGImagePropertyPixelWidth as String] as? NSNumber,
+               let h=properties[kCGImagePropertyPixelHeight as String] as? NSNumber,
+               let calibrated=CaptureProjection.longSideFOV(equivalent35mm:equivalent.doubleValue,aspect:max(w.doubleValue,h.doubleValue)/max(1,min(w.doubleValue,h.doubleValue))) {
+                fieldOfView=calibrated
+            }
+            let deliveredFOV=fieldOfView
             let exposureSeconds=self.device?.exposureDuration.seconds ?? 1.0/60
             self.received=nil
             guard failure==nil,let data else {
@@ -173,7 +184,7 @@ final class GuidedPhotoCamera:NSObject,ObservableObject,AVCapturePhotoCaptureDel
                     guard self.active,self.expected==resolvedSettings.uniqueID else { return };self.expected=nil
                     if self.captureResetRequested { self.rearmOnQueue();return }
                     switch result {
-                    case .success(let jpeg):self.hasFrame=true;self.ui { self.frame=GuidedPhotoFrame(data:jpeg,motion:motion,fieldOfView:fieldOfView,exposureSeconds:exposureSeconds);self.busy=false;self.status="Fotograma listo. Desplaza la cámara dejando la mitad de la escena en común." }
+                    case .success(let jpeg):self.hasFrame=true;self.ui { self.frame=GuidedPhotoFrame(data:jpeg,motion:motion,fieldOfView:deliveredFOV,exposureSeconds:exposureSeconds);self.busy=false;self.status="Fotograma listo. Desplaza la cámara dejando la mitad de la escena en común." }
                     case .failure(let error):if !self.hasFrame { self.unlockControls() };self.ui { self.busy=false;self.status=error.localizedDescription }
                     }
                 }

@@ -24,6 +24,10 @@ import Darwin
         try require(metadata[50714]==[4096] && metadata[50717]==[61439] && BayerSaturationPolicy.span==57343,"Working DNG levels do not match the 16-bit encoder")
         let tone=try NightTonePlan.make(luminances:[Double](repeating:0.03,count:70)+[Double](repeating:0.25,count:29)+[1],maximumGain:64)
         try require(tone.gain<=1.01,"A lit night scene received a highlight-destroying exposure boost")
+        let native:[UInt16]=[5000,5000,5000,5000,5000,5000,5000,5000,5000,5000,5000,5000,5000,5000,5000,5000]
+        let normalized=try native.withUnsafeBufferPointer{try BayerQuadPacking.pack($0,rowElements:4,originX:0,originY:0,cropWidth:4,cropHeight:4,step:1,black:[2112,2112,2112,2112],white:16380)}
+        let measured=normalized.withUnsafeBytes{Float(Float16(bitPattern:$0.loadUnaligned(as:UInt16.self)))}
+        try require(measured>0.19 && measured<0.21,"Native 14-bit levels were normalized against a 12-bit file representation")
         print("BOUNDED BAYER / CAMERA NEUTRAL / NIGHT HIGHLIGHT CHECKS PASSED")
     }
     static func resourceChecks() throws {

@@ -30,7 +30,7 @@ struct GuidedPanoramaView:View {
     var body:some View {
         ZStack {
             VStack {
-                HStack { Spacer();Text("PANORAMA").font(.headline);Spacer();Text("\(frames.count)/10").monospacedDigit() }
+                HStack { Spacer();Text("PANORAMA").font(.headline);Spacer();Text("\(frames.count)/24").monospacedDigit() }
                 if let preview { Image(uiImage:preview).resizable().scaledToFit().frame(maxHeight:450).padding(.vertical) }
                 Spacer()
                 if result==nil { sweepGuide }
@@ -84,7 +84,7 @@ struct GuidedPanoramaView:View {
                 ZStack(alignment:.leading) {
                     RoundedRectangle(cornerRadius:12).fill(.black.opacity(0.75))
                     Rectangle().fill(.white.opacity(0.6)).frame(height:1)
-                    HStack(spacing:1) { ForEach(thumbnails.indices,id:\.self) { i in Image(uiImage:thumbnails[i]).resizable().scaledToFill().frame(width:max(12,(g.size.width-40)/10),height:42).clipped() } }.padding(.horizontal,12).opacity(0.65)
+                    HStack(spacing:1) { ForEach(thumbnails.indices,id:\.self) { i in Image(uiImage:thumbnails[i]).resizable().scaledToFill().frame(width:max(3,(g.size.width-47)/24),height:42).clipped() } }.padding(.horizontal,12).opacity(0.65)
                     Image(systemName:(sweep?.direction ?? 1)>=0 ? "arrow.right":"arrow.left").font(.title2.bold())
                         .foregroundStyle(sweep?.warning==nil ? CameraPalette.accent:.orange)
                         .offset(x:12+max(0,g.size.width-52)*CGFloat(sweep?.progress ?? 0))
@@ -107,8 +107,8 @@ struct GuidedPanoramaView:View {
         guard scene == .active,interactionEnabled,flow.sweeping,!flow.finishRequested else { return }
         do {
             if let sample=motion.read() { try sweep?.update(sample) }
-            if (sweep?.progress ?? 0)>=1 || frames.count>=10 { flow.finishRequested=true;if !camera.busy && !flow.pending {finish()};return }
-            if camera.ready && !camera.busy && !flow.pending && (frames.isEmpty || sweep?.needsFrame(fieldOfView:fieldOfView)==true || PanoramaSweepState.needsTimedSample(now:ProcessInfo.processInfo.systemUptime,lastRequest:lastRequest)) { takeFrame() }
+            if (sweep?.progress ?? 0)>=1 || frames.count>=24 { flow.finishRequested=true;if !camera.busy && !flow.pending {finish()};return }
+            if camera.ready && !camera.busy && !flow.pending && (frames.isEmpty || sweep?.needsFrame(fieldOfView:fieldOfView)==true || (motion.read()==nil && PanoramaSweepState.needsTimedSample(now:ProcessInfo.processInfo.systemUptime,lastRequest:lastRequest))) { takeFrame() }
         } catch { message=error.localizedDescription }
     }
     private func takeFrame() {
@@ -116,12 +116,12 @@ struct GuidedPanoramaView:View {
         camera.capture(motion:motion.read()) { accepted in if !accepted { flow.pending=false;message=camera.status } }
     }
     private func accept(_ frame:GuidedPhotoFrame) {
-        guard scene == .active,flow.sweeping,flow.pending,frames.count<10 else { return };flow.pending=false
+        guard scene == .active,flow.sweeping,flow.pending,frames.count<24 else { return };flow.pending=false
         if let sample=frame.motion { try? sweep?.update(sample) }
         sweep?.captured()
         frames.append(frame.data);fieldOfView=frame.fieldOfView
         if let cg=PreviewDecoder.image(frame.data,maximumDimension:180) { thumbnails.append(UIImage(cgImage:cg)) }
-        message="";if flow.finishRequested || frames.count>=10 { finish() }
+        message="";if flow.finishRequested || frames.count>=24 { finish() }
     }
     private func finish() {
         flow.sweeping=false;flow.finishRequested=false;flow.pending=false
@@ -133,10 +133,10 @@ struct GuidedPanoramaView:View {
     }
     private func merge() {
         guard frames.count>=2,!processing else { return }
-        processing=true;message="Uniendo panorama…";let captured=frames,token=ProcessingCancellation();cancellation=token
+        processing=true;message="Uniendo panorama…";let captured=frames,fov=fieldOfView,token=ProcessingCancellation();cancellation=token
         Task { @MainActor in
             do {
-                let merged=try await Task.detached(priority:.userInitiated) { try PanoramaProcessor().process(captured,options:ProcessingOptions(),cancellation:token) }.value
+                let merged=try await Task.detached(priority:.userInitiated) { try PanoramaProcessor().process(captured,options:ProcessingOptions(),cancellation:token,fieldOfView:fov) }.value
                 try token.check();result=merged;preview=PreviewDecoder.image(merged.jpeg).map { UIImage(cgImage:$0) };message="Panorama listo para revisar."
             } catch { message=error.localizedDescription }
             processing=false;cancellation=nil
