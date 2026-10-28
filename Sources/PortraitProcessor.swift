@@ -54,7 +54,7 @@ enum PortraitProcessor {
         // a fractional guided edge here bleeds face/hair colour into the bokeh.
         let exclusion=mask.applyingFilter("CIMaximumCompositing",parameters:[kCIInputBackgroundImageKey:soft])
             .clampedToExtent().applyingFilter("CIMorphologyMaximum",parameters:[kCIInputRadiusKey:2]).cropped(to:extent)
-        guard let weighted=weightedKernel?.apply(extent:extent,arguments:[input,exclusion]),
+        guard let weighted=weightedKernel?.apply(extent:extent,arguments:[input,exclusion,amount]),
               let weight=weightKernel?.apply(extent:extent,arguments:[exclusion]) else { throw CameraFailure.message("No se pudo separar el fondo del retrato.") }
         func background(_ scale:Double) throws -> CIImage {
             let parameters=[kCIInputRadiusKey:radius*scale]
@@ -85,8 +85,29 @@ enum PortraitProcessor {
                 blurred=depthBlendKernel?.apply(extent:extent,arguments:[input,near,middle,blurred,depth.disparity,depth.validity,focal]) ?? blurred
             }
         }
-        return input.applyingFilter("CIBlendWithMask",parameters:[kCIInputBackgroundImageKey:blurred,kCIInputMaskImageKey:soft]).cropped(to:extent)
+        let foreground=try cleanForeground(input,mask:soft,background:blurred,extent:extent,amount:amount)
+        return foreground.applyingFilter("CIBlendWithMask",parameters:[kCIInputBackgroundImageKey:blurred,kCIInputMaskImageKey:soft]).cropped(to:extent)
     }
+    /// Erode only the colour estimation core, not the final hair alpha. A thin
+    /// strand without a supported core retains its measured foreground colour.
+    static func cleanForeground(_ image:CIImage,mask:CIImage,background:CIImage,extent:CGRect,amount:Double) throws -> CIImage {
+        let core=mask.clampedToExtent().applyingFilter("CIMorphologyMinimum",parameters:[kCIInputRadiusKey:1.5]).cropped(to:extent)
+        guard let weighted=foregroundKernel?.apply(extent:extent,arguments:[image,core]) else { throw CameraFailure.message("No se pudo preparar el borde del retrato.") }
+        let color=weighted.clampedToExtent().applyingFilter("CIGaussianBlur",parameters:[kCIInputRadiusKey:2]).cropped(to:extent)
+        let density=core.clampedToExtent().applyingFilter("CIGaussianBlur",parameters:[kCIInputRadiusKey:2]).cropped(to:extent)
+        guard let clean=edgeKernel?.apply(extent:extent,arguments:[image,mask,core,color,density,background,amount]) else { throw CameraFailure.message("No se pudo limpiar el borde del retrato.") };return clean
+    }
+    private static let foregroundKernel=CIColorKernel(source:"kernel vec4 foregroundCore(__sample p,__sample m) {return vec4(p.rgb*clamp(m.r,0.0,1.0),1.0);}")
+    private static let edgeKernel=CIColorKernel(source:"""
+     kernel vec4 foregroundEdge(__sample p,__sample m,__sample core,__sample color,__sample density,__sample bg,float amount) {
+      if(density.r<0.08) return p;
+      vec3 estimate=color.rgb/max(density.r,0.0001);
+      float bright=dot(bg.rgb-estimate,vec3(0.2126,0.7152,0.0722));
+      float edge=smoothstep(0.02,0.35,max(0.0,m.r-core.r))*(1.0-smoothstep(0.95,1.0,m.r));
+      float strength=0.65*amount*edge*smoothstep(0.1,0.6,bright);
+      return vec4(mix(p.rgb,estimate,strength),p.a);
+     }
+     """)
     private static let momentsKernel=CIColorKernel(source:"""
      kernel vec4 guidedMoments(__sample image,__sample mask) {
       float i=dot(image.rgb,vec3(0.2126,0.7152,0.0722));float p=clamp(mask.r,0.0,1.0);
@@ -120,8 +141,10 @@ enum PortraitProcessor {
      }
      """)
     private static let weightedKernel=CIColorKernel(source:"""
-        kernel vec4 backgroundColor(__sample p,__sample mask) {
-            return vec4(p.rgb*(1.0-clamp(mask.r,0.0,1.0)),1.0);
+        kernel vec4 backgroundColor(__sample p,__sample mask,float amount) {
+            float luminance=dot(max(p.rgb,vec3(0.0)),vec3(0.2126,0.7152,0.0722));
+            float specular=1.0+0.75*amount*smoothstep(0.75,1.5,luminance);
+            return vec4(p.rgb*specular*(1.0-clamp(mask.r,0.0,1.0)),1.0);
         }
         """)
     private static let weightKernel=CIColorKernel(source:"""
