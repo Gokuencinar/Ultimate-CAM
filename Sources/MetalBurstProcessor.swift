@@ -186,7 +186,7 @@ final class MetalBurstProcessor {
         guard plan.active else { return image }
         let e=image.extent,w=Int(e.width),h=Int(e.height)
         let normalized=image.transformed(by:CGAffineTransform(translationX:-e.minX,y:-e.minY))
-        let output=try load(normalized,width:w,height:h,cancellation:cancellation),input=try texture(w,h)
+        let input=try load(normalized,width:w,height:h,cancellation:cancellation),output=try texture(w,h)
         var parameters=MetalFusionParameters();parameters.sr=plan.coefficients;parameters.control=plan.geometry(normalized.extent)
         let command=try command();try encode("uc_lca",command,textures:[input,output],parameters:parameters)
         try finish(command,cancellation:cancellation)
@@ -196,7 +196,9 @@ final class MetalBurstProcessor {
     private func tone(_ image:CIImage,maximumGain:Double,night:Bool,options:ProcessingOptions,cancellation:ProcessingCancellation?) throws -> (sdr:CIImage,hdr:CIImage) {
         let extent=image.extent.integral,w=Int(extent.width),h=Int(extent.height)
         let normalized=image.transformed(by:CGAffineTransform(translationX:-extent.minX,y:-extent.minY))
-        let input=try load(normalized,width:w,height:h,cancellation:cancellation),output=try texture(w,h)
+        // Reuse the uploaded source as the final destination only after the
+        // reconstruction kernel has read it into the separate corrected plane.
+        let output=try load(normalized,width:w,height:h,cancellation:cancellation),input=try texture(w,h)
         let base=try texture(max(1,(w+15)/16),max(1,(h+15)/16),format:.r16Float)
         let middleBase=try texture(max(1,base.width/2),max(1,base.height/2),format:.r16Float)
         let wideBase=try texture(max(1,middleBase.width/2),max(1,middleBase.height/2),format:.r16Float)
