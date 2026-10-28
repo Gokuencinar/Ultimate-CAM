@@ -296,8 +296,10 @@ struct CameraView: View {
                     .background(.black.opacity(0.55),in:Circle())
             }.accessibilityLabel("Ajustes rápidos").accessibilityIdentifier("camera.quickSettings")
             Spacer(minLength:0)
+            VStack(spacing:2) {
             Text(captureTitle)
                 .font(.system(size:12,weight:.medium)).foregroundStyle(.white.opacity(0.8))
+            HStack(spacing:4) {
             if abs(bias)>=0.05 && !manualExposure {
                 Button { bias=0 } label: {
                     Text(String(format:"%+.1f EV",bias)).font(.system(size:11,weight:.semibold).monospacedDigit())
@@ -305,6 +307,16 @@ struct CameraView: View {
                         .background(.black.opacity(0.65),in:Capsule())
                 }.accessibilityIdentifier("camera.headerExposureBias").accessibilityLabel("Restablecer exposición")
                     .accessibilityValue(String(format:"%.1f",bias))
+            }
+            if options.liftShadows>0.005 {
+                Button { options.liftShadows=0 } label: {
+                    Text("S +"+String(Int(options.liftShadows*100))).font(.system(size:11,weight:.semibold).monospacedDigit())
+                        .padding(.horizontal,8).frame(minHeight:36).background(.black.opacity(0.65),in:Capsule())
+                }.foregroundStyle(CameraPalette.accent).accessibilityIdentifier("camera.headerShadows")
+                    .accessibilityLabel("Restablecer sombras")
+            }
+            if camera.resourceLimited { Image(systemName:"thermometer.medium").font(.caption).accessibilityLabel("Captura adaptada a temperatura o memoria") }
+            }
             }
             Spacer(minLength:0)
             Menu {
@@ -383,7 +395,7 @@ struct CameraView: View {
             }
             quickButton("", symbol: "grid", selected: grid) { grid.toggle() }
         }
-        if !manualExposure { exposureCompensation }
+        if !manualExposure { exposureCompensation;shadowCompensation }
         }
     }
 
@@ -396,6 +408,18 @@ struct CameraView: View {
                 Text(String(format:"%+.1f EV",bias)).font(.system(size:12,weight:.semibold).monospacedDigit()).frame(minWidth:68,minHeight:40)
             }.accessibilityLabel("Restablecer exposición").accessibilityIdentifier("camera.resetExposureBias")
                 .accessibilityValue(String(format:"%.1f",bias))
+        }.padding(.horizontal,12).background(.black.opacity(0.65),in:RoundedRectangle(cornerRadius:16))
+            .tint(CameraPalette.accent).disabled(!controlsEnabled)
+    }
+
+    private var shadowCompensation:some View {
+        HStack(spacing:10) {
+            Image(systemName:"circle.lefthalf.filled").foregroundStyle(CameraPalette.accent).accessibilityHidden(true)
+            Slider(value:$options.liftShadows,in:0...1,step:0.05).accessibilityLabel("Sombras y rango dinámico")
+                .accessibilityIdentifier("camera.shadowLift")
+            Button { options.liftShadows=0 } label: {
+                Text("+"+String(Int(options.liftShadows*100))+" %").font(.system(size:12,weight:.semibold).monospacedDigit()).frame(minWidth:68,minHeight:40)
+            }.accessibilityLabel("Restablecer sombras").accessibilityIdentifier("camera.resetShadows")
         }.padding(.horizontal,12).background(.black.opacity(0.65),in:RoundedRectangle(cornerRadius:16))
             .tint(CameraPalette.accent).disabled(!controlsEnabled)
     }

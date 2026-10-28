@@ -11,14 +11,15 @@ struct NightCapturePlan {
 
     static func make(iso: Double, seconds: Double, isoRange: ClosedRange<Double>,
                      durationRange: ClosedRange<Double>, targetOffset: Double = 0,
-                     budget: Double = 8, shutterLimit: Double = 1,motionLimit:Double?=nil,tripodStable:Bool=false,astroEnabled:Bool=true) throws -> NightCapturePlan {
+                     budget requestedBudget: Double = 8, shutterLimit: Double = 1,motionLimit:Double?=nil,tripodStable:Bool=false,astroEnabled:Bool=true,resources:CaptureResourceBudget = .unrestricted) throws -> NightCapturePlan {
         let values = [iso, seconds, isoRange.lowerBound, isoRange.upperBound,
                       durationRange.lowerBound, durationRange.upperBound]
-        guard budget.isFinite, (1...16).contains(budget), shutterLimit.isFinite, (1.0/30...1).contains(shutterLimit),
+        guard requestedBudget.isFinite, (1...16).contains(requestedBudget), shutterLimit.isFinite, (1.0/30...1).contains(shutterLimit),
               targetOffset.isFinite, values.allSatisfy({ $0.isFinite && $0 > 0 }),
               isoRange.contains(iso), durationRange.contains(seconds) else {
             throw CameraFailure.message("La medición nocturna no es válida. Vuelve a medir la escena.")
         }
+        let budget=max(1,requestedBudget*resources.nightBudgetScale)
         if let motionLimit { guard motionLimit.isFinite,(1.0/1000...1).contains(motionLimit) else { throw CameraFailure.message("Medición de movimiento fuera de rango.") } }
         // AE can hit its preview ISO/shutter ceiling before reaching its target.
         // Compensate only measured underexposure at high ISO, with a 2 EV cap.
@@ -36,7 +37,7 @@ struct NightCapturePlan {
             let duration=min(durationRange.upperBound,shutterLimit,budget/4,meteredProduct/isoRange.lowerBound)
             guard duration>=durationRange.lowerBound else { throw CameraFailure.message("El formato no admite la serie Astro.") }
             let sensitivity=min(isoRange.upperBound,max(isoRange.lowerBound,meteredProduct/duration))
-            let frames=min(16,max(4,Int(floor(budget/duration))))
+            let frames=min(resources.maximumFrames,max(4,Int(floor(budget/duration))))
             return NightCapturePlan(seconds:duration,iso:sensitivity,count:frames,compensationEV:compensation,astro:true)
         }
         let limit = min(shutterLimit,motionLimit ?? 1, durationRange.upperBound, budget/3)
@@ -50,7 +51,20 @@ struct NightCapturePlan {
         let rounded = shutters.first(where: { $0 <= desired && $0 >= durationRange.lowerBound }) ?? desired
         let duration = min(limit, max(durationRange.lowerBound, max(min(seconds, limit), rounded)))
         let sensitivity = min(isoRange.upperBound, max(isoRange.lowerBound, meteredProduct / duration))
-        let frames = min(16, max(3, Int(floor(budget / duration))))
+        let frames = min(resources.maximumFrames, max(3, Int(floor(budget / duration))))
         return NightCapturePlan(seconds: duration, iso: sensitivity, count: frames, compensationEV: compensation)
+    }
+}
+
+/// Deterministic host-testable policy. CameraModel samples thermal/memory state;
+/// planner and preview do not infer pressure from unrelated image statistics.
+struct CaptureResourceBudget:Equatable {
+    let maximumFrames:Int,previewInterval:Double,temporalInterval:Double,temporalBytes:Int,nightBudgetScale:Double
+    static let unrestricted=Self(maximumFrames:16,previewInterval:0.2,temporalInterval:1.0/15,temporalBytes:48*1024*1024,nightBudgetScale:1)
+    static func make(thermal:ProcessInfo.ThermalState,memoryPressure:Bool=false)->Self {
+        if memoryPressure || thermal == .critical { return Self(maximumFrames:4,previewInterval:1,temporalInterval:0.25,temporalBytes:8*1024*1024,nightBudgetScale:0.35) }
+        if thermal == .serious { return Self(maximumFrames:8,previewInterval:0.5,temporalInterval:0.125,temporalBytes:16*1024*1024,nightBudgetScale:0.6) }
+        if thermal == .fair { return Self(maximumFrames:12,previewInterval:0.25,temporalInterval:1.0/12,temporalBytes:32*1024*1024,nightBudgetScale:0.85) }
+        return unrestricted
     }
 }

@@ -13,6 +13,7 @@ final class PreviewAnalysisController:NSObject,AVCaptureVideoDataOutputSampleBuf
     let output=AVCaptureVideoDataOutput()
     let history=TemporalFrameBuffer<CGImage>()
     let motion=PreviewMotionMeter()
+    private var resources=CaptureResourceBudget.unrestricted
     private var previousBufferTime=0.0
     private var buffering=false
     private var motionEnabled=false
@@ -46,6 +47,14 @@ final class PreviewAnalysisController:NSObject,AVCaptureVideoDataOutputSampleBuf
         output.deliversPreviewSizedOutputBuffers=true
         output.setSampleBufferDelegate(self,queue:queue)
     }
+    func setResources(_ budget:CaptureResourceBudget) {
+        queue.async {
+            guard self.resources != budget else { return };self.resources=budget
+            self.previousTime=0;self.previousBufferTime=0;self.motion.reset()
+            self.history.setMaximumBytes(budget.temporalBytes)
+            if budget.maximumFrames<=4 { self.context.clearCaches() }
+        }
+    }
     func setActive(_ value:Bool) {
         lock.lock();active=value;generation=UUID();if !value { exposureReading=nil };lock.unlock()
         if !value { history.reset();motion.reset();DispatchQueue.main.async { self.completion(nil) } }
@@ -73,7 +82,7 @@ final class PreviewAnalysisController:NSObject,AVCaptureVideoDataOutputSampleBuf
         lock.lock();let enabled=active && configurationReady,token=generation,pending=deliveryPending;lock.unlock()
         guard enabled,let pixel=CMSampleBufferGetImageBuffer(sampleBuffer),CVPixelBufferGetPlaneCount(pixel)>0 else { return }
         let host=ProcessInfo.processInfo.systemUptime
-        if (buffering || motionEnabled || exposureMetering) && host-previousBufferTime>=1.0/15 {
+        if (buffering || motionEnabled || exposureMetering) && host-previousBufferTime>=resources.temporalInterval {
             previousBufferTime=host
             let pts=CMSampleBufferGetPresentationTimeStamp(sampleBuffer).seconds
             if !pts.isFinite || (lastPTS.isFinite && pts<=lastPTS) { history.reset();motion.reset() }
@@ -108,7 +117,7 @@ final class PreviewAnalysisController:NSObject,AVCaptureVideoDataOutputSampleBuf
                 }
             }
         }
-        guard !pending,options.enabled,CACurrentMediaTime()-previousTime>=0.2 else { return }
+        guard !pending,options.enabled,CACurrentMediaTime()-previousTime>=resources.previewInterval else { return }
         previousTime=CACurrentMediaTime()
         let type=CVPixelBufferGetPixelFormatType(pixel)
         guard [kCVPixelFormatType_420YpCbCr8BiPlanarFullRange,kCVPixelFormatType_420YpCbCr8BiPlanarVideoRange].contains(type) else { return }

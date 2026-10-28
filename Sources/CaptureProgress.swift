@@ -11,6 +11,7 @@ struct OpticalCaptureProgress {
         guard capturing,seen.insert(id).inserted else { return }
         completed=min(total,completed+1)
     }
+    mutating func retarget(total:Int) { self.total=max(completed,max(1,total)) }
     mutating func complete() { if started { completed=total } }
     mutating func reset() { self=OpticalCaptureProgress() }
 }

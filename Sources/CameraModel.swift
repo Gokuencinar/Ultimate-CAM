@@ -128,6 +128,10 @@ final class CameraModel: NSObject, ObservableObject, AVCapturePhotoCaptureDelega
     @Published private(set) var importedPhotoID: UUID?
     @Published private(set) var previewAnalysisFrame: PreviewAnalysisFrame?
     private var previewTools = PreviewAnalysisOptions()
+    @Published private(set) var resourceLimited=false
+    private var resources=CaptureResourceBudget.unrestricted
+    private var memoryPressureUntil=0.0
+    private var resourceRecovery:DispatchWorkItem?
     private lazy var previewAnalyzer = PreviewAnalysisController { [weak self] frame in self?.previewAnalysisFrame=frame }
 
     override init() {
@@ -139,6 +143,8 @@ final class CameraModel: NSObject, ObservableObject, AVCapturePhotoCaptureDelega
             "processingDelegate": responds(to: NSSelectorFromString("captureOutput:didFinishProcessingPhoto:error:")),
             "completionDelegate": responds(to: NSSelectorFromString("captureOutput:didFinishCaptureForResolvedSettings:error:"))
         ])
+        NotificationCenter.default.addObserver(self,selector:#selector(resourceStateChanged),name:ProcessInfo.thermalStateDidChangeNotification,object:nil)
+        queue.async { self.refreshResources() }
         NotificationCenter.default.addObserver(self, selector: #selector(memoryWarning),
             name: UIApplication.didReceiveMemoryWarningNotification, object: nil)
         NotificationCenter.default.addObserver(self, selector: #selector(sessionInterrupted),
@@ -148,7 +154,7 @@ final class CameraModel: NSObject, ObservableObject, AVCapturePhotoCaptureDelega
         NotificationCenter.default.addObserver(self, selector: #selector(runtimeError),
             name: AVCaptureSession.runtimeErrorNotification, object: session)
     }
-    deinit { NotificationCenter.default.removeObserver(self) }
+    deinit { resourceRecovery?.cancel();NotificationCenter.default.removeObserver(self) }
 
     private func publish(_ action: @escaping () -> Void) { DispatchQueue.main.async(execute: action) }
     private func message(_ text: String) { publish { self.status = text } }
@@ -191,8 +197,26 @@ final class CameraModel: NSObject, ObservableObject, AVCapturePhotoCaptureDelega
         } catch { message(error.localizedDescription) }
     }
 
+    @objc private func resourceStateChanged() { queue.async { self.refreshResources() } }
+    private func refreshResources() {
+        let pressure=ProcessInfo.processInfo.systemUptime<memoryPressureUntil
+        let next=CaptureResourceBudget.make(thermal:ProcessInfo.processInfo.thermalState,memoryPressure:pressure)
+        guard resources != next else { return };resources=next;previewAnalyzer.setResources(next)
+        if inFlight,!processingOptions.hdrBracketing,!processingOptions.nativeNight,
+           !["processing","importing"].contains(captureStage),desiredCount>next.maximumFrames {
+            desiredCount=min(desiredCount,max(frames.count+1,next.maximumFrames))
+            opticalProgress.retarget(total:desiredCount);publishOpticalProgress()
+        }
+        publish { self.resourceLimited=next != .unrestricted }
+        CaptureTrace.record("capture.resources",["thermal":ProcessInfo.processInfo.thermalState.rawValue,
+            "memoryPressure":pressure,"frameLimit":next.maximumFrames,"previewFPS":1/next.previewInterval])
+    }
     @objc private func memoryWarning() {
         queue.async {
+            self.memoryPressureUntil=ProcessInfo.processInfo.systemUptime+60
+            self.refreshResources();self.resourceRecovery?.cancel()
+            let recovery=DispatchWorkItem { [weak self] in self?.refreshResources() }
+            self.resourceRecovery=recovery;self.queue.asyncAfter(deadline:.now()+61,execute:recovery)
             if self.processingCancellation != nil {
                 CaptureTrace.record("processing.memoryWarning")
                 self.processingCancellation?.cancel("Procesado detenido por presión de memoria; se conserva la referencia.")
@@ -676,6 +700,7 @@ final class CameraModel: NSObject, ObservableObject, AVCapturePhotoCaptureDelega
     private func beginCapture(stack:Bool,count:Int,raw:Bool,flash:CameraFlash,options:ProcessingOptions,mirrorSelfie:Bool,shutterTime:Double) {
         guard self.active, self.session.isRunning, !self.interrupted, !self.inFlight, !self.captureRecoveryRequired,
               let device = self.input?.device else { return }
+        refreshResources()
         var options=options;options.lens=LensIdentity(rawValue:selectedLens.rawValue) ?? .wide
         do { _ = try options.validated() } catch { self.message(error.localizedDescription); return }
         if options.nativeNight {
@@ -714,7 +739,7 @@ final class CameraModel: NSObject, ObservableObject, AVCapturePhotoCaptureDelega
         self.hdrPlan = []; self.hdrExposures = []; self.lastHDRTimestamp = nil
         self.nightFrameSeconds = 0
         self.lastNightTimestamp = nil
-        self.desiredCount = hdr ? 3 : (burst ? min(9, max(3, count)) : 1)
+        self.desiredCount = hdr ? 3 : (burst ? min(resources.maximumFrames,min(9,max(3,count))) : 1)
         self.processingOptions = options
         self.rawRequested = (raw || (night && options.nightRAW) || (hdr && options.hdrMetalRAW)) && !self.output.availableRawPhotoPixelFormatTypes.isEmpty
         self.rawData = nil
@@ -761,7 +786,7 @@ final class CameraModel: NSObject, ObservableObject, AVCapturePhotoCaptureDelega
                     isoRange: Double(device.activeFormat.minISO)...Double(device.activeFormat.maxISO),
                     durationRange: device.activeFormat.minExposureDuration.seconds...device.activeFormat.maxExposureDuration.seconds,
                     targetOffset: Double(device.exposureTargetOffset), budget: options.nightBudget,
-                    shutterLimit: options.nightShutterLimit,motionLimit:options.nightMotionMetering ? motion?.shutterLimit:nil,tripodStable:motion?.tripodStable ?? false,astroEnabled:options.astroEnabled) : nil
+                    shutterLimit: options.nightShutterLimit,motionLimit:options.nightMotionMetering ? motion?.shutterLimit:nil,tripodStable:motion?.tripodStable ?? false,astroEnabled:options.astroEnabled,resources:resources) : nil
                 let bracket = hdr ? try HDRCapturePlan.make(iso:Double(device.iso),seconds:device.exposureDuration.seconds,span:options.hdrSpan,
                     isoRange:Double(device.activeFormat.minISO)...Double(device.activeFormat.maxISO),
                     durationRange:device.activeFormat.minExposureDuration.seconds...device.activeFormat.maxExposureDuration.seconds,scene:hdrScene) : nil
