@@ -732,7 +732,7 @@ struct CameraView: View {
                 Picker("Temporizador",selection:$timerSeconds) { Text("No").tag(0);Text("3 s").tag(3);Text("10 s").tag(10) }
             } header: { Label("Calidad e imagen",systemImage:"camera") }.disabled(videoMode)
             Section {
-                MovieSettingsFields(camera:movie)
+                MovieSettingsFields(camera:movie,configuring:openingVideo,configure:{ options,lens in configureMovie(options,lens:lens) })
             } header: { Label("Vídeo",systemImage:"video") } footer: { Text("Calidad según la lente seleccionada.").font(.caption) }
             Section {
                 NavigationLink { cleanSettingsPage("Color y estilo") { colorSettings } } label: { Label("Color y LUT",systemImage:"camera.filters") }.accessibilityIdentifier("settings.color")

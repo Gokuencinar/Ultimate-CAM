@@ -4,8 +4,10 @@ import SwiftUI
 /// Settings and review only. Live video belongs to CameraView's persistent visor.
 struct MovieSettingsFields:View {
     @ObservedObject var camera:MovieCameraModel
+    var configuring=false
+    let configure:(MovieConfiguration,CameraLens)->Void
     private func update(_ change:(inout MovieConfiguration)->Void) {
-        var request=camera.configuration;change(&request);camera.configure(request,lens:camera.lens)
+        var request=camera.configuration;change(&request);configure(request,camera.lens)
     }
     var body:some View {
         Group {
@@ -20,7 +22,7 @@ struct MovieSettingsFields:View {
             } label: { Label("Formato",systemImage:"film") }
             Toggle(isOn:Binding(get:{camera.configuration.audio},set:{ value in update { $0.audio=value } })) { Label("Audio",systemImage:"mic") }
             Toggle(isOn:Binding(get:{camera.configuration.stabilized},set:{ value in update { $0.stabilized=value } })) { Label("Estabilización",systemImage:"hand.raised") }
-        }
+        }.disabled(configuring || [.recording,.finishing,.saving].contains(camera.phase))
     }
 }
 
