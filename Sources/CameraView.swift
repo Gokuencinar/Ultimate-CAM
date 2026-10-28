@@ -793,20 +793,21 @@ struct CameraView: View {
         Form { content() }.scrollContentBackground(.hidden).listStyle(.insetGrouped).listRowSpacing(6)
             .background(.ultraThinMaterial).navigationTitle(title).navigationBarTitleDisplayMode(.inline)
     }
+    private var nightUsesSystem:Bool { options.nativeNight || ((options.nightSystemPreferred || !rawAvailable) && camera.nativeNightIssue==nil) }
     private var nightOptions:some View {
         Section {
             Picker("Duración",selection:$options.nightBudget) { ForEach([2.0,4,8,16],id:\.self) { Text("\(Int($0)) s").tag($0) } }
-                .pickerStyle(.segmented)
-            Toggle("Adaptar al movimiento",isOn:$options.nightMotionMetering)
-            Toggle("Astro automático en trípode",isOn:$options.astroEnabled).accessibilityIdentifier("night.astro")
-            Toggle("RAW computacional",isOn:Binding(get:{!options.nightSystemPreferred},set:{ value in
+                .pickerStyle(.segmented).disabled(nightUsesSystem)
+            Toggle("Adaptar al movimiento",isOn:$options.nightMotionMetering).disabled(nightUsesSystem)
+            Toggle("Astro automático en trípode",isOn:$options.astroEnabled).disabled(nightUsesSystem).accessibilityIdentifier("night.astro")
+            Toggle("RAW computacional",isOn:Binding(get:{rawAvailable && !options.nightSystemPreferred},set:{ value in
                 options.nightSystemPreferred = !value
                 if options.isNightMode { activateUnifiedNight() }
             })).disabled(!rawAvailable).accessibilityIdentifier("night.computationalRAW")
             Toggle("Guardar DNG fusionado",isOn:$options.saveFusedDNG).disabled(options.nightSystemPreferred || !rawAvailable)
                 .accessibilityIdentifier("night.saveFusedDNG")
             Picker("Exposición del sistema",selection:$options.nativeNightMaximum) { Text("Auto").tag(false);Text("Máxima").tag(true) }
-                .disabled(!options.nightSystemPreferred && rawAvailable)
+                .disabled(!nightUsesSystem)
             Text(options.nightSystemPreferred && camera.nativeNightIssue==nil ? "Procesado del sistema listo":"Captura múltiple con medición y calibración de iOS")
                 .font(.caption).foregroundStyle(.secondary)
         } footer: { Text("Apoya el iPhone. Astro prioriza exposiciones largas, hasta 16 tomas.") }

@@ -45,6 +45,7 @@ enum PhotoModePolicy {
             var next=nativeNight(from:current);next.nightMetalRAW=false;next.nightRAW=false;return next
         }
         var next=preset(.night,from:current,supportsRAW:supportsRAW)
+        if current.isNightMode { next.liftShadows=current.liftShadows;next.noiseReduction=current.noiseReduction;next.sharpening=current.sharpening }
         next.zeroShutterLagFusion=false;next.nightMetalRAW=supportsRAW && !current.nightSystemPreferred
         next.nightRAW=next.nightMetalRAW
         if next.nightMetalRAW { next.nightSpectralFusion=false }

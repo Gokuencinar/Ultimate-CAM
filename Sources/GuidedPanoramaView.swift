@@ -102,7 +102,7 @@ struct GuidedPanoramaView:View {
         if sweeping { finishRequested=true;if !camera.busy && !pending {finish()};return }
         guard frames.isEmpty else { message="Une las vistas guardadas o reinicia antes de otro barrido.";return }
         guard let sample=motion.read() else { message="Esperando orientación. Mantén el teléfono vertical.";motion.start();return }
-        do { sweep=try PanoramaSweepPlan(sample);sweeping=true;finishRequested=false;saved=false;message="Gira despacio siguiendo la flecha.";takeFrame() }
+        do { sweep=try PanoramaSweepPlan(sample);sweeping=true;finishRequested=false;saved=false;message="Preparando la primera foto. Mantén el teléfono quieto un instante.";takeFrame() }
         catch { message=error.localizedDescription }
     }
     private func tick() {
@@ -115,7 +115,7 @@ struct GuidedPanoramaView:View {
     }
     private func takeFrame() {
         guard !pending else { return };pending=true;pendingFrameID=camera.frame?.id
-        camera.capture { accepted in if !accepted { pending=false } }
+        camera.capture { accepted in if !accepted { pending=false;message=camera.status } }
     }
     private func accept(_ frame:GuidedPhotoFrame) {
         guard scene == .active,sweeping,pending,frames.count<10 else { return };pending=false

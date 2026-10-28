@@ -328,7 +328,9 @@ import Darwin
         try require(archive.retainedCount==1 && archive.original(at:hdr)==Data([0,0x44]),"HDR retained non-anchor DNG mappings")
         let unified=PhotoModePolicy.unifiedNight(from:ProcessingOptions(),supportsRAW:true,nativeAvailable:true)
         try require(unified.isNightMode && unified.nightMetalRAW && !unified.nativeNight,"Automatic night did not select calibrated Bayer on a RAW lens")
-        var system=unified;system.nightSystemPreferred=true
+        var system=unified;system.nightSystemPreferred=true;system.liftShadows=0.65
+        let returned=PhotoModePolicy.unifiedNight(from:system,supportsRAW:true,nativeAvailable:false)
+        try require(returned.liftShadows==0.65,"Changing the unified night engine reset live shadow edits")
         let nativeUnified=PhotoModePolicy.unifiedNight(from:system,supportsRAW:true,nativeAvailable:true)
         try require(nativeUnified.isNightMode && nativeUnified.nativeNight && !nativeUnified.nightStatic,"System engine escaped the unified night mode")
         let jpegFallback=PhotoModePolicy.unifiedNight(from:system,supportsRAW:false,nativeAvailable:false)

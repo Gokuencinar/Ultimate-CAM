@@ -225,7 +225,7 @@ final class MovieCameraModel: NSObject, ObservableObject, AVCaptureFileOutputRec
         } catch { ui { self.ready=self.session.isRunning && self.configured;self.status=error.localizedDescription } }
     }
     private func configureRecordingSwitching(_ camera:AVCaptureDevice) {
-        guard camera.activePrimaryConstituentDeviceSwitchingBehavior != .unsupported else {
+        guard camera.activePrimaryConstituentDeviceSwitchingBehavior != .unsupported,output.connection(with:.video) != nil,output.primaryConstituentDeviceSwitchingBehaviorForRecording != .unsupported else {
             output.isPrimaryConstituentDeviceSwitchingBehaviorForRecordingEnabled=false;return
         }
         output.setPrimaryConstituentDeviceSwitchingBehaviorForRecording(.auto,restrictedSwitchingBehaviorConditions:[])
