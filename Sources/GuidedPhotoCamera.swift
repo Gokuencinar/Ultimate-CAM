@@ -119,20 +119,20 @@ final class GuidedPhotoCamera:NSObject,ObservableObject,AVCapturePhotoCaptureDel
             self.ui { self.frame=nil;self.ready=false;self.busy=false }
         }
     }
-    func capture() {
+    func capture(accepted:((Bool)->Void)?=nil) {
         queue.async {
-            guard self.active,self.session.isRunning,self.expected==nil,!self.recoveryRequired else { return }
+            guard self.active,self.session.isRunning,self.expected==nil,!self.recoveryRequired else { self.ui { accepted?(false) };return }
             if !self.locked,let device=self.device,device.isAdjustingFocus || device.isAdjustingExposure || device.isAdjustingWhiteBalance {
-                self.ui { self.status="Espera a que terminen el enfoque y la medición antes de añadir la primera foto." };return
+                self.ui { self.status="Espera a que terminen el enfoque y la medición antes de añadir la primera foto.";accepted?(false) };return
             }
             do { try self.lockControls() }
-            catch { self.ui { self.status=error.localizedDescription };return }
+            catch { self.ui { self.status=error.localizedDescription;accepted?(false) };return }
             let settings=AVCapturePhotoSettings(format:[AVVideoCodecKey:AVVideoCodecType.jpeg])
             settings.flashMode = .off;settings.photoQualityPrioritization = .balanced
             settings.maxPhotoDimensions=self.output.maxPhotoDimensions
             self.expected=settings.uniqueID;self.received=nil;self.captureError=nil
             self.capturedMotion=nil
-            let id=settings.uniqueID;self.ui { self.busy=true;self.status="Capturando fotograma…" }
+            let id=settings.uniqueID;self.ui { self.busy=true;self.status="Capturando fotograma…";accepted?(true) }
             self.output.capturePhoto(with:settings,delegate:self)
             self.queue.asyncAfter(deadline:.now()+30) {
                 guard self.expected==id else { return }

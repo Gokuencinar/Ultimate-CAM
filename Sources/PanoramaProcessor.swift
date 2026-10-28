@@ -42,7 +42,7 @@ final class PanoramaProcessor {
         for index in 1..<frames.count {
             try cancellation?.check();progress?("Uniendo panorama \(index+1) de \(frames.count)…")
             let next=try decode(frames[index])
-            guard abs(next.extent.width-previous.extent.width)<1,abs(next.extent.height-previous.extent.height)<1 else { throw CameraFailure.message("Mantén la misma lente, orientación y zoom durante el panorama.") }
+            guard abs(next.extent.width-previous.extent.width)<=2,abs(next.extent.height-previous.extent.height)<=2 else { throw CameraFailure.message("Mantén la misma lente, orientación y zoom durante el panorama.") }
             let pair=try registration(reference:previous,floating:next)
             let transform=previousTransform*pair
             let warped=try Self.warp(next,matrix:transform)
@@ -78,23 +78,36 @@ final class PanoramaProcessor {
     }
     func registration(reference:CIImage,floating:CIImage) throws -> simd_float3x3 {
         let scale=min(1,1024/max(reference.extent.width,reference.extent.height))
-        func low(_ image:CIImage) throws -> CGImage {
-            let small=image.transformed(by:CGAffineTransform(scaleX:scale,y:scale))
-            guard let cg=context.createCGImage(small,from:small.extent,format:.RGBA8,colorSpace:CGColorSpace(name:CGColorSpace.sRGB)!) else { throw CameraFailure.message("No se pudo preparar el registro panorámico.") };return cg
+        func patches(_ a:CIImage,_ b:CIImage) throws -> (CGImage,CGImage) {
+            let width=Int(floor(min(a.extent.width,b.extent.width)*scale))
+            let height=Int(floor(min(a.extent.height,b.extent.height)*scale))
+            guard width>=16,height>=16 else { throw CameraFailure.message("El solapamiento es demasiado pequeño para registrar.") }
+            let bounds=CGRect(x:0,y:0,width:width,height:height)
+            func raster(_ image:CIImage) throws -> CGImage {
+                let normalized=image.transformed(by:CGAffineTransform(translationX:-image.extent.minX,y:-image.extent.minY))
+                    .transformed(by:CGAffineTransform(scaleX:scale,y:scale)).cropped(to:bounds)
+                guard let cg=context.createCGImage(normalized,from:bounds,format:.RGBA8,colorSpace:CGColorSpace(name:CGColorSpace.sRGB)!),cg.width==width,cg.height==height else { throw CameraFailure.message("No se pudo preparar el registro panorámico.") }
+                return cg
+            }
+            return (try raster(a),try raster(b))
         }
         // Dense homography starts near identity and can miss large panorama
         // displacements. First estimate translation; refine perspective only
         // on the common, already aligned region.
-        let rough=VNTranslationalImageRegistrationRequest(targetedCGImage:try low(floating))
-        try VNImageRequestHandler(cgImage:try low(reference)).perform([rough])
+        let initial=try patches(reference,floating)
+        let rough=VNTranslationalImageRegistrationRequest(targetedCGImage:initial.1)
+        rough.regionOfInterest=CGRect(x:0,y:0,width:1,height:1)
+        try VNImageRequestHandler(cgImage:initial.0,orientation:.up).perform([rough])
         guard let observed=rough.results?.first,observed.confidence>=0.5 else { throw CameraFailure.message("No se encontró suficiente detalle común. Conserva un 40–60 % de solapamiento.") }
         let dx=observed.alignmentTransform.tx/scale,dy=observed.alignmentTransform.ty/scale
         let translation=simd_float3x3(columns:(SIMD3(1,0,0),SIMD3(0,1,0),SIMD3(Float(dx),Float(dy),1)))
         let shifted=floating.transformed(by:CGAffineTransform(translationX:dx,y:dy))
         let overlap=reference.extent.intersection(shifted.extent).integral.intersection(reference.extent).intersection(shifted.extent)
         guard overlap.width*overlap.height>reference.extent.width*reference.extent.height*0.2 else { throw CameraFailure.message("Falta solapamiento para registrar el panorama.") }
-        let refine=VNHomographicImageRegistrationRequest(targetedCGImage:try low(shifted.cropped(to:overlap)))
-        try VNImageRequestHandler(cgImage:try low(reference.cropped(to:overlap))).perform([refine])
+        let aligned=try patches(reference.cropped(to:overlap),shifted.cropped(to:overlap))
+        let refine=VNHomographicImageRegistrationRequest(targetedCGImage:aligned.1)
+        refine.regionOfInterest=CGRect(x:0,y:0,width:1,height:1)
+        try VNImageRequestHandler(cgImage:aligned.0,orientation:.up).perform([refine])
         guard let result=refine.results?.first,result.confidence>=0.5 else { return translation }
         let s=simd_float3x3(diagonal:SIMD3(Float(scale),Float(scale),1))
         let origin=simd_float3x3(columns:(SIMD3(1,0,0),SIMD3(0,1,0),SIMD3(Float(overlap.minX),Float(overlap.minY),1)))
@@ -129,4 +142,34 @@ final class PanoramaProcessor {
             return vec4(vec3(clamp(d/radius,0.0,1.0)),1.0);
         }
         """)
+}
+
+/// Unwrapped yaw avoids the ±180° discontinuity while the camera stays at one
+/// viewpoint. Samples are gated by actual angular overlap, not a repeating burst.
+struct PanoramaSweepPlan {
+    let reference:SphereReference
+    private var lastYaw:Float=0
+    private var travel:Float=0
+    private var lastCaptured:Float=0
+    private let initialPitch:Float
+    var direction:Float=1
+    var distance:Float { max(0,travel*direction) }
+    var progress:Double { min(1,Double(distance/170)) }
+    var warning:String?
+    init(_ sample:SphereMotionSnapshot) throws {
+        reference=try SphereReference(sample)
+        let f=try reference.pose(sample).forward
+        initialPitch=asin(min(1,max(-1,f.y)))*180/Float.pi
+    }
+    mutating func update(_ sample:SphereMotionSnapshot) throws {
+        let f=try reference.pose(sample).forward
+        let yaw=atan2(f.x,f.z)*180/Float.pi
+        var delta=yaw-lastYaw;if delta>180 {delta-=360};if delta < -180 {delta+=360}
+        travel+=delta;lastYaw=yaw
+        if abs(travel)>3 && lastCaptured==0 { direction=travel>=0 ? 1:-1 }
+        let pitch=asin(min(1,max(-1,f.y)))*180/Float.pi
+        warning=sample.rotationSpeed>0.55 ? "Gira más despacio":(abs(pitch-initialPitch)>10 || abs(sample.gravity.x)>0.22 ? "Mantén la flecha en la línea central":nil)
+    }
+    func needsFrame(fieldOfView:Double)->Bool { warning==nil && distance-lastCaptured>=Float(min(20,max(10,fieldOfView*0.32))) }
+    mutating func captured() { lastCaptured=distance }
 }
