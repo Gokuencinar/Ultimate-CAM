@@ -98,6 +98,14 @@ final class GuidedPhotoCamera:NSObject,ObservableObject,AVCapturePhotoCaptureDel
             }
         }
     }
+    func pauseForModeChange(_ completion:@escaping (Bool)->Void) {
+        queue.async {
+            guard self.expected==nil else { self.ui { completion(false) };return }
+            self.active=false;self.permissionToken=UUID()
+            if self.session.isRunning { self.session.stopRunning() }
+            self.ui { self.ready=false;completion(true) }
+        }
+    }
     func resetSequence() {
         queue.async {
             guard !self.active,!self.session.isRunning,self.expected==nil else { return }

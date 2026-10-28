@@ -534,6 +534,7 @@ struct CameraView: View {
                         modeButton("iOS",selected:options.nativeNight) { activateNativeNight() }.accessibilityIdentifier("camera.mode.nativeNight").id("native")
                     }
                 }.accessibilityIdentifier("camera.modes")
+                    .onAppear { proxy.scrollTo(selectedPhotoMode,anchor:.center) }
                     .onChange(of:selectedPhotoMode) { _,value in withAnimation(.easeOut(duration:0.2)) { proxy.scrollTo(value,anchor:.center) } }
                 }
                 Button { showControls = true } label: { Image(systemName:"gearshape").font(.system(size:19)).frame(width:44,height:44) }
@@ -591,7 +592,10 @@ struct CameraView: View {
             }
             switch old {
             case .video:movie.shutdown(completion:start)
-            case .panorama,.sphere:guided.stop(completion:start)
+            case .panorama,.sphere:guided.pauseForModeChange { accepted in
+                guard token==modeTransitionID,scenePhase == .active else { return }
+                if accepted { start() } else { allowPreviewAttachment=true;guided.start();finishModeTransition(token) }
+            }
             case .photo:camera.pauseForModeChange { accepted in
                 guard token==modeTransitionID,scenePhase == .active else { return }
                 if accepted { start() } else { allowPreviewAttachment=true;camera.start();finishModeTransition(token) }
