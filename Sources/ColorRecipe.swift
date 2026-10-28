@@ -4,7 +4,10 @@ enum HueBand: Int, CaseIterable, Identifiable {
     case red, orange, yellow, green, aqua, blue, purple, magenta
     var id: Int { rawValue }
     var label: String { ["Rojo", "Naranja", "Amarillo", "Verde", "Aguamarina", "Azul", "Púrpura", "Magenta"][rawValue] }
-    var center: Double { [0, 1.0/12, 1.0/6, 1.0/3, 0.5, 2.0/3, 0.75, 5.0/6][rawValue] }
+    var center: Double {
+        let centers:[Double]=[0,1.0/12,1.0/6,1.0/3,0.5,2.0/3,0.75,5.0/6]
+        return centers[rawValue]
+    }
 }
 
 struct HSLAdjustment: Codable, Equatable {
