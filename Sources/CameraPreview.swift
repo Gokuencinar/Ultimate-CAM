@@ -3,8 +3,19 @@ import SwiftUI
 import UIKit
 
 final class PreviewSurface: UIView {
-    override class var layerClass: AnyClass { AVCaptureVideoPreviewLayer.self }
-    var previewLayer: AVCaptureVideoPreviewLayer { layer as! AVCaptureVideoPreviewLayer }
+    private(set) var previewLayer=AVCaptureVideoPreviewLayer()
+    /// Reuse the UIKit surface, never a Fig preview attachment across sessions.
+    /// Called on main, after the backend committed configuration/startRunning.
+    func attach(_ session:AVCaptureSession?) {
+        precondition(Thread.isMainThread)
+        guard previewLayer.session !== session else { return }
+        previewLayer.session=nil;previewLayer.removeFromSuperlayer()
+        dismissFocus?.cancel();ring.isHidden=true;caption.isHidden=true
+        guard let session else { return }
+        let next=AVCaptureVideoPreviewLayer(session:session)
+        next.videoGravity = .resizeAspectFill;next.frame=bounds
+        previewLayer=next;layer.insertSublayer(next,at:0);setNeedsLayout()
+    }
     private let ring = UIView()
     private let caption = UILabel()
     private var dismissFocus: DispatchWorkItem?
@@ -34,6 +45,7 @@ final class PreviewSurface: UIView {
     required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
     override func layoutSubviews() {
         super.layoutSubviews()
+        previewLayer.frame=bounds
         if let connection = previewLayer.connection, connection.isVideoRotationAngleSupported(90) {
             connection.videoRotationAngle = 90
         }
@@ -58,6 +70,16 @@ final class PreviewSurface: UIView {
     }
 }
 
+/// Explicit main-thread detach precedes all cross-session configuration. A
+/// SwiftUI state update alone is not a barrier for UIViewRepresentable updates.
+final class PreviewAttachmentController:ObservableObject {
+    private weak var surface:PreviewSurface?
+    private var session:AVCaptureSession?
+    func bind(_ view:PreviewSurface) { precondition(Thread.isMainThread);surface=view;view.attach(session) }
+    func connect(_ session:AVCaptureSession?) { precondition(Thread.isMainThread);self.session=session;surface?.attach(session) }
+    func detach() { connect(nil) }
+}
+
 struct CameraPreview: UIViewRepresentable {
     let session: AVCaptureSession
     let zoom: Double
@@ -65,13 +87,14 @@ struct CameraPreview: UIViewRepresentable {
     let changeZoom: (Double) -> Void
     var supportsFocusLock=true
     var supportsZoom=true
+    var attachment:PreviewAttachmentController?=nil
 
     final class Coordinator: NSObject {
         var parent: CameraPreview
         var startingZoom = 1.0
         init(_ parent: CameraPreview) { self.parent = parent }
         func focus(_ gesture: UIGestureRecognizer, locked: Bool) {
-            guard let view = gesture.view as? PreviewSurface else { return }
+            guard !locked || parent.supportsFocusLock,let view = gesture.view as? PreviewSurface else { return }
             let location = gesture.location(in: view)
             let point = view.previewLayer.captureDevicePointConverted(fromLayerPoint: location)
             view.showFocus(at: location, locked: locked)
@@ -83,6 +106,7 @@ struct CameraPreview: UIViewRepresentable {
             if gesture.state == .began { focus(gesture, locked: true) }
         }
         @objc func pinch(_ gesture: UIPinchGestureRecognizer) {
+            guard parent.supportsZoom else { return }
             if gesture.state == .began { startingZoom = parent.zoom }
             if gesture.state == .began || gesture.state == .changed {
                 parent.changeZoom(startingZoom * Double(gesture.scale))
@@ -92,20 +116,18 @@ struct CameraPreview: UIViewRepresentable {
     func makeCoordinator() -> Coordinator { Coordinator(self) }
     func makeUIView(context: Context) -> PreviewSurface {
         let view = PreviewSurface()
-        view.previewLayer.session = session
-        view.previewLayer.videoGravity = .resizeAspectFill
+        if let attachment { attachment.bind(view) } else { view.attach(session) }
         let tap = UITapGestureRecognizer(target: context.coordinator, action: #selector(Coordinator.tap(_:)))
-        if supportsFocusLock {
-            let hold=UILongPressGestureRecognizer(target:context.coordinator,action:#selector(Coordinator.hold(_:)))
-            hold.minimumPressDuration=0.55;tap.require(toFail:hold);view.addGestureRecognizer(hold)
-        } else { view.accessibilityLabel="Visor. Toca para enfocar y medir la primera vista." }
+        let hold=UILongPressGestureRecognizer(target:context.coordinator,action:#selector(Coordinator.hold(_:)))
+        hold.minimumPressDuration=0.55;tap.require(toFail:hold);view.addGestureRecognizer(hold)
         view.addGestureRecognizer(tap)
-        if supportsZoom { view.addGestureRecognizer(UIPinchGestureRecognizer(target: context.coordinator, action: #selector(Coordinator.pinch(_:)))) }
+        view.addGestureRecognizer(UIPinchGestureRecognizer(target: context.coordinator, action: #selector(Coordinator.pinch(_:))))
         return view
     }
     func updateUIView(_ view: PreviewSurface, context: Context) {
         context.coordinator.parent = self
         // Keep the same UIKit surface while photo/movie sessions hand off.
-        if view.previewLayer.session !== session { view.previewLayer.session=session;view.setNeedsLayout() }
+        if let attachment { attachment.bind(view) } else { view.attach(session) }
+        view.accessibilityLabel=supportsFocusLock ? "Visor. Toca para enfocar o mantén pulsado para bloquear enfoque y exposición.":"Visor. Toca para enfocar y medir la primera vista."
     }
 }

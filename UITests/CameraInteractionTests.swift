@@ -72,18 +72,29 @@ final class CameraInteractionTests: XCTestCase {
         XCTAssertTrue(app.buttons["Resaltar enfoque"].exists)
         XCTAssertTrue(app.buttons["Cebras de luces"].exists)
         app.buttons["Resaltar enfoque"].tap()
-        for (mode,close,capture) in [("panorama","panorama.close","panorama.capture"),("sphere","sphere.close","sphere.capture")] {
+        let finder=app.descendants(matching:.any).matching(identifier:"camera.viewfinder").firstMatch
+        let originalFrame=finder.frame,windows=app.windows.count
+        for mode in ["panorama","sphere","panorama"] {
             let button=revealMode(app,"camera.mode."+mode)
             XCTAssertTrue(button.isHittable);button.tap()
-            XCTAssertTrue(app.buttons[close].waitForExistence(timeout:8))
-            XCTAssertTrue(app.buttons[capture].exists)
-            XCTAssertEqual(app.buttons[capture].frame.midX,app.frame.midX,accuracy:2,"Guided shutter must stay centered regardless of the side labels")
-            let image=XCTAttachment(screenshot:app.screenshot());image.name="Guided "+mode;image.lifetime = .keepAlways;add(image)
-            // No shutter, motion service simulation or photo-library write.
-            app.buttons[close].tap()
-            XCTAssertTrue(app.buttons["camera.shutter"].waitForExistence(timeout:5))
+            XCTAssertTrue(app.buttons[mode+".capture"].waitForExistence(timeout:8))
+            let transition=app.descendants(matching:.any).matching(identifier:"camera.modeTransition").firstMatch
+            XCTAssertTrue(transition.waitForNonExistence(timeout:5))
+            XCTAssertTrue(app.scrollViews["camera.modes"].isHittable,"Guided modes must keep the common carousel")
+            XCTAssertEqual(app.windows.count,windows)
+            XCTAssertEqual(app.descendants(matching:.any).matching(identifier:"camera.viewfinder").count,1,"Guided mode created another visor")
+            XCTAssertEqual(finder.frame,originalFrame,"Guided mode changed the persistent viewfinder geometry")
+            XCTAssertFalse(app.buttons[mode+".close"].exists,"Guided mode must not present a separate camera")
+            XCTAssertEqual(app.buttons[mode+".capture"].frame.midX,app.frame.midX,accuracy:2)
         }
+        revealMode(app,"camera.mode.video").tap()
+        XCTAssertTrue(app.buttons["video.record"].waitForExistence(timeout:8))
+        XCTAssertFalse(app.buttons["panorama.capture"].exists)
+        revealMode(app,"camera.mode.photo").tap()
+        XCTAssertTrue(app.buttons["camera.shutter"].waitForExistence(timeout:8))
+        XCTAssertEqual(app.windows.count,windows)
     }
+
     func testVideoStaysInCameraWindowWithoutRecording() {
         continueAfterFailure=false
         let app=XCUIApplication();app.launch()
@@ -112,6 +123,16 @@ final class CameraInteractionTests: XCTestCase {
         XCTAssertTrue(transition.waitForNonExistence(timeout:5),"Photo transition did not complete")
         XCTAssertFalse(app.buttons["video.record"].exists)
         XCTAssertEqual(app.windows.count,windows)
+        for _ in 0..<2 {
+            revealMode(app,"camera.mode.video").tap()
+            XCTAssertTrue(app.buttons["video.record"].waitForExistence(timeout:8))
+            XCTAssertTrue(transition.waitForNonExistence(timeout:5))
+            revealMode(app,"camera.mode.photo").tap()
+            XCTAssertTrue(app.buttons["camera.shutter"].waitForExistence(timeout:8))
+            XCTAssertTrue(transition.waitForNonExistence(timeout:5))
+            XCTAssertEqual(finder.frame,originalFrame)
+            XCTAssertEqual(app.state,.runningForeground)
+        }
     }
     func testViewfinderAndCleanSettings() {
         continueAfterFailure=false

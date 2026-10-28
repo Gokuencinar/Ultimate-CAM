@@ -5,8 +5,10 @@ import UIKit
 
 struct GuidedPanoramaView:View {
     @AppStorage("hardwareCaptureButtons") private var hardwareButtons=true
-    @StateObject private var camera=GuidedPhotoCamera()
-    @Environment(\.dismiss) private var dismiss
+    @ObservedObject var camera:GuidedPhotoCamera
+    @Binding var modeBusy:Bool
+    @Binding var unsavedSequence:Bool
+    var interactionEnabled=true
     @Environment(\.scenePhase) private var scene
     @State private var frames=[Data]()
     @State private var processing=false
@@ -16,12 +18,9 @@ struct GuidedPanoramaView:View {
     @State private var message=""
     @State private var saved=false
     @State private var saving=false
-    @State private var confirmClose=false
-    @State private var closing=false
     var body:some View {
         ZStack {
-            CameraPreview(session:camera.session,zoom:1,focus:{ point,_ in camera.focus(point) },changeZoom:{_ in},supportsFocusLock:false,supportsZoom:false)
-                .allowsHitTesting(frames.isEmpty && !camera.busy && !processing && result==nil).ignoresSafeArea()
+
             if let last=frames.last,let cg=PreviewDecoder.image(last,maximumDimension:600),result==nil {
                 GeometryReader { g in
                     Image(decorative:cg,scale:1).resizable().scaledToFill().frame(width:g.size.width,height:g.size.height).clipped().opacity(0.18)
@@ -29,8 +28,6 @@ struct GuidedPanoramaView:View {
             }
             VStack {
                 HStack {
-                    Button { if frames.isEmpty || saved { close() } else { confirmClose=true } } label: { Image(systemName:"chevron.left").frame(width:44,height:44) }
-                        .accessibilityIdentifier("panorama.close").disabled(camera.busy || processing || saving)
                     Spacer();Text("PANORAMA").font(.headline);Spacer()
                     Text("\(frames.count)/10").monospacedDigit()
                 }
@@ -54,24 +51,23 @@ struct GuidedPanoramaView:View {
                 }
                 Text(message.isEmpty ? camera.status:message).font(.footnote).multilineTextAlignment(.center).padding(.vertical,6)
             }.padding().background { LinearGradient(colors:[.black.opacity(0.75),.clear,.black.opacity(0.8)],startPoint:.top,endPoint:.bottom).allowsHitTesting(false) }
-        }.foregroundStyle(.white).tint(CameraPalette.accent).preferredColorScheme(.dark)
-            .onCameraCaptureEvent(isEnabled:hardwareButtons && scene == .active && camera.ready && !camera.busy && !processing && !saving &&
-                                  !closing && !confirmClose && result==nil && frames.count<10) { event in
+        }.disabled(!interactionEnabled).foregroundStyle(.white).tint(CameraPalette.accent).preferredColorScheme(.dark)
+            .onCameraCaptureEvent(isEnabled:interactionEnabled && hardwareButtons && scene == .active && camera.ready && !camera.busy && !processing && !saving &&
+                                  result==nil && frames.count<10) { event in
                 if event.phase == .ended { camera.capture() }
             }
-            .interactiveDismissDisabled(!frames.isEmpty || camera.busy || processing || saving)
-            .onAppear { UIApplication.shared.isIdleTimerDisabled=true;camera.start() }
-            .onDisappear { UIApplication.shared.isIdleTimerDisabled=false;cancellation?.cancel();camera.stop() }
-            .onChange(of:camera.frame?.id) { _,id in if scene == .active,!closing,id != nil,let data=camera.frame?.data,frames.count<10 { frames.append(data);message="" } }
+            .onAppear { publishState() }
+            .onDisappear { cancellation?.cancel() }
+            .onChange(of:camera.frame?.id) { _,id in if scene == .active,id != nil,let data=camera.frame?.data,frames.count<10 { frames.append(data);message="" } }
             .onChange(of:scene) { _,phase in
-                if phase == .background { UIApplication.shared.isIdleTimerDisabled=false;camera.stop();cancellation?.cancel() }
-                else if phase == .active && !closing { UIApplication.shared.isIdleTimerDisabled=true;camera.start() }
+                if phase == .background { cancellation?.cancel() }
             }
-            .confirmationDialog("¿Descartar las fotos de este panorama?",isPresented:$confirmClose,titleVisibility:.visible) {
-                Button("Descartar y volver",role:.destructive) { close() };Button("Continuar",role:.cancel) { }
-            }
+            .onChange(of:frames.count) { _,_ in publishState() }
+            .onChange(of:saved) { _,_ in publishState() }
+            .onChange(of:processing) { _,_ in publishState() }
+            .onChange(of:saving) { _,_ in publishState() }
     }
-    private func close() { closing=true;camera.stop { dismiss() } }
+    private func publishState() { modeBusy=processing || saving;unsavedSequence = !frames.isEmpty && !saved }
     private func merge() {
         processing=true;message="Registrando perspectivas…";let captured=frames,token=ProcessingCancellation();cancellation=token
         Task { @MainActor in

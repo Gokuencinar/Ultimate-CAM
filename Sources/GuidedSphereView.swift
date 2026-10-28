@@ -5,9 +5,11 @@ import UIKit
 
 struct GuidedSphereView:View {
     @AppStorage("hardwareCaptureButtons") private var hardwareButtons=true
-    @StateObject private var camera=GuidedPhotoCamera()
+    @ObservedObject var camera:GuidedPhotoCamera
+    @Binding var modeBusy:Bool
+    @Binding var unsavedSequence:Bool
+    var interactionEnabled=true
     @StateObject private var motion=SphereMotionProvider()
-    @Environment(\.dismiss) private var dismiss
     @Environment(\.scenePhase) private var scene
     @State private var reference:SphereReference?
     @State private var captured=[Int:SphereImageFrame]()
@@ -20,9 +22,7 @@ struct GuidedSphereView:View {
     @State private var saving=false
     @State private var message=""
     @State private var interrupted=false
-    @State private var closing=false
     @State private var confirmDiscard=false
-    @State private var restarting=false
     @State private var interactivePreview=true
     private var direction:SIMD3<Float>? {
         guard let reference,let snapshot=motion.snapshot else { return nil };return try? reference.pose(snapshot).forward
@@ -40,12 +40,9 @@ struct GuidedSphereView:View {
     }
     var body:some View {
         ZStack {
-            CameraPreview(session:camera.session,zoom:1,focus:{ point,_ in camera.focus(point) },changeZoom:{_ in},supportsFocusLock:false,supportsZoom:false)
-                .allowsHitTesting(captured.isEmpty && !camera.busy && !processing && result==nil).ignoresSafeArea()
+
             VStack(spacing:12) {
                 HStack {
-                    Button { if captured.isEmpty || saved { close() } else { restarting=false;confirmDiscard=true } } label: { Image(systemName:"chevron.left").frame(width:44,height:44) }
-                        .accessibilityIdentifier("sphere.close").disabled(camera.busy || processing || saving)
                     Spacer();Text("ESFERA").font(.headline);Spacer();Text("\(captured.count)/62").monospacedDigit()
                 }
                 if result==nil { coverageMap.frame(height:110).background(.black.opacity(0.65),in:RoundedRectangle(cornerRadius:10)) }
@@ -64,7 +61,7 @@ struct GuidedSphereView:View {
                     if let next { Text("Objetivo: giro \(Int(next.yaw))° · altura \(Int(next.pitch))° · distancia \(Int(angle))°").font(.caption.monospacedDigit()) }
                     Image(systemName:aimReady ? "scope":"viewfinder").font(.system(size:40)).foregroundStyle(aimReady ? CameraPalette.accent:.white)
                     HStack {
-                        Button("Reiniciar") { restarting=true;confirmDiscard=true }.font(.subheadline)
+                        Button("Reiniciar") { confirmDiscard=true }.font(.subheadline)
                             .accessibilityLabel("Empezar la esfera de nuevo").frame(maxWidth:.infinity)
                             .disabled(camera.busy || processing || saving || captured.isEmpty).opacity(captured.isEmpty ? 0.35:1)
                         Button {
@@ -81,32 +78,34 @@ struct GuidedSphereView:View {
                 }
                 Text(message.isEmpty ? motion.message:message).font(.footnote).multilineTextAlignment(.center)
                 if result==nil { Text(camera.status).font(.caption).multilineTextAlignment(.center) }
-                if result==nil { Text("Experimental · JPEG SDR · la calibración del campo de visión necesita comprobación en el iPhone.").font(.caption2).foregroundStyle(.secondary) }
             }.padding().background { LinearGradient(colors:[.black.opacity(0.8),.clear,.black.opacity(0.85)],startPoint:.top,endPoint:.bottom).allowsHitTesting(false) }
-        }.foregroundStyle(.white).preferredColorScheme(.dark).tint(CameraPalette.accent)
-            .onCameraCaptureEvent(isEnabled:hardwareButtons && scene == .active && camera.ready && !camera.busy && !processing && !saving &&
-                                  !closing && !confirmDiscard && result==nil && aimReady && next != nil) { event in
+        }.disabled(!interactionEnabled).foregroundStyle(.white).preferredColorScheme(.dark).tint(CameraPalette.accent)
+            .onCameraCaptureEvent(isEnabled:interactionEnabled && hardwareButtons && scene == .active && camera.ready && !camera.busy && !processing && !saving &&
+                                  !confirmDiscard && result==nil && aimReady && next != nil) { event in
                 if event.phase == .ended,let next { pendingTarget=next.id;camera.capture() }
             }
-            .interactiveDismissDisabled(!captured.isEmpty || camera.busy || processing || saving)
-            .onAppear { UIApplication.shared.isIdleTimerDisabled=true;camera.motionProvider={ motion.read() };motion.start();camera.start() }
-            .onDisappear { UIApplication.shared.isIdleTimerDisabled=false;motion.stop();camera.stop();cancellation?.cancel() }
+            .onAppear { publishState();camera.motionProvider={ motion.read() };motion.start() }
+            .onDisappear { motion.stop();camera.motionProvider=nil;cancellation?.cancel() }
             .onChange(of:camera.frame?.id) { _,id in if id != nil,let frame=camera.frame { accept(frame) } }
             .onChange(of:scene) { _,phase in
                 if phase == .background {
-                    interrupted = !captured.isEmpty;pendingTarget=nil;motion.stop();camera.stop();cancellation?.cancel();UIApplication.shared.isIdleTimerDisabled=false
+                    interrupted = !captured.isEmpty;pendingTarget=nil;motion.stop();cancellation?.cancel()
                     if interrupted { message="La referencia de orientación se interrumpió. Empieza otra esfera para no mezclar ejes de sesiones distintas." }
-                } else if phase == .active && !closing {
-                    UIApplication.shared.isIdleTimerDisabled=true;camera.start();if !interrupted { motion.start() }
+                } else if phase == .active {
+                    if !interrupted { motion.start() }
                 }
             }
             .confirmationDialog("¿Descartar las vistas de esta esfera?",isPresented:$confirmDiscard,titleVisibility:.visible) {
                 Button("Descartar vistas",role:.destructive) {
-                    if restarting { captured=[:];reference=nil;result=nil;preview=nil;saved=false;interrupted=false;message="";camera.unlock();motion.stop();motion.start() }
-                    else { close() }
+                    captured=[:];reference=nil;result=nil;preview=nil;saved=false;interrupted=false;message="";camera.unlock();motion.stop();motion.start()
                 };Button("Continuar",role:.cancel) { }
             }
+            .onChange(of:captured.count) { _,_ in publishState() }
+            .onChange(of:saved) { _,_ in publishState() }
+            .onChange(of:processing) { _,_ in publishState() }
+            .onChange(of:saving) { _,_ in publishState() }
     }
+    private func publishState() { modeBusy=processing || saving;unsavedSequence = !captured.isEmpty && !saved }
     private var coverageMap:some View {
         Canvas { context,size in
             for target in SphereTarget.all {
@@ -123,7 +122,7 @@ struct GuidedSphereView:View {
         }.accessibilityLabel("Vistas esféricas completadas: \(captured.count) de 62")
     }
     private func accept(_ frame:GuidedPhotoFrame) {
-        guard scene == .active,!closing else { pendingTarget=nil;return }
+        guard scene == .active else { pendingTarget=nil;return }
         guard let target=pendingTarget,let sample=frame.motion else { message="No se recibió orientación para esa foto; no se añade a la esfera.";pendingTarget=nil;if captured.isEmpty { camera.unlock() };return }
         pendingTarget=nil
         do {
@@ -146,7 +145,6 @@ struct GuidedSphereView:View {
             processing=false;cancellation=nil
         }
     }
-    private func close() { closing=true;motion.stop();camera.stop { dismiss() } }
     private func save() {
         guard let result,!saved,!saving else { return };saving=true
         PHPhotoLibrary.requestAuthorization(for:.addOnly) { permission in

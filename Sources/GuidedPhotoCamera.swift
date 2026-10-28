@@ -98,6 +98,18 @@ final class GuidedPhotoCamera:NSObject,ObservableObject,AVCapturePhotoCaptureDel
             }
         }
     }
+    func resetSequence() {
+        queue.async {
+            guard !self.active,!self.session.isRunning,self.expected==nil else { return }
+            self.unlockControls();self.received=nil;self.capturedMotion=nil;self.captureError=nil
+            self.recoveryRequired=false;self.configured=false
+            self.session.beginConfiguration()
+            for input in self.session.inputs { self.session.removeInput(input) }
+            for output in self.session.outputs { self.session.removeOutput(output) }
+            self.session.commitConfiguration();self.device=nil
+            self.ui { self.frame=nil;self.ready=false;self.busy=false }
+        }
+    }
     func capture() {
         queue.async {
             guard self.active,self.session.isRunning,self.expected==nil,!self.recoveryRequired else { return }

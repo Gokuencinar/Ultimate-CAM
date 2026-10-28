@@ -21,6 +21,8 @@ private enum AuxiliaryCameraMode:String,Identifiable {
     var id:String { rawValue }
 }
 
+private enum CameraScreenMode:Equatable { case photo,video,panorama,sphere }
+
 private enum CompositionGuide: String, CaseIterable, Identifiable {
     case thirds = "Tercios", golden = "Áurea", center = "Centro", diagonal = "Diagonales"
     var id: String { rawValue }
@@ -57,6 +59,14 @@ struct CameraView: View {
     @AppStorage("mirrorSelfies") private var mirrorSelfies=false
     @StateObject private var camera = CameraModel()
     @StateObject private var movie = MovieCameraModel()
+    @StateObject private var guided = GuidedPhotoCamera()
+    @StateObject private var previewAttachment = PreviewAttachmentController()
+    @State private var guidedBusy=false
+    @State private var guidedUnsaved=false
+    @State private var confirmModeChange=false
+    @State private var pendingModeChange:(()->Void)?
+    @State private var allowPreviewAttachment=true
+    @State private var sceneWasBackgrounded=false
     @State private var videoMode = false
     @State private var showMovieReview = false
     @StateObject private var profiles = ProcessingProfiles()
@@ -129,7 +139,7 @@ struct CameraView: View {
         return rawEnabled ? "RAW + JPEG":"Cámara"
     }
     private var movieBusy:Bool { [.recording,.finishing,.saving].contains(movie.phase) }
-    private var controlsEnabled: Bool { !camera.busy && !movieBusy && !loadingPhoto && !openingVideo && countdown == 0 }
+    private var controlsEnabled: Bool { !camera.busy && !movieBusy && !guidedBusy && !guided.busy && !loadingPhoto && !openingVideo && countdown == 0 }
     private var intrinsicMetalFusion:Bool { (options.nightStatic && options.nightMetalRAW) || (options.hdrBracketing && options.hdrMetalRAW) }
     private var intrinsicAdaptiveFusion:Bool { intrinsicMetalFusion || (options.nightStatic && (options.nightWeightedFusion || options.nightSpectralFusion)) }
     private var hardwareCaptureReady:Bool {
@@ -138,17 +148,24 @@ struct CameraView: View {
         !importFile && !exportFile && !importingDocument && camera.importFailure==nil
     }
 
-    var body: some View {
+    private var cameraShell:some View {
         ZStack {
             Color.black.ignoresSafeArea()
             viewfinder.ignoresSafeArea()
-                .overlay {
-                    if openingVideo {
-                        Rectangle().fill(.ultraThinMaterial).ignoresSafeArea().allowsHitTesting(false)
-                            .accessibilityIdentifier("camera.modeTransition").transition(.opacity)
-                    }
-                }.animation(.easeInOut(duration:0.2),value:openingVideo)
+            if auxiliaryMode == .panorama {
+                GuidedPanoramaView(camera:guided,modeBusy:$guidedBusy,unsavedSequence:$guidedUnsaved,interactionEnabled:!openingVideo && !confirmModeChange && !showControls)
+                    .padding(.bottom,52)
+            } else if auxiliaryMode == .sphere {
+                GuidedSphereView(camera:guided,modeBusy:$guidedBusy,unsavedSequence:$guidedUnsaved,interactionEnabled:!openingVideo && !confirmModeChange && !showControls)
+                    .padding(.bottom,52)
+            }
+            if openingVideo {
+                Rectangle().fill(.ultraThinMaterial).ignoresSafeArea().allowsHitTesting(false)
+                    .accessibilityIdentifier("camera.modeTransition").transition(.opacity)
+            }
+
         }
+        .animation(.easeInOut(duration:0.2),value:openingVideo)
         .onCameraCaptureEvent(isEnabled:hardwareCaptureReady) { event in
             guard event.phase == .ended else { return }
             CaptureTrace.record("ui.hardwareCapture",["timerActive":countdown>0])
@@ -156,8 +173,8 @@ struct CameraView: View {
         }
         .overlay(alignment: .top) {
             VStack(spacing: 0) {
-                Group { if videoMode { videoHeader } else { header } }.padding(.horizontal, 20).padding(.vertical, 10)
-                if showQuickControls && !videoMode { quickControls.padding(.horizontal, 16).padding(.bottom, 12) }
+                Group { if auxiliaryMode == nil { if videoMode { videoHeader } else { header } } }.padding(.horizontal, 20).padding(.vertical, 10)
+                if showQuickControls && !videoMode && auxiliaryMode == nil { quickControls.padding(.horizontal, 16).padding(.bottom, 12) }
             }
             .background {
                 LinearGradient(colors: [.black.opacity(0.8), .black.opacity(0)],
@@ -167,12 +184,12 @@ struct CameraView: View {
         }
         .overlay(alignment: .bottom) {
             VStack(spacing: 0) {
-                if (!videoMode && (camera.isFocusLocked || manualFocus || zoom>1.01)) || (videoMode && movie.zoom>1.01) { focusInfo.padding(.horizontal, 20).padding(.bottom, 8) }
+                if auxiliaryMode == nil && ((!videoMode && (camera.isFocusLocked || manualFocus || zoom>1.01)) || (videoMode && movie.zoom>1.01)) { focusInfo.padding(.horizontal, 20).padding(.bottom, 8) }
                 if camera.processingInProgress {
                     Button("Detener procesado y conservar original") { camera.cancelProcessing() }
                         .font(.footnote.bold()).buttonStyle(.bordered).tint(CameraPalette.accent).padding(.bottom, 8)
                 }
-                bottomDock
+                if auxiliaryMode != nil { modeSelector.padding(.horizontal,20).padding(.bottom,5) } else { bottomDock }
             }
             .background {
                 LinearGradient(colors: [.black.opacity(0), .black.opacity(0.85)],
@@ -181,19 +198,44 @@ struct CameraView: View {
             }
         }
         .background(Color.black).foregroundStyle(.white).preferredColorScheme(.dark)
-        .onAppear { UIApplication.shared.isIdleTimerDisabled = true; if auxiliaryMode == nil && !openingVideo { if videoMode { movie.start(movie.configuration,lens:movie.lens) } else { camera.start() } }; loadProfile(profiles.options(for: lens.rawValue) ?? ProcessingOptions()) }
-        .onDisappear { UIApplication.shared.isIdleTimerDisabled = false; cancelCountdown();cancelModeTransition(); profiles.flush() }
-        .onChange(of: scenePhase) { _, phase in
-            if phase == .active { UIApplication.shared.isIdleTimerDisabled = true; if auxiliaryMode == nil && !openingVideo { if videoMode { movie.start(movie.configuration,lens:movie.lens) } else { camera.start() } } }
-            else if phase == .background {
-                UIApplication.shared.isIdleTimerDisabled = false
-                cancelCountdown()
-                cancelModeTransition()
-                profiles.flush()
-                camera.stop()
-                movie.shutdown()
+    }
+
+    private var cameraLifecycle:some View {
+        cameraShell
+        .onAppear {
+            UIApplication.shared.isIdleTimerDisabled=true
+            if !openingVideo { startSelectedMode() }
+            loadProfile(profiles.options(for:lens.rawValue) ?? ProcessingOptions())
+        }
+        .onDisappear {
+            UIApplication.shared.isIdleTimerDisabled=false;cancelCountdown();cancelModeTransition()
+            pendingModeChange=nil;previewAttachment.detach();camera.stop();movie.shutdown();guided.stop();profiles.flush()
+        }
+        .onReceive(camera.$ready) { ready in
+            if !videoMode && auxiliaryMode == nil && allowPreviewAttachment && scenePhase == .active {
+                previewAttachment.connect(ready ? camera.session:nil)
             }
         }
+        .onReceive(movie.$ready) { ready in
+            if videoMode && allowPreviewAttachment && scenePhase == .active { previewAttachment.connect(ready ? movie.session:nil) }
+        }
+        .onReceive(guided.$ready) { ready in
+            if auxiliaryMode != nil && allowPreviewAttachment && scenePhase == .active { previewAttachment.connect(ready ? guided.session:nil) }
+        }
+        .onChange(of:scenePhase) { _,phase in
+            if phase == .active {
+                UIApplication.shared.isIdleTimerDisabled=true
+                if sceneWasBackgrounded { sceneWasBackgrounded=false;startSelectedMode() }
+            } else if phase == .background {
+                sceneWasBackgrounded=true;UIApplication.shared.isIdleTimerDisabled=false
+                cancelCountdown();cancelModeTransition();allowPreviewAttachment=false;previewAttachment.detach()
+                profiles.flush();camera.stop();movie.shutdown();guided.stop()
+            }
+        }
+    }
+
+    var body:some View {
+        cameraLifecycle
         .onChange(of: camera.selectedLens) { _, next in
             resetUIControls()
             if !loadProfile(profiles.options(for: next.rawValue) ?? ProcessingOptions()) { options = ProcessingOptions() }
@@ -215,8 +257,11 @@ struct CameraView: View {
         }) { settings }
         .sheet(isPresented: $showResult) { review }
         .sheet(isPresented: $showMovieReview) { MovieReview(camera:movie) }
-        .fullScreenCover(item:$auxiliaryMode,onDismiss:{ resetUIControls();camera.resumeAfterAuxiliary() }) { mode in
-            switch mode { case .panorama: GuidedPanoramaView();case .sphere: GuidedSphereView() }
+        .confirmationDialog("¿Descartar esta secuencia para cambiar de modo?",isPresented:$confirmModeChange,titleVisibility:.visible) {
+            Button("Descartar y cambiar",role:.destructive) {
+                let action=pendingModeChange;pendingModeChange=nil;action?()
+            }
+            Button("Continuar aquí",role:.cancel) { pendingModeChange=nil }
         }
         .photosPicker(isPresented: $showPhotoPicker, selection: $selectedPhoto, matching: .images,
                       preferredItemEncoding: .current)
@@ -277,13 +322,14 @@ struct CameraView: View {
 
     private var viewfinder: some View {
         ZStack {
-            CameraPreview(session: videoMode ? movie.session:camera.session, zoom: videoMode ? movie.zoom:zoom, focus: { point, locked in
-                if videoMode { movie.focus(point,locked:locked) }
+            CameraPreview(session: videoMode ? movie.session:(auxiliaryMode == nil ? camera.session:guided.session), zoom: videoMode ? movie.zoom:(auxiliaryMode == nil ? zoom:1), focus: { point, locked in
+                if auxiliaryMode != nil { guided.focus(point) }
+                else if videoMode { movie.focus(point,locked:locked) }
                 else { manualFocus = false;camera.focus(at: point, lock: locked) }
-            }, changeZoom: { value in if videoMode { movie.setZoom(value) } else { camera.setZoom(value) } })
+            }, changeZoom: { value in if videoMode { movie.setZoom(value) } else if auxiliaryMode == nil { camera.setZoom(value) } },supportsFocusLock:auxiliaryMode == nil,supportsZoom:auxiliaryMode == nil,attachment:previewAttachment)
                 .allowsHitTesting(controlsEnabled || (videoMode && movie.phase == .recording))
             GeometryReader { geometry in
-                if !videoMode,let frame=camera.previewAnalysisFrame {
+                if !videoMode,auxiliaryMode == nil,let frame=camera.previewAnalysisFrame {
                     if let color=frame.color {
                         Image(decorative:color,scale:1).resizable().scaledToFill()
                             .frame(width:geometry.size.width,height:geometry.size.height).clipped()
@@ -294,11 +340,11 @@ struct CameraView: View {
                     }
                 }
             }.allowsHitTesting(false)
-            if grid { ViewfinderGrid(guide: guide) }
-            if !videoMode,previewTools.histogram,let frame=camera.previewAnalysisFrame {
+            if grid && auxiliaryMode == nil { ViewfinderGrid(guide: guide) }
+            if !videoMode,auxiliaryMode == nil,previewTools.histogram,let frame=camera.previewAnalysisFrame {
                 VStack { HStack { Spacer();PreviewMeterView(metrics:frame.metrics) };Spacer() }.padding(.top,110).padding(.trailing,18)
             }
-            if !videoMode,let notice=camera.previewAnalysisFrame?.notice {
+            if !videoMode,auxiliaryMode == nil,let notice=camera.previewAnalysisFrame?.notice {
                 VStack { Spacer();Text(notice).font(.caption).padding(8).background(.black.opacity(0.8)).padding(.bottom,230) }.allowsHitTesting(false)
             }
             if countdown > 0 {
@@ -482,9 +528,9 @@ struct CameraView: View {
                         }.accessibilityIdentifier("camera.mode.portrait").id("portrait")
                         modeButton("HDR",selected:options.hdrBracketing) { activateHDR() }.accessibilityIdentifier("camera.mode.hdr").id("hdr")
                         modeButton("Pila",selected:stack && !options.nightStatic && !options.hdrBracketing) { options.nativeNight=false;options.nightStatic=false;options.hdrBracketing=false;options.portraitAmount=0;stack=true }.accessibilityIdentifier("camera.mode.stack").id("stack")
-                        modeButton("Vídeo",selected:videoMode,photoMode:false) { enterVideo() }.accessibilityIdentifier("camera.mode.video").id("video")
-                        modeButton("Panorama",selected:false) { openAuxiliary(.panorama) }.accessibilityIdentifier("camera.mode.panorama")
-                        modeButton("Esfera",selected:false) { openAuxiliary(.sphere) }.accessibilityIdentifier("camera.mode.sphere")
+                        modeButton("Vídeo",selected:videoMode,destination:.video) { }.accessibilityIdentifier("camera.mode.video").id("video")
+                        modeButton("Panorama",selected:auxiliaryMode == .panorama,destination:.panorama) { }.accessibilityIdentifier("camera.mode.panorama").id("panorama")
+                        modeButton("Esfera",selected:auxiliaryMode == .sphere,destination:.sphere) { }.accessibilityIdentifier("camera.mode.sphere").id("sphere")
                         modeButton("iOS",selected:options.nativeNight) { activateNativeNight() }.accessibilityIdentifier("camera.mode.nativeNight").id("native")
                     }
                 }.accessibilityIdentifier("camera.modes")
@@ -492,60 +538,77 @@ struct CameraView: View {
                 }
                 Button { showControls = true } label: { Image(systemName:"gearshape").font(.system(size:19)).frame(width:44,height:44) }
                     .accessibilityIdentifier("camera.settings")
-                    .accessibilityLabel("Ajustes de cámara")
+                    .accessibilityLabel("Ajustes de cámara").disabled(auxiliaryMode != nil)
             }.disabled(!controlsEnabled)
     }
 
     private var selectedPhotoMode:String {
-        if videoMode { return "video" }
+        if let auxiliaryMode { return auxiliaryMode.id };if videoMode { return "video" }
         if options.nativeNight { return "native" };if options.nightStatic { return "night" };if options.hdrBracketing { return "hdr" }
         if stack { return "stack" };return options.portraitAmount>0 ? "portrait":"photo"
     }
 
-    private func modeButton(_ title: String, selected: Bool, photoMode:Bool=true, action: @escaping () -> Void) -> some View {
-        let highlighted=selected && (!photoMode || !videoMode)
-        return Button { if videoMode && photoMode { leaveVideo(then:action) } else if !videoMode || photoMode { action() } } label: {
-            Text(title).font(.system(size: 13, weight: .bold)).tracking(1)
-                .foregroundStyle(highlighted ? CameraPalette.accent : .white.opacity(0.65))
-                .padding(.horizontal, 12).frame(height: 38)
-                .background(highlighted ? Color(white: 0.16) : .clear, in: Capsule())
-        }.accessibilityAddTraits(highlighted ? .isSelected : [])
+    private var screenMode:CameraScreenMode {
+        if videoMode { return .video }
+        if auxiliaryMode == .panorama { return .panorama };if auxiliaryMode == .sphere { return .sphere };return .photo
     }
-
-    private func openAuxiliary(_ mode:AuxiliaryCameraMode) {
-        openingVideo=true
-        camera.pauseForModeChange { accepted in
-            openingVideo=false
-            if accepted && scenePhase == .active { auxiliaryMode=mode }
-            else if scenePhase == .active { camera.start() }
-        }
+    private func modeButton(_ title:String,selected:Bool,destination:CameraScreenMode = .photo,action:@escaping ()->Void)->some View {
+        let highlighted=selected && (destination != .photo || screenMode == .photo)
+        return Button {
+            guard controlsEnabled else { return }
+            if screenMode==destination { action();return }
+            let change={ switchMode(to:destination,then:action) }
+            if auxiliaryMode != nil && guidedUnsaved { pendingModeChange=change;confirmModeChange=true }
+            else { change() }
+        } label: {
+            Text(title).font(.system(size:13,weight:.bold)).tracking(1)
+                .foregroundStyle(highlighted ? CameraPalette.accent:.white.opacity(0.65))
+                .padding(.horizontal,12).frame(height:38)
+                .background(highlighted ? Color(white:0.16):.clear,in:Capsule())
+        }.accessibilityAddTraits(highlighted ? .isSelected:[])
     }
-
-    private func enterVideo() {
-        guard controlsEnabled,!videoMode else { return }
-        cancelCountdown();showQuickControls=false
+    private func startSelectedMode() {
+        allowPreviewAttachment=true
+        if videoMode { movie.start(movie.configuration,lens:movie.lens) }
+        else if auxiliaryMode != nil { guided.start() }
+        else { camera.start() }
+    }
+    private func switchMode(to destination:CameraScreenMode,then action:@escaping ()->Void) {
+        guard controlsEnabled else { return };cancelCountdown();showQuickControls=false
+        let old=screenMode
         beginModeTransition { token in
-            camera.pauseForModeChange { accepted in
+            let start:()->Void = {
                 guard token==modeTransitionID,scenePhase == .active else { return }
-                if accepted { videoMode=true;movie.start(movie.configuration,lens:lens) }
-                else { camera.start() }
-                finishModeTransition(token)
+                videoMode=destination == .video
+                auxiliaryMode=destination == .panorama ? .panorama:(destination == .sphere ? .sphere:nil)
+                guidedBusy=false;guidedUnsaved=false;allowPreviewAttachment=true
+                switch destination {
+                case .photo:resetUIControls();camera.resumeAfterAuxiliary()
+                case .video:movie.start(movie.configuration,lens:lens)
+                case .panorama,.sphere:guided.resetSequence();guided.start()
+                }
+                action();finishModeTransition(token)
+            }
+            switch old {
+            case .video:movie.shutdown(completion:start)
+            case .panorama,.sphere:guided.stop(completion:start)
+            case .photo:camera.pauseForModeChange { accepted in
+                guard token==modeTransitionID,scenePhase == .active else { return }
+                if accepted { start() } else { allowPreviewAttachment=true;camera.start();finishModeTransition(token) }
+            }
             }
         }
     }
-    private func leaveVideo(then action:@escaping ()->Void) {
-        guard !movieBusy,!openingVideo else { return }
+    private func configureMovie(_ options:MovieConfiguration,lens:CameraLens) {
+        guard videoMode else { movie.configure(options,lens:lens);return }
+        guard controlsEnabled else { return }
         beginModeTransition { token in
-            movie.shutdown {
-                guard token==modeTransitionID,scenePhase == .active else { return }
-                videoMode=false;resetUIControls()
-                // Rebuild photo input settings after movie changed activeFormat.
-                camera.resumeAfterAuxiliary();action();finishModeTransition(token)
-            }
+            allowPreviewAttachment=true;movie.configure(options,lens:lens);finishModeTransition(token)
         }
     }
     private func beginModeTransition(_ operation:@escaping (UUID)->Void) {
         modeTransitionTask?.cancel();modeTransitionID=UUID();openingVideo=true
+        allowPreviewAttachment=false;previewAttachment.detach()
         let token=modeTransitionID
         modeTransitionTask=Task { @MainActor in
             do { try await Task.sleep(nanoseconds:200_000_000) } catch { return }
@@ -560,7 +623,7 @@ struct CameraView: View {
             for _ in 0..<20 {
                 do { try await Task.sleep(nanoseconds:50_000_000) } catch { return }
                 guard token==modeTransitionID,scenePhase == .active else { return }
-                if videoMode ? movie.ready:camera.ready { break }
+                if videoMode ? movie.ready:(auxiliaryMode != nil ? guided.ready:camera.ready) { break }
             }
             guard token==modeTransitionID else { return }
             openingVideo=false;modeTransitionTask=nil
@@ -575,7 +638,7 @@ struct CameraView: View {
         else { movie.record(mirrorSelfie:mirrorSelfies) }
     }
     private func updateMovie(_ change:(inout MovieConfiguration)->Void) {
-        var request=movie.configuration;change(&request);movie.configure(request,lens:movie.lens)
+        var request=movie.configuration;change(&request);configureMovie(request,lens:movie.lens)
     }
     private var videoHeader:some View {
         HStack(spacing:12) {
@@ -601,7 +664,7 @@ struct CameraView: View {
         VStack(spacing:14) {
             HStack(spacing:8) {
                 ForEach(movie.lenses.filter { $0 != .front }) { item in
-                    Button(item.label) { movie.configure(movie.configuration,lens:item) }
+                    Button(item.label) { configureMovie(movie.configuration,lens:item) }
                         .font(.subheadline.bold()).frame(width:44,height:36)
                         .background(movie.lens==item ? CameraPalette.accent:Color(white:0.14),in:Capsule())
                         .foregroundStyle(movie.lens==item ? .black:.white)
@@ -621,7 +684,7 @@ struct CameraView: View {
                 }.accessibilityIdentifier("video.record").accessibilityLabel(movie.phase == .recording ? "Detener vídeo":(movie.phase == .review ? "Revisar vídeo":"Grabar vídeo"))
                     .disabled(openingVideo || [.finishing,.saving].contains(movie.phase) || (!movie.ready && movie.phase != .review))
                 Spacer()
-                Button { movie.configure(movie.configuration,lens:movie.lens == .front ? lastBackLens:.front) } label: {
+                Button { configureMovie(movie.configuration,lens:movie.lens == .front ? lastBackLens:.front) } label: {
                     Image(systemName:"arrow.triangle.2.circlepath.camera").font(.title2).frame(width:50,height:50)
                 }.accessibilityLabel("Cambiar cámara").disabled(movieBusy || openingVideo || !movie.lenses.contains(.front))
             }
