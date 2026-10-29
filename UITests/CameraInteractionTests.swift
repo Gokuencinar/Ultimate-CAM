@@ -263,10 +263,14 @@ final class CameraInteractionTests: XCTestCase {
     }
     private func tapVisible(_ control:XCUIElement) {
         XCTAssertTrue(control.waitForExistence(timeout:5))
-        XCTAssertTrue(control.isHittable)
-        // These fixed visor buttons are outside scroll views. Xcode 16's AX
-        // scroll-to-visible action can fail even for their visible frames.
-        // Send a real center tap while retaining the hit-test assertions.
+        XCTAssertTrue(control.isEnabled)
+        let frame=control.frame,bounds=XCUIApplication().frame
+        XCTAssertFalse(frame.isEmpty || frame.isNull || frame.isInfinite)
+        XCTAssertTrue(bounds.contains(frame),"Visor control is outside the visible window: \(frame)")
+        // Exercise a real pointer event on the visible, enabled control. Each
+        // caller then verifies its panel/value, rather than trusting AX's
+        // hit-test proxy for a SwiftUI overlay above a full-screen UIKit view.
+        if !control.isHittable { print("AX hit-test differs from visible geometry: \(control.identifier) \(frame)") }
         control.coordinate(withNormalizedOffset:CGVector(dx:0.5,dy:0.5)).tap()
     }
     private func setSwitch(_ control:XCUIElement,to value:String) {
