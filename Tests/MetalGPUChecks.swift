@@ -158,6 +158,9 @@ import Darwin
             colored[i]=0.8;colored[i+1]=0.05;colored[i+2]=0.6
         }
         try require(RAWRenderValidation.rejects(rendered:pink,reference:gray),"Global magenta decode was silently exported")
+        let black=[Float](repeating:0,count:gray.count)
+        try require(RAWRenderValidation.rejects(rendered:pink,reference:black),"A nearly black scene turned into bright magenta")
+        try require(!RAWRenderValidation.rejects(rendered:valid,reference:black),"Neutral shadow recovery was rejected")
         try require(RAWRenderValidation.rejects(rendered:white,reference:gray),"Burned night decode was silently exported")
         try require(!RAWRenderValidation.rejects(rendered:valid,reference:gray),"Valid night lift was rejected")
         try require(!RAWRenderValidation.rejects(rendered:colored,reference:colored),"A genuinely coloured subject was rejected")

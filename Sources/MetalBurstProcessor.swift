@@ -409,9 +409,10 @@ enum RAWRenderValidation {
             let a=SIMD3(reference[i],reference[i+1],reference[i+2]),b=SIMD3(rendered[i],rendered[i+1],rendered[i+2])
             guard b.x.isFinite,b.y.isFinite,b.z.isFinite else { invalid+=1;continue }
             let al=(a.x+a.y+a.z)/3,bl=(b.x+b.y+b.z)/3
-            if al>0.015 && al<0.65 && max(a.x,a.y,a.z)-min(a.x,a.y,a.z)<max(0.02,al*0.25) {
+            if al>=0 && al<0.65 && max(a.x,a.y,a.z)-min(a.x,a.y,a.z)<max(0.02,al*0.25) {
                 neutral+=1
-                if min(b.x,b.z)>max(0.03,b.y*1.55) { magenta+=1 }
+                let minimumChroma:Float=al<=0.015 ? 0.15:0.03
+                if min(b.x,b.z)>max(minimumChroma,b.y*1.55) { magenta+=1 }
             }
             if al<0.2 { dark+=1;if bl>0.8 { washed+=1 } }
         }
