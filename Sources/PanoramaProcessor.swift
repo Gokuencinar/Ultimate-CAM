@@ -146,8 +146,10 @@ final class PanoramaProcessor {
     }
     static func cylindrical(_ image:CIImage,fieldOfView:Double) throws -> CIImage {
         guard fieldOfView.isFinite,(30...110).contains(fieldOfView) else { throw CameraFailure.message("Campo de visión panorámico no válido.") }
-        let e=image.extent,f=max(e.width,e.height)*0.5/tan(fieldOfView*Double.pi/360)
-        let width=floor(2*f*atan(e.width/(2*f))),bounds=CGRect(x:0,y:0,width:width,height:e.height)
+        let e=image.extent
+        let f:Double=Double(max(e.width,e.height))*0.5/tan(fieldOfView*Double.pi/360)
+        let width:Double=floor(2*f*atan(Double(e.width)/(2*f)))
+        let bounds=CGRect(x:0,y:0,width:CGFloat(width),height:e.height)
         guard let output=cylinderKernel?.apply(extent:bounds,roiCallback:{_,_ in e},image:image,
             arguments:[f,CIVector(x:e.midX,y:e.midY),width/2]) else { throw CameraFailure.message("No se pudo preparar la proyección panorámica.") }
         return output
