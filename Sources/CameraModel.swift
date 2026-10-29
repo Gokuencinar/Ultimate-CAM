@@ -69,6 +69,7 @@ final class CameraModel: NSObject, ObservableObject, AVCapturePhotoCaptureDelega
 
     private let queue = DispatchQueue(label: "local.ultimatecam.session", qos: .userInitiated, autoreleaseFrequency:.workItem)
     private let processing = DispatchQueue(label: "local.ultimatecam.processing", qos: .userInitiated, autoreleaseFrequency:.workItem)
+    private let exports = DispatchQueue(label: "local.ultimatecam.exports", qos: .utility, autoreleaseFrequency:.workItem)
     private let output = AVCapturePhotoOutput()
     private var input: AVCaptureDeviceInput?
     private var rotationCoordinator:AVCaptureDevice.RotationCoordinator?
@@ -120,6 +121,8 @@ final class CameraModel: NSObject, ObservableObject, AVCapturePhotoCaptureDelega
     private var nightFrameSeconds: Double = 0
     private var lastNightTimestamp: Double?
     private var exportedResult: URL?
+    private var resultGeneration=UUID()
+    private var exportingResult=false
     private var captureRecoveryRequired = false
     private var focusToken = UUID()
     private var savedKinds = Set<String>()
@@ -274,7 +277,7 @@ final class CameraModel: NSObject, ObservableObject, AVCapturePhotoCaptureDelega
                     switch outcome {
                     case .failure(let error): self.finishFailure(error); self.reportImportError(error.localizedDescription)
                     case .success(let result):
-                        self.result = result; self.savedKinds = []; self.exportedResult = nil
+                        self.result = result; self.resultGeneration=UUID(); self.savedKinds = []; self.exportedResult = nil
                         self.inFlight = false; self.captureStage = "idle"
                         CaptureTrace.record("import.success", ["bytes": result.jpeg.count, "source": result.source])
                         self.publish {
@@ -1120,7 +1123,7 @@ final class CameraModel: NSObject, ObservableObject, AVCapturePhotoCaptureDelega
                             "night": options.nightStatic, "rawFrames": rawBurst?.count ?? 0,
                             "processingSeconds": ProcessInfo.processInfo.systemUptime - processingStarted])
                         self.captureStage = "idle"
-                        self.result = result
+                        self.result = result; self.resultGeneration=UUID()
                         self.savedKinds = []
                         self.exportedResult = nil
                         self.publish {
@@ -1275,32 +1278,36 @@ final class CameraModel: NSObject, ObservableObject, AVCapturePhotoCaptureDelega
 
     private func exportResult() {
         queue.async {
-            guard !self.inFlight, let result = self.result else {
-                CaptureTrace.record("export.failure", ["reason": "no idle result"]); return
+            guard !self.inFlight,!self.exportingResult,let result=self.result else {
+                CaptureTrace.record("export.failure",["reason":"no idle result"]);return
             }
-            self.inFlight = true
-            let existing = self.exportedResult
-            self.processing.async {
-            do {
-                let directory = existing ?? CaptureTrace.file.deletingLastPathComponent()
-                    .appendingPathComponent("UltimateCAM-Inspection", isDirectory: true)
-                    .appendingPathComponent(UUID().uuidString, isDirectory: true)
-                if existing == nil {
-                    try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
-                    try result.jpeg.write(to: directory.appendingPathComponent("result.jpg"), options: .atomic)
-                    try result.reference.write(to: directory.appendingPathComponent("reference.jpg"), options: .atomic)
-                    if let raw = result.raw { try raw.write(to: directory.appendingPathComponent("reference.dng"), options: .atomic) }
-                    if let raw = result.raw {
-                        try BurstProcessor().exportRAWDiagnostics(raw, to: directory)
+            // Export owns a value snapshot, never the shutter transaction. New
+            // captures and their GPU processing continue on their own queues.
+            self.exportingResult=true
+            let generation=self.resultGeneration,existing=self.exportedResult
+            let started=ProcessInfo.processInfo.systemUptime
+            self.exports.async {
+                do {
+                    let directory=existing ?? CaptureTrace.file.deletingLastPathComponent()
+                        .appendingPathComponent("UltimateCAM-Inspection",isDirectory:true)
+                        .appendingPathComponent(UUID().uuidString,isDirectory:true)
+                    if existing == nil {
+                        try FileManager.default.createDirectory(at:directory,withIntermediateDirectories:true)
+                        try result.jpeg.write(to:directory.appendingPathComponent("result.jpg"))
+                        try result.reference.write(to:directory.appendingPathComponent("reference.jpg"))
+                        if let raw=result.raw { try raw.write(to:directory.appendingPathComponent("reference.dng")) }
                     }
+                    self.queue.async {
+                        if self.resultGeneration==generation { self.exportedResult=directory }
+                        self.exportingResult=false
+                    }
+                    CaptureTrace.record("export.success",["directory":directory.path,"source":result.source,
+                        "raw":result.raw != nil,"mergedFrames":result.mergedFrames,
+                        "seconds":ProcessInfo.processInfo.systemUptime-started])
+                } catch {
+                    self.queue.async { self.exportingResult=false }
+                    CaptureTrace.record("export.failure",["reason":error.localizedDescription])
                 }
-                self.queue.async { self.exportedResult = directory; self.inFlight = false }
-                CaptureTrace.record("export.success", ["directory": directory.path, "source": result.source,
-                    "raw": result.raw != nil, "mergedFrames": result.mergedFrames])
-            } catch {
-                self.queue.async { self.inFlight = false }
-                CaptureTrace.record("export.failure", ["reason": error.localizedDescription])
-            }
             }
         }
     }
