@@ -164,6 +164,19 @@ import Darwin
         try require(RAWRenderValidation.rejects(rendered:white,reference:gray),"Burned night decode was silently exported")
         try require(!RAWRenderValidation.rejects(rendered:valid,reference:gray),"Valid night lift was rejected")
         try require(!RAWRenderValidation.rejects(rendered:colored,reference:colored),"A genuinely coloured subject was rejected")
+        // A short HDR anchor may be almost black while its longer exposures
+        // legitimately recover coloured subjects. Night validation must not
+        // reject the HDR reconstruction on that comparison.
+        var coloredHDR=makeFrames(count:3,noise:[1e-7,1e-8],exposures:[1,2,4],scene:{_,_ in 0.1})
+        for i in coloredHDR.indices {
+            let f=coloredHDR[i];var values=halfValues(f.quads)
+            for j in stride(from:0,to:values.count,by:4) { values[j+1]*=0.15;values[j+2]*=0.15 }
+            coloredHDR[i]=SensorBayerFrame(width:w,height:h,quads:pack(values),calibration:f.calibration,exposure:f.exposure,timestamp:f.timestamp,noiseProfile:f.noiseProfile,sharpness:f.sharpness)
+        }
+        let blackImage=CIImage(color:.black).cropped(to:CGRect(x:0,y:0,width:w*2,height:h*2))
+        let blackJPEG=try JPEGRenderer.render(blackImage,extent:blackImage.extent,options:ProcessingOptions(),context:context).data
+        let hdrColor=try processor.processRAW(coloredHDR,referenceJPEG:blackJPEG,originalDNG:Data(),options:hdr,cancellation:nil,progress:nil)
+        try require(hdrColor.source=="Bayer-Metal" && hdrColor.mergedFrames==3,"Night recovery incorrectly rejected coloured HDR shadow recovery")
         print("FULL RAW GPU QUANTITATIVE CHECKS PASSED (synthetic sensor; no physical camera opened)")
     }
     static func clippedNight(_ processor:MetalBurstProcessor,context:CIContext,options:ProcessingOptions,reference:Data) throws {

@@ -328,7 +328,8 @@ final class MetalBurstProcessor {
         progress?("Metal RAW · tono y color…")
         let optical=options.lensCorrections ? try correctOptics(developed,lens:first.lens,center:fused.center,cancellation:cancellation):developed
         let mapped=try tone(optical,maximumGain:options.hdrBracketing ? 64:32,night:!options.hdrBracketing,options:effective,cancellation:cancellation)
-        if first.zoom<1.05,RAWRenderValidation.rejects(mapped.sdr,reference:referenceJPEG,context:context) {
+        if options.nightStatic && !options.hdrBracketing && first.zoom<1.05,
+           RAWRenderValidation.rejects(mapped.sdr,reference:referenceJPEG,context:context) {
             return CaptureResult(jpeg:referenceJPEG,reference:referenceJPEG,
                 details:"Se conserva la foto de cámara: el revelado RAW no mantuvo el color.",
                 mergedFrames:1,raw:originalDNG,source:"camera-reference-color-recovery")
