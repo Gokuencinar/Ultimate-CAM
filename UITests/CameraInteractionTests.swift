@@ -15,15 +15,15 @@ final class CameraInteractionTests: XCTestCase {
     func testQuickExposureAndRAWFormatsWithoutCapturing() {
         continueAfterFailure=false
         let app=XCUIApplication();app.launchArguments=["-ui-test-raw-support"];app.launch()
-        app.buttons["camera.quickSettings"].tap()
+        tapVisible(app.buttons["camera.quickSettings"])
         let shadows=app.sliders["camera.shadowLift"]
         XCTAssertTrue(shadows.waitForExistence(timeout:3));shadows.adjust(toNormalizedSliderPosition:0.7)
-        app.buttons["camera.quickSettings"].tap()
+        tapVisible(app.buttons["camera.quickSettings"])
         XCTAssertTrue(app.buttons["camera.headerShadows"].waitForExistence(timeout:3))
         XCTAssertEqual(app.buttons["camera.previewTools"].value as? String,"Activo")
         app.buttons["camera.headerShadows"].tap()
         XCTAssertTrue(app.buttons["camera.headerShadows"].waitForNonExistence(timeout:3))
-        app.buttons["camera.quickSettings"].tap()
+        tapVisible(app.buttons["camera.quickSettings"])
         let exposure=app.sliders["camera.exposureBias"],reset=app.buttons["camera.resetExposureBias"]
         XCTAssertTrue(exposure.waitForExistence(timeout:3))
         let positiveEV=NSPredicate { _,_ in (Double(reset.value as? String ?? "0") ?? 0)>0.5 }
@@ -34,12 +34,12 @@ final class CameraInteractionTests: XCTestCase {
         }
         XCTAssertGreaterThan(Double(reset.value as? String ?? "0") ?? 0,0.5)
         capture(app,"quick-exposure")
-        app.buttons["camera.quickSettings"].tap()
+        tapVisible(app.buttons["camera.quickSettings"])
         let headerEV=app.buttons["camera.headerExposureBias"]
         XCTAssertTrue(headerEV.waitForExistence(timeout:3),"EV disappeared when quick settings closed")
         XCTAssertGreaterThan(Double(headerEV.value as? String ?? "0") ?? 0,0.5)
         headerEV.tap();XCTAssertFalse(headerEV.exists)
-        app.buttons["camera.quickSettings"].tap()
+        tapVisible(app.buttons["camera.quickSettings"])
         XCTAssertEqual(reset.value as? String,"0.0")
         let format=app.buttons["camera.quickFormat"]
         XCTAssertTrue(format.isEnabled)
@@ -71,13 +71,13 @@ final class CameraInteractionTests: XCTestCase {
         let windows=app.windows.count
         XCTAssertFalse(app.buttons["camera.mode.nativeNight"].exists)
         revealMode(app,"camera.mode.night").tap()
-        app.buttons["camera.quickSettings"].tap()
+        tapVisible(app.buttons["camera.quickSettings"])
         let format=app.buttons["camera.quickFormat"]
         if format.value as? String != "RAW*" { format.tap() }
         XCTAssertEqual(format.value as? String,"RAW*")
         XCTAssertTrue(app.staticTexts["Noche · RAW Metal"].exists)
-        app.buttons["camera.quickSettings"].tap()
-        app.buttons["camera.settings"].tap();app.buttons["settings.night"].tap()
+        tapVisible(app.buttons["camera.quickSettings"])
+        tapVisible(app.buttons["camera.settings"]);app.buttons["settings.night"].tap()
         let raw=app.switches["night.computationalRAW"]
         XCTAssertTrue(raw.waitForExistence(timeout:3));setSwitch(raw,to:"0");setSwitch(raw,to:"1")
         XCTAssertFalse(app.buttons["processing.nativeNight"].exists)
@@ -91,11 +91,11 @@ final class CameraInteractionTests: XCTestCase {
     func testGuidedModesAndPreviewToolsWithoutTakingPhotos() {
         continueAfterFailure=false
         let app=XCUIApplication();app.launch()
-        app.buttons["camera.previewTools"].tap()
+        tapVisible(app.buttons["camera.previewTools"])
         XCTAssertTrue(app.buttons["Histograma del visor"].waitForExistence(timeout:3))
         app.buttons["Histograma del visor"].tap()
         // Menu selection dismisses the menu; reopen to inspect the other tools.
-        app.buttons["camera.previewTools"].tap()
+        tapVisible(app.buttons["camera.previewTools"])
         XCTAssertTrue(app.buttons["Resaltar enfoque"].exists)
         XCTAssertTrue(app.buttons["Cebras de luces"].exists)
         app.buttons["Resaltar enfoque"].tap()
@@ -168,7 +168,7 @@ final class CameraInteractionTests: XCTestCase {
         XCTAssertFalse(app.buttons["video.close"].exists,"Video must not be a separate presented camera")
         XCTAssertEqual(finder.frame,originalFrame,"Persistent viewfinder geometry changed")
         capture(app,"video")
-        app.buttons["camera.settings"].tap()
+        tapVisible(app.buttons["camera.settings"])
         XCTAssertTrue(app.navigationBars["Ajustes"].waitForExistence(timeout:3))
         XCTAssertTrue(app.descendants(matching:.any).matching(identifier:"video.resolution").firstMatch.exists)
         capture(app,"settings-video")
@@ -198,7 +198,7 @@ final class CameraInteractionTests: XCTestCase {
         XCTAssertEqual(finder.frame.height,app.frame.height,accuracy:2)
         let point=finder.coordinate(withNormalizedOffset:CGVector(dx:0.45,dy:0.45))
         point.tap();point.press(forDuration:0.8)
-        app.buttons["camera.settings"].tap()
+        tapVisible(app.buttons["camera.settings"])
         XCTAssertTrue(app.navigationBars["Ajustes"].waitForExistence(timeout:3))
         XCTAssertTrue(app.buttons["settings.night"].exists)
         XCTAssertFalse(app.staticTexts.containing(NSPredicate(format:"label CONTAINS %@","shader")).firstMatch.exists)
@@ -222,7 +222,7 @@ final class CameraInteractionTests: XCTestCase {
     func testAstroPreferenceWithoutCapturing() {
         continueAfterFailure=false
         let app=XCUIApplication();app.launch()
-        app.buttons["camera.settings"].tap()
+        tapVisible(app.buttons["camera.settings"])
         app.buttons["settings.night"].tap()
         XCTAssertTrue(app.navigationBars["Modo Noche"].waitForExistence(timeout:3))
         let astro=app.switches["night.astro"]
@@ -238,7 +238,7 @@ final class CameraInteractionTests: XCTestCase {
     func testAdvancedHasOnlyTechnicalPanels() {
         continueAfterFailure=false
         let app=XCUIApplication();app.launch()
-        app.buttons["camera.settings"].tap()
+        tapVisible(app.buttons["camera.settings"])
         let advanced=app.buttons["settings.advanced"]
         for _ in 0..<7 { if advanced.isHittable { break };app.swipeUp() }
         XCTAssertTrue(advanced.isHittable);advanced.tap()
@@ -260,6 +260,14 @@ final class CameraInteractionTests: XCTestCase {
         if !button.isHittable { modes.swipeRight() }
         for _ in 0..<4 { if button.isHittable { break };modes.swipeLeft() }
         return button
+    }
+    private func tapVisible(_ control:XCUIElement) {
+        XCTAssertTrue(control.waitForExistence(timeout:5))
+        XCTAssertTrue(control.isHittable)
+        // These fixed visor buttons are outside scroll views. Xcode 16's AX
+        // scroll-to-visible action can fail even for their visible frames.
+        // Send a real center tap while retaining the hit-test assertions.
+        control.coordinate(withNormalizedOffset:CGVector(dx:0.5,dy:0.5)).tap()
     }
     private func setSwitch(_ control:XCUIElement,to value:String) {
         XCTAssertTrue(control.isHittable)
