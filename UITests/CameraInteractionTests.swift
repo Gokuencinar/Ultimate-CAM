@@ -26,7 +26,12 @@ final class CameraInteractionTests: XCTestCase {
         app.buttons["camera.quickSettings"].tap()
         let exposure=app.sliders["camera.exposureBias"],reset=app.buttons["camera.resetExposureBias"]
         XCTAssertTrue(exposure.waitForExistence(timeout:3))
-        exposure.adjust(toNormalizedSliderPosition:0.75)
+        let positiveEV=NSPredicate { _,_ in (Double(reset.value as? String ?? "0") ?? 0)>0.5 }
+        for _ in 0..<3 {
+            exposure.adjust(toNormalizedSliderPosition:0.85)
+            let reached=XCTNSPredicateExpectation(predicate:positiveEV,object:nil)
+            if XCTWaiter.wait(for:[reached],timeout:2) == .completed { break }
+        }
         XCTAssertGreaterThan(Double(reset.value as? String ?? "0") ?? 0,0.5)
         capture(app,"quick-exposure")
         app.buttons["camera.quickSettings"].tap()

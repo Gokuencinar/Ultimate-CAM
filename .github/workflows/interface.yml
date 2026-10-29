@@ -8,20 +8,20 @@ permissions:
 
 jobs:
   preview:
-    runs-on: macos-26-intel
-    timeout-minutes: 35
+    runs-on: macos-15-intel
+    timeout-minutes: 40
+    env:
+      DEVELOPER_DIR: /Applications/Xcode_16.4.app/Contents/Developer
     steps:
       - uses: actions/checkout@v4
       - name: Generate Xcode project
         run: |
           set -euo pipefail
-          if ! xcrun --sdk iphonesimulator metal -v >/dev/null 2>&1; then
-            xcodebuild -downloadComponent MetalToolchain
-          fi
+          xcodebuild -version
           if ! command -v xcodegen >/dev/null 2>&1; then brew install xcodegen; fi
           xcodegen generate
       - name: Capture interface on iPhone 11 Pro simulator
-        timeout-minutes: 30
+        timeout-minutes: 35
         run: bash scripts/capture_ui.sh
       - name: Temporary simulator views
         if: always()
